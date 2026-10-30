@@ -1,114 +1,111 @@
-# 记录格式与 round-trip 约定
+# 记录格式
 
 ## 目标
 
-**一份 Schema，两类数据共用。**
+**一份 Schema，两类数据共用**：仿真局面（带真值）与真实牌局（无真值）。因此不需要格式转换器，S2 的评测与 S3 的复盘跑的是同一条数据通路。
 
-- 仿真局面（自对弈产生，带真值）
-- 真实对局（手动录入，无真值）
+## 设计原则：只存推不出来的东西
 
-两者用同一种结构存储，因此 S2 的评测和 S3 的复盘跑的是**同一条数据通路**，不需要格式转换器。
+已出的牌、各家剩余张数、最近的出牌、按顺序的出牌历史、炸弹数——全都能从 `initial` + `steps` 推出来，所以**不写进文件**。同一份事实只有一个来源，才不会出现两处不一致。
+
+推导逻辑在 `src/ddz/record/state.py`，行为由 `tests/test_record.py` 盯着。
 
 ## 硬性要求
 
 1. **round-trip**：`load(save(x)) == x`，结构等价
-2. **可回放**：仅凭记录能逐步重建每个决策点的局面
-3. 以上两条由 `tests/` 中的自动化测试保证，S1 阶段就立起来
+2. **字节稳定**：同一记录两次序列化结果逐字节相同（排序键 + 固定缩进）
+3. **可回放**：仅凭记录能逐步重建每个决策点的局面
 
-## 字段定义
+## 顶层字段
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `schema_version` | int | 是 | 当前为 `1` |
+| `schema_version` | int | 是 | 当前 `1`；不匹配直接拒绝，不做猜测 |
 | `record_id` | str | 是 | 唯一标识 |
 | `source` | str | 是 | `sim` 或 `real` |
-| `created_at` | str | 是 | ISO 8601 带时区 |
-| `ruleset` | str | 是 | 规则集标识，当前 `standard-3p-v1` |
-| `me` | str | 是 | 我方位置：`landlord` / `landlord_up` / `landlord_down` |
-| `initial.my_hand` | list[str] | 是 | 我方起始手牌 |
-| `initial.three_landlord_cards` | list[str] | 是 | 三张底牌 |
-| `initial.opponents` | object | 否 | **真值**，仅仿真局有 |
-| `steps` | list[Step] | 是 | 出牌序列 |
+| `created_at` | str | 是 | ISO 8601 带时区。**命令行不会重新生成它**，所以重跑同一输入输出不变 |
+| `ruleset` | str | 是 | 当前 `standard-3p-v1` |
+| `me` | str | 是 | 我方位置：`landlord` / `landlord_down` / `landlord_up` |
+| `initial` | object | 是 | 开局信息 |
+| `steps` | list | 是 | 出牌序列，`index` 必须从 0 连续 |
+| `advice` | list | 否 | 模型给出的建议 |
 | `outcome` | object | 否 | 最终结果，仅完整对局有 |
 
-### Step
+### `initial`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `index` | int | 是 | 从 0 开始 |
-| `player` | str | 是 | 出牌者位置 |
-| `action` | object | 是 | `{"type": "play", ...}` 或 `{"type": "pass"}` |
-| `cards_left` | object | 是 | 各家剩余张数 |
-| `candidates` | list | 否 | 我方决策点上模型给出的候选与估计 |
-| `truth_hand` | list[str] | 否 | 该玩家出牌前的手牌，仅仿真局有 |
+| `my_hand` | list[str] | 是 | **我方**起始手牌（地主 20 张、农民 17 张） |
+| `three_landlord_cards` | list[str] | 是 | 三张底牌（公开信息） |
+| `opponents` | object | 否 | 对手手牌**真值**，仅仿真局面有 |
 
-### 牌的表示
+对手手牌是可选字段，这一点是刻意的：真实牌局根本拿不到。任何消费方在字段缺失时都必须明确处理，不能当成空手牌。
 
-字符表：`3 4 5 6 7 8 9 T J Q K A 2 B R`（`B` = 小王，`R` = 大王），与 RLCard / DouZero 一致。手牌按此顺序规范化排序后存储。
+### `steps[]`
 
-## 示例（仿真局，含真值）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `index` | int | 从 0 连续，不连续直接报错 |
+| `player` | str | 出牌者位置 |
+| `action` | object | 见下 |
+
+### `advice[]`
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `after_step` | int | 这个建议是在走完多少步之后给出的 |
+| `position` | str | 当时该谁动 |
+| `model` | str | 实际使用的权重文件 |
+| `note` | str | 固定措辞，提醒这不是真实胜率 |
+| `candidates` | list | `{action, score}`，按 score 降序 |
+| `diagnostics` | object | 用了哪个模型、给多少个动作打了分等 |
+
+## 牌的表示
+
+字符表：`3 4 5 6 7 8 9 T J Q K A 2 B R`（`B` 小王、`R` 大王），与 RLCard / DouZero 一致。
+
+## 动作的表示
+
+```json
+{"type": "play", "cards": ["3", "3", "3"]}
+{"type": "pass"}
+```
+
+不使用 `"pass"` 这类魔法字符串——避免与牌面混淆。`Action` 在构造时就校验：`play` 必须带牌，`pass` 不能带牌。
+
+## 示例
 
 ```json
 {
   "schema_version": 1,
-  "record_id": "sim-000001",
+  "record_id": "fixture-seed7-landlord_up",
   "source": "sim",
-  "created_at": "2026-10-31T12:00:00+08:00",
+  "created_at": "2026-10-31T00:00:00+08:00",
   "ruleset": "standard-3p-v1",
   "me": "landlord_up",
   "initial": {
-    "my_hand": ["3", "4", "7", "9", "T", "Q", "K", "A", "2", "B"],
-    "three_landlord_cards": ["5", "J", "R"],
-    "opponents": {
-      "landlord": ["3", "3", "6", "8", "9", "J", "Q", "K", "2", "2"],
-      "landlord_down": ["4", "5", "6", "7", "8", "T", "J", "A", "A", "B"]
-    }
+    "my_hand": ["3", "4", "5", "5", "6", "7", "8", "9", "T", "T", "J", "J", "K", "K", "2", "2", "2"],
+    "three_landlord_cards": ["7", "9", "2"]
   },
   "steps": [
-    {
-      "index": 0,
-      "player": "landlord",
-      "action": {"type": "play", "cards": ["8", "8"]},
-      "cards_left": {"landlord": 18, "landlord_up": 10, "landlord_down": 10},
-      "truth_hand": ["3", "3", "6", "8", "9", "J", "Q", "K", "2", "2"]
-    },
-    {
-      "index": 1,
-      "player": "landlord_up",
-      "action": {"type": "play", "cards": ["9", "9"]},
-      "cards_left": {"landlord": 18, "landlord_up": 8, "landlord_down": 10},
-      "candidates": [
-        {"action": {"type": "play", "cards": ["9", "9"]}, "score": 0.58},
-        {"action": {"type": "play", "cards": ["Q", "Q"]}, "score": 0.51},
-        {"action": {"type": "pass"}, "score": 0.44}
-      ],
-      "truth_hand": ["3", "4", "7", "9", "T", "Q", "K", "A", "2", "B"]
-    }
+    {"index": 0, "player": "landlord", "action": {"type": "play", "cards": ["8", "8", "8"]}},
+    {"index": 1, "player": "landlord_down", "action": {"type": "pass"}}
   ],
-  "outcome": {"winner": "landlord"}
-}
-```
-
-## 示例（真实对局，无真值）
-
-```json
-{
-  "schema_version": 1,
-  "record_id": "real-20261031-01",
-  "source": "real",
-  "created_at": "2026-10-31T21:30:00+08:00",
-  "ruleset": "standard-3p-v1",
-  "me": "landlord_down",
-  "initial": {
-    "my_hand": ["3", "5", "6", "8", "9", "J", "J", "Q", "A", "2"],
-    "three_landlord_cards": ["5", "J", "R"]
-  },
-  "steps": [
+  "advice": [
     {
-      "index": 0,
-      "player": "landlord_down",
-      "action": {"type": "play", "cards": ["9"]},
-      "cards_left": {"landlord": 20, "landlord_up": 17, "landlord_down": 9}
+      "after_step": 2,
+      "position": "landlord_up",
+      "model": "models/douzero_WP/landlord_up.onnx",
+      "note": "模型给出的估计，不是真实胜率",
+      "candidates": [
+        {"action": {"type": "play", "cards": ["2", "2", "2"]}, "score": 0.4587},
+        {"action": {"type": "pass"}, "score": 0.4582}
+      ],
+      "diagnostics": {
+        "position": "landlord_up",
+        "n_actions_scored": 2,
+        "score_kind": "Q 值（期望回报），不是校准胜率"
+      }
     }
   ]
 }
@@ -116,4 +113,4 @@
 
 ## 版本策略
 
-`schema_version` 只在**破坏性变更**时递增。升级时在 `record/` 中提供显式迁移函数，并保留旧版本样例作为回归测试数据。
+`schema_version` 只在**破坏性变更**时递增。解析时只接受当前版本，其余直接报错——不做猜测式兼容。升级时提供显式迁移函数，并保留旧版本样例作为回归数据。

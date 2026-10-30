@@ -2,7 +2,7 @@
 
 > 给定一个牌局局面，推断另外两家手上还有什么牌，给出候选出牌及各自的胜率估计，并把整局完整落盘供复盘。
 
-**项目状态：环境已锁定，尚无可用代码。** 工作项与依赖关系见 [Issues](https://github.com/nicknicka/doudizhu/issues)，设计见 [docs/design.md](docs/design.md)。
+**项目状态：端到端最小闭环已跑通** —— 一个局面进，带候选建议的记录出。工作项与依赖关系见 [Issues](https://github.com/nicknicka/doudizhu/issues)，设计见 [docs/design.md](docs/design.md)。
 
 ---
 
@@ -53,8 +53,6 @@ flowchart LR
 
 ## 快速开始
 
-目前只有环境可跑通，业务代码尚未实现。下面是**实测通过**的步骤：
-
 ```bash
 python3.11 -m venv .venv
 .venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
@@ -63,9 +61,26 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`27 passed`（未下载权重时其中一条会跳过）。
+预期结果：`115 passed`（未下载权重时相关用例会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
+
+### 给出建议
+
+```bash
+.venv/bin/python -m ddz suggest \
+    --in  tests/data/position_landlord_up.json \
+    --out /tmp/advice.json
+```
+
+```
+局面：landlord_up 行动，手牌 17 张，合法动作 2 个
+  1. 222            估计 +0.4587
+  2. 不出            估计 +0.4582
+  （模型给出的估计，不是真实胜率）
+```
+
+输入是一个局面记录，输出是同一记录**追加了 `advice` 段**。同一局面重跑，输出逐字节相同。
 
 依赖版本与踩过的坑都记在 [docs/environment.md](docs/environment.md)，包括 RLCard 1.2.0 的动作接口差异、仿真器观测里的信息泄漏，以及模型特征对推断的依赖。
 

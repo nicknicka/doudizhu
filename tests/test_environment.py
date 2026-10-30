@@ -22,15 +22,16 @@ LOCK_FILE = REPO_ROOT / "requirements.lock.txt"
 WEIGHT_FILES = ("landlord.onnx", "landlord_up.onnx", "landlord_down.onnx")
 
 # 每个位置模型的 x 宽度。数字来自 DouZero 的特征构造，上游一旦改动会暴露。
-# z 的形状是 (batch, seq_len, 162)，其中 batch 与 seq_len 在计算图里是符号维度；
-# DouZero 的约定是 seq_len 固定为 15（见上游 _process_action_seq 的 length 参数）。
+# z 的形状是 (batch, seq_len, 162)，其中 batch 与 seq_len 在计算图里是符号维度。
+# DouZero 的约定是 seq_len = 5：取最近 15 手，每 3 手（一轮）折成一行，
+# 3 * 54 = 162 列（见上游 _action_seq_list2array 的 reshape(5, 162)）。
 EXPECTED_X_WIDTH = {
     "landlord.onnx": 373,
     "landlord_up.onnx": 484,
     "landlord_down.onnx": 484,
 }
 Z_FEATURE_DIM = 162
-Z_SEQ_LEN = 15
+Z_SEQ_LEN = 5
 
 
 @pytest.fixture()
