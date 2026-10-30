@@ -63,7 +63,7 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`7 passed`（未下载权重时其中一条会跳过）。
+预期结果：`27 passed`（未下载权重时其中一条会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
 
@@ -78,6 +78,7 @@ python3.11 -m venv .venv
 │   ├── architecture.md       架构与接口契约
 │   ├── data-schema.md        记录格式与 round-trip 约定
 │   ├── environment.md        环境、依赖版本与实测发现
+│   ├── rules.md              规则核对结果与信息泄漏记录
 │   └── roadmap.md            阶段计划与验收标准
 ├── src/ddz/
 │   ├── source/               输入源适配器
