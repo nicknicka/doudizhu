@@ -98,7 +98,7 @@ python3.11 -m venv .venv
 
 ### 3. RLCard 的观测里泄漏了对手手牌
 
-`state["raw_obs"]["others_hand"]` 给的是**另外两家合并后的完整手牌**（开局就是 37 个字符）。这不是真实牌局里能看到的信息。
+`state["raw_obs"]["others_hand"]` 给的是**另外两家合并后的完整手牌**（开局就是 37 个字符）；同一份信息还以编码形态出现在 `state["obs"][54:108]`。两个面都不是真实牌局里能看到的信息。完整核对见 [rules.md](rules.md)。
 
 后果很直接：**手牌推断模块必须主动回避这个字段**。一旦误用，推断看起来"特别准"，但那是在偷看答案——而且因为字段名看起来人畜无害（`others_hand`），这个错误很容易悄悄发生。后续实现推断时，可见信息应当只从 `current_hand` / `played_cards` / `num_cards_left` / `seen_cards` / `trace` 里取。
 

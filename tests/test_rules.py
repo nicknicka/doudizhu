@@ -8,11 +8,17 @@
 
 from __future__ import annotations
 
+import random
 from collections import Counter
 from types import SimpleNamespace
 
 from rlcard.games.doudizhu.judger import DoudizhuJudger
 from rlcard.games.doudizhu.utils import get_gt_cards
+
+# 上游动作词表：RLCard 用这个字符串表示「不出」。
+# 注意它不是我们记录格式里的动作表示（我们用 {"type": "pass"}），
+# 只是上游 API 的取值，所以在这里集中命名一次，不在正文里散落字面量。
+RLCARD_PASS = "pass"
 
 
 def playable(hand: str) -> set[str]:
@@ -24,7 +30,7 @@ def responses(hand: str, last_played: str) -> list[str]:
     """上家出了 last_played 时，我手上除 pass 之外的所有合法应对。"""
     player = SimpleNamespace(current_hand=[SimpleNamespace(rank=c) for c in hand])
     greater = SimpleNamespace(played_cards=last_played)
-    return [c for c in get_gt_cards(player, greater) if c != "pass"]
+    return [c for c in get_gt_cards(player, greater) if c != RLCARD_PASS]
 
 
 class TestStraightRule:
@@ -105,26 +111,50 @@ class TestBombAndRocketRule:
 
 
 def test_observation_leaks_merged_opponent_hands():
-    """已知的上游信息泄漏：默认观测里含另外两家**真实手牌的并集**。
+    """已确认的上游信息泄漏：**原始观测与编码观测都含另外两家真实手牌的并集**。
 
-    这不是我们想要的行为，但它确实成立 —— RLCard 的
-    ``raw_obs["others_hand"]`` 恰好等于另外两家真值手牌的合并，且全程保持精确。
+    泄漏有两个面，且全程保持精确：
 
-    由此产生一条硬约束：**手牌推断绝对不能读这个字段**，否则等于偷看答案，
-    后续评测会给出好看但毫无意义的数字。
+    1. ``raw_obs["others_hand"]`` —— 直接就是另两家真值手牌的合并
+    2. ``state["obs"][54:108]`` —— 同一份信息的编码形态
 
-    如果上游哪天修掉了这个泄漏，这条测试会失败 —— 那是好事，说明约束可以放宽，
+    第 2 条尤其危险：``state["obs"]`` 是仿真器准备喂给智能体的那个向量，
+    看起来"已经过处理"，很容易被当成干净的输入直接使用。
+
+    由此产生硬约束：**可见信息只能从白名单字段取**
+    （``current_hand`` / ``played_cards`` / ``num_cards_left`` / ``seen_cards``
+    / ``trace`` / ``landlord`` / ``self``），
+    **既不能读 ``others_hand``，也不能直接用 ``state["obs"]``**。
+
+    上游若修掉泄漏，这条测试会失败 —— 那是好消息，说明约束可以放宽，
     顺手更新 docs/rules.md 即可。
     """
+    import numpy as np
     import rlcard
+    from rlcard.envs.doudizhu import _cards2array
 
-    env = rlcard.make("doudizhu")
-    env.seed(42)
-    state, _ = env.reset()
+    for steps in (0, 15, 35):
+        env = rlcard.make("doudizhu")
+        env.seed(42)
+        random.seed(42)
+        state, _ = env.reset()
+        for _ in range(steps):
+            if env.is_over():
+                break
+            action = random.choice(state["raw_legal_actions"])
+            state, _ = env.step(action, raw_action=True)
 
-    obs = state["raw_obs"]
-    me = obs["self"]
-    truth_hands = env.get_perfect_information()["hand_cards"]
-    others_truth = "".join(truth_hands[i] for i in range(3) if i != me)
+        raw = state["raw_obs"]
+        me = raw["self"]
+        truth_hands = env.get_perfect_information()["hand_cards"]
+        others_truth = "".join(truth_hands[i] for i in range(3) if i != me)
 
-    assert Counter(obs["others_hand"]) == Counter(others_truth)
+        # 面一：原始观测字段
+        assert Counter(raw["others_hand"]) == Counter(others_truth), (
+            f"第 {steps} 步：raw_obs['others_hand'] 不再是另两家真值的并集"
+        )
+
+        # 面二：编码观测中对应的区块
+        assert np.array_equal(state["obs"][54:108], _cards2array(others_truth)), (
+            f"第 {steps} 步：state['obs'][54:108] 不再是另两家真值的编码"
+        )
