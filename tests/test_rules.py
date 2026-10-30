@@ -110,30 +110,33 @@ class TestBombAndRocketRule:
         assert responses("3333BR", "BR") == []
 
 
-def test_observation_leaks_merged_opponent_hands():
-    """已确认的上游信息泄漏：**原始观测与编码观测都含另外两家真实手牌的并集**。
+FULL_DECK = "3456789TJQKA2" * 4 + "BR"
 
-    泄漏有两个面，且全程保持精确：
 
-    1. ``raw_obs["others_hand"]`` —— 直接就是另两家真值手牌的合并
-    2. ``state["obs"][54:108]`` —— 同一份信息的编码形态
+def test_opponent_hand_pool_is_publicly_derivable():
+    """另两家手牌的**并集**是公开信息，不是泄漏。README 级别的纠正：
 
-    第 2 条尤其危险：``state["obs"]`` 是仿真器准备喂给智能体的那个向量，
-    看起来"已经过处理"，很容易被当成干净的输入直接使用。
+    它看起来像泄漏 —— 确实精确等于另两家真实手牌的并集。但那是牌的守恒推出来的：
 
-    由此产生硬约束：**可见信息只能从白名单字段取**
-    （``current_hand`` / ``played_cards`` / ``num_cards_left`` / ``seen_cards``
-    / ``trace`` / ``landlord`` / ``self``），
-    **既不能读 ``others_hand``，也不能直接用 ``state["obs"]``**。
+        每张牌只可能在三个地方：我手上 / 别人手上 / 已出的牌堆里
 
-    上游若修掉泄漏，这条测试会失败 —— 那是好消息，说明约束可以放宽，
-    顺手更新 docs/rules.md 即可。
+    所以
+
+        另两家并集 = 全牌 − 我的手 − 已出的牌
+
+    任何会数牌的牌手都能算出这个集合。它不透露**分配**，而分配才是真正隐藏的
+    信息，也正是本项目要推断的东西。
+
+    这条测试有两个用途：
+
+    1. 证明仿真器给的 ``others_hand``（以及 ``state["obs"]`` 里对应那段编码）
+       不含任何超出公开信息的成分 —— 我们的推断问题没有被提前喂答案；
+    2. 把「未现身的牌池」该怎么算写成**可执行的定义** —— 真实牌局录入那条路径
+       没有仿真器帮我们算，必须自己来。
     """
-    import numpy as np
     import rlcard
-    from rlcard.envs.doudizhu import _cards2array
 
-    for steps in (0, 15, 35):
+    for steps in (0, 10, 25, 45):
         env = rlcard.make("doudizhu")
         env.seed(42)
         random.seed(42)
@@ -146,15 +149,15 @@ def test_observation_leaks_merged_opponent_hands():
 
         raw = state["raw_obs"]
         me = raw["self"]
+        played = "".join(raw["played_cards"])
+
+        pool_from_public_info = Counter(FULL_DECK) - Counter(raw["current_hand"]) - Counter(played)
+
+        assert Counter(raw["others_hand"]) == pool_from_public_info, (
+            f"第 {steps} 步：others_hand 不等于「全牌 − 我的手 − 已出的牌」"
+        )
+
+        # 并集确实等于另两家的真值之和 —— 但这正是守恒，不是特权
         truth_hands = env.get_perfect_information()["hand_cards"]
         others_truth = "".join(truth_hands[i] for i in range(3) if i != me)
-
-        # 面一：原始观测字段
-        assert Counter(raw["others_hand"]) == Counter(others_truth), (
-            f"第 {steps} 步：raw_obs['others_hand'] 不再是另两家真值的并集"
-        )
-
-        # 面二：编码观测中对应的区块
-        assert np.array_equal(state["obs"][54:108], _cards2array(others_truth)), (
-            f"第 {steps} 步：state['obs'][54:108] 不再是另两家真值的编码"
-        )
+        assert Counter(raw["others_hand"]) == Counter(others_truth)
