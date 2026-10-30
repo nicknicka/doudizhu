@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 模型权重：体积较大，通过 scripts/ 获取，不入库
+models/
+*.ckpt
+*.onnx
+
+# 运行期数据
+data/
+
+# macOS
+.DS_Store
+
+# 编辑器
+.idea/
+.vscode/
