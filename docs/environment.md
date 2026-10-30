@@ -16,19 +16,23 @@
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install --no-cache-dir -e ".[dev]"
+.venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
+.venv/bin/python -m pip install --no-cache-dir -e . --no-deps
 .venv/bin/python scripts/download_models.py
 .venv/bin/python -m pytest
 ```
 
-四步都实测通过。两个补充说明：
+五步都实测通过。三点说明：
 
-- 装依赖时加 `--no-cache-dir`：模型与依赖会占掉 2–4 GB，对磁盘紧张的环境有必要。
-- 下载脚本是**幂等**的：文件已存在且大小正确时直接跳过，可以放心重复执行。
+- **依赖从锁定清单装，不让 pip 现场解析。** 直接 `pip install -e ".[dev]"` 的话，`pyproject.toml` 只约束直接依赖，间接依赖（protobuf、packaging 之类）仍会浮动到当下最新版——那样的"复现"只是碰巧一致。
+- 第二步的 **`--no-deps` 是故意的**：依赖已由第一步装好，这一步只把本项目本身装上，不需要 pip 再解析一遍。
+- 装依赖时加 **`--no-cache-dir`**：模型与依赖会占掉 2–4 GB。下载脚本则是**幂等**的，文件已存在且大小正确时直接跳过。
 
 ## 依赖清单
 
-直接依赖锁死在 `pyproject.toml`，含间接依赖的完整解析结果在 `requirements.lock.txt`。
+直接依赖声明在 `pyproject.toml`；**真正用于安装的是 `requirements.lock.txt`**，它记录了含间接依赖的完整解析结果。
+
+锁定清单不是说明书：`test_installed_versions_match_lock` 会逐项比对准已装版本，任何间接依赖一旦浮动，测试立刻失败。
 
 | 包 | 锁定版本 | 用途 |
 |---|---|---|
@@ -115,11 +119,12 @@ for pos in positions:
 
 ## 验证方式
 
-`tests/test_environment.py` 六条断言，`pytest` 全绿：
+`tests/test_environment.py` 七条断言，`pytest` 全绿：
 
 | 测试 | 守护什么 |
 |---|---|
-| `test_numpy_stays_on_major_version_1` | 依赖锁生效 |
+| `test_installed_versions_match_lock` | 锁定清单与实际安装逐项一致 |
+| `test_numpy_stays_on_major_version_1` | numpy 主版本锁生效 |
 | `test_pytorch_is_absent` | 没有混入 PyTorch |
 | `test_simulator_runs_a_full_game` | 仿真器可用且能收敛 |
 | `test_simulator_exposes_ground_truth_hands` | 评测真值来源存在 |

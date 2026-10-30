@@ -57,12 +57,15 @@ flowchart LR
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/python -m pip install --no-cache-dir -e ".[dev]"
+.venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
+.venv/bin/python -m pip install --no-cache-dir -e . --no-deps
 .venv/bin/python scripts/download_models.py   # 约 18 MB 的 ONNX 权重
 .venv/bin/python -m pytest
 ```
 
-预期结果：`6 passed`（未下载权重时其中一条会跳过）。
+预期结果：`7 passed`（未下载权重时其中一条会跳过）。
+
+依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
 
 依赖版本与踩过的坑都记在 [docs/environment.md](docs/environment.md)，包括 RLCard 1.2.0 的动作接口差异、仿真器观测里的信息泄漏，以及模型特征对推断的依赖。
 

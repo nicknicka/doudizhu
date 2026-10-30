@@ -1,6 +1,11 @@
-# 由 `pip freeze` 生成，记录实测环境的完整解析结果（含间接依赖）。
-# 更新方式：.venv/bin/python -m pip freeze | sort > requirements.lock.txt
+# 完整依赖锁定：安装入口就是本文件，而不是让 pip 现场解析。
+#   .venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
+#   .venv/bin/python -m pip install --no-cache-dir -e . --no-deps
 #
+# tests/test_environment.py::test_installed_versions_match_lock 会逐项比对
+# 已装版本与本文件，不一致直接测试失败 —— 所以它是有约束力的，不是说明文档。
+#
+# 更新方式：改完依赖后重新 freeze，并确认上面那条测试依然通过。
 # 实测平台：macOS 27.0.1 / arm64 / Python 3.11.17
 
 Pygments==2.21.0

@@ -17,7 +17,7 @@ BASE_URL = (
 )
 
 # 文件名 -> 字节数。用于检测下载被截断。改动镜像来源时需同步更新。
-MODELS: dict[str, int] = {
+MODEL_SIZES: dict[str, int] = {
     "landlord.onnx": 5_834_135,
     "landlord_up.onnx": 6_061_463,
     "landlord_down.onnx": 6_061_463,
@@ -55,9 +55,9 @@ def main() -> int:
 
     args.dest.mkdir(parents=True, exist_ok=True)
     print(f"目标目录：{args.dest.resolve()}")
-    for name, size in MODELS.items():
+    for name, size in MODEL_SIZES.items():
         download(name, size, args.dest)
-    print(f"完成，共 {len(MODELS)} 个文件。")
+    print(f"完成，共 {len(MODEL_SIZES)} 个文件。")
     return 0
 
 
