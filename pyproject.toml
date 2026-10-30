@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doudizhu"
+version = "0.0.1"
+description = "斗地主决策助手：推断对手手牌，给出候选出牌与模型估计"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# 以下版本均为实测通过（macOS arm64 / Python 3.11.17），不是照文档抄来的。
+# 含间接依赖的完整解析结果见 requirements.lock.txt。
+#
+# numpy 锁 1.x 是保守选择，不是硬约束：它等于端到端实测通过的那套配置。
+# 实测 numpy 2.4.6 下 RLCard 同样能跑通完整一局，且两库都未使用 numpy 2 移除的 API。
+# 要切换请先补一轮完整规则覆盖测试。详见 docs/environment.md。
+# onnxruntime 走 CPU，因此不需要 torch —— 这条路线省下约 1–2 GB 磁盘。
+dependencies = [
+    "numpy==1.26.4",
+    "rlcard==1.2.0",
+    "onnxruntime==1.31.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

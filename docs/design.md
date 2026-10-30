@@ -46,7 +46,7 @@
 | 后端 | FastAPI | 本机已装 |
 | 前端 | 极简页面（S3） | 只为展示 |
 
-依赖固定：venv + `numpy<2`（老代码用到了 numpy 2.x 移除的 API）。
+依赖固定：venv + `numpy==1.26.4`（保守选择，等于端到端实测通过的配置；理由见 [environment.md](environment.md)）。
 
 ## 4. 模型权重：已核实可用
 
@@ -86,7 +86,7 @@
 
 | 阶段 | 内容 | 完成判定 |
 |---|---|---|
-| S0 | venv + `numpy<2` + rlcard + onnxruntime 跑通一局；ONNX 推断结果与 ckpt 路径一致；拿真实一局比对四条规则 | 环境可复现，规则无差异 |
+| S0 | venv + rlcard + onnxruntime 跑通一局；ONNX 推断结果与 ckpt 路径一致；拿真实一局比对四条规则 | 环境可复现，规则无差异 |
 | S1 | CLI：给定局面 → 3 个候选动作 + 胜率估计；记录 round-trip 测试 | 同一局面重跑结果一致；round-trip 测试通过 |
 | S2 | 约束过滤 + 粒子采样推断 → 仿真真值评测 | N 局上产出可复现的命中率数字，N 与参数写进 README，并与随机基线对照 |
 | S3 | 极简 Web（局面 / 候选胜率 / 手牌热力图）+ README + 2 分钟录屏 | 陌生人看完录屏能说清"做了什么、难在哪" |
@@ -99,7 +99,7 @@ S0 需要比对的四条规则：顺子最少 5 张、连对最少 3 对、飞�
 
 | 风险 | 对策 |
 |---|---|
-| numpy 2.x 与老代码不兼容 | S0 第一件事，锁 `numpy<2` |
+| ~~numpy 2.x 与老代码不兼容~~ **已推翻** | 实测 numpy 2.4.6 下 RLCard 可跑通，两库均未用 numpy 2 移除的 API；保留 1.x 锁仅为锁定已验证配置 |
 | 磁盘仅剩 15 Gi | pip 加 `--no-cache-dir`；走 ONNX 路线避开 PyTorch |
 | 实际平台规则与 RLCard 实现有差异 | S0 逐条比对四条规则，不一致必须重新评估 |
 | DouZero 输出是 Q 值，**不等于校准过的胜率** | WP 版本缓解但不等价；对外措辞必须准确 |
@@ -113,6 +113,7 @@ S0 需要比对的四条规则：顺子最少 5 张、连对最少 3 对、飞�
 | RLCard 的 Game 对象持有全部玩家真实手牌 | `rlcard/games/doudizhu/game.py`：`players[i].current_hand`；而默认 state 把另两家手牌**合并**返回（`_get_others_current_hand`） |
 | DouZero 的 `InfoSet` 可自行构造，无需跑其环境 | `douzero/env/env.py`：`get_obs(infoset)` 只依赖 `InfoSet` 字段 |
 | 本机环境 | macOS 27.0.1 / arm64 / Python 3.11.17 / numpy 2.4.4 / fastapi 0.115.0；无 torch、无 rlcard；磁盘余 15 Gi |
+| 依赖版本（实测通过） | numpy 1.26.4 / rlcard 1.2.0 / onnxruntime 1.31.1；详见 [environment.md](environment.md) |
 
 ## 9. 进展
 

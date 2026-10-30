@@ -6,7 +6,7 @@
 
 | 任务 | 说明 |
 |---|---|
-| 建 venv | 锁定 `numpy<2`（老代码用到了 numpy 2.x 移除的 API） |
+| 建 venv | 锁定 `numpy==1.26.4`（保守选择，见 [environment.md](environment.md)） |
 | 装依赖 | `rlcard` + `onnxruntime`，**不装 PyTorch** |
 | 下载权重 | DouZero-WP 三个 ONNX，约 18 MB |
 | 跑通一局 | RLCard 自对弈一局，确认能取到全部玩家真实手牌 |
@@ -64,7 +64,7 @@
 
 | 风险 | 对策 |
 |---|---|
-| numpy 2.x 兼容性 | S0 第一件事，锁 `numpy<2` |
+| ~~numpy 2.x 兼容性~~ **已推翻** | 实测 numpy 2.4.6 下 RLCard 可跑通；保留 1.x 锁只为锁定已验证配置 |
 | 磁盘空间紧张 | pip 加 `--no-cache-dir`；走 ONNX 路线避开 PyTorch |
 | 实际平台规则与 RLCard 实现有差异 | S0 逐条比对，不一致必须重新评估 |
 | 模型输出是 Q 值，不等于校准胜率 | 对外措辞准确：只说"模型给出的估计" |

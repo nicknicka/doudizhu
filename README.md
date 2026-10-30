@@ -2,7 +2,7 @@
 
 > 给定一个牌局局面，推断另外两家手上还有什么牌，给出候选出牌及各自的胜率估计，并把整局完整落盘供复盘。
 
-**项目状态：设计定稿，S0 未开始 —— 当前仓库尚无可用代码。**
+**项目状态：环境已锁定，尚无可用代码。** 工作项与依赖关系见 [Issues](https://github.com/nicknicka/doudizhu/issues)，设计见 [docs/design.md](docs/design.md)。
 
 ---
 
@@ -51,6 +51,21 @@ flowchart LR
 
 **不训练任何模型**：DouZero 由自我博弈训练而成，人类对局数据非必需。
 
+## 快速开始
+
+目前只有环境可跑通，业务代码尚未实现。下面是**实测通过**的步骤：
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --no-cache-dir -e ".[dev]"
+.venv/bin/python scripts/download_models.py   # 约 18 MB 的 ONNX 权重
+.venv/bin/python -m pytest
+```
+
+预期结果：`6 passed`（未下载权重时其中一条会跳过）。
+
+依赖版本与踩过的坑都记在 [docs/environment.md](docs/environment.md)，包括 RLCard 1.2.0 的动作接口差异、仿真器观测里的信息泄漏，以及模型特征对推断的依赖。
+
 ## 目录结构
 
 ```
@@ -59,6 +74,7 @@ flowchart LR
 │   ├── design.md             设计共识（定稿）
 │   ├── architecture.md       架构与接口契约
 │   ├── data-schema.md        记录格式与 round-trip 约定
+│   ├── environment.md        环境、依赖版本与实测发现
 │   └── roadmap.md            阶段计划与验收标准
 ├── src/ddz/
 │   ├── source/               输入源适配器

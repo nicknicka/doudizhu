@@ -1,0 +1,16 @@
+# 由 `pip freeze` 生成，记录实测环境的完整解析结果（含间接依赖）。
+# 更新方式：.venv/bin/python -m pip freeze | sort > requirements.lock.txt
+#
+# 实测平台：macOS 27.0.1 / arm64 / Python 3.11.17
+
+Pygments==2.21.0
+flatbuffers==25.12.19
+iniconfig==2.3.1
+numpy==1.26.4
+onnxruntime==1.31.1
+packaging==26.3
+pluggy==1.7.0
+protobuf==7.36.2
+pytest==9.2.0
+rlcard==1.2.0
+termcolor==3.3.0
