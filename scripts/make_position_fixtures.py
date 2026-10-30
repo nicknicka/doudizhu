@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import random
 import sys
 from pathlib import Path
@@ -24,7 +23,7 @@ OUT_DIR = REPO_ROOT / "tests" / "data"
 
 
 def cut_position(seed: int, target_player_id: int, max_steps: int = 60):
-    """跑到指定玩家该动为止，返回 (记录, 该玩家手牌)。"""
+    """跑到指定玩家该动为止，返回该决策点的记录。"""
     env = rlcard.make("doudizhu")
     env.seed(seed)
     random.seed(seed)

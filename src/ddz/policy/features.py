@@ -17,6 +17,8 @@ from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
+from ddz.cards import FULL_DECK, normalize
+
 # RLCard 字符表 → DouZero 整数编码
 CARD_TO_INT: dict[str, int] = {
     "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
@@ -24,9 +26,6 @@ CARD_TO_INT: dict[str, int] = {
     "2": 17, "B": 20, "R": 30,
 }
 INT_TO_CARD: dict[int, str] = {v: k for k, v in CARD_TO_INT.items()}
-
-# 整副牌，共 54 张
-FULL_DECK: tuple[str, ...] = tuple("3456789TJQKA2" * 4) + ("B", "R")
 
 # 13 个普通点数的列序（2 排在 A 之后）
 CARD_COLUMN: dict[int, int] = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6,
@@ -54,11 +53,6 @@ POSITIONS = ("landlord", "landlord_up", "landlord_down")
 def to_ints(cards: Iterable[str]) -> list[int]:
     """字符牌 → 整数牌。"""
     return [CARD_TO_INT[c] for c in cards]
-
-
-def parse_action(action: Sequence[str]) -> list[int]:
-    """出牌序列 → 整数牌序列。空序列表示「不出」，与上游一致。"""
-    return to_ints(action)
 
 
 def cards_to_array(cards: Sequence[int]) -> np.ndarray:
@@ -137,11 +131,11 @@ def build_features(
 
     my_handcards = _repeat(cards_to_array(to_ints(my_hand)), n)
     other_handcards = _repeat(cards_to_array(to_ints(other_hand_cards)), n)
-    last_action = _repeat(cards_to_array(parse_action(last_move)), n)
+    last_action = _repeat(cards_to_array(to_ints(last_move)), n)
 
     my_action_batch = np.zeros(my_handcards.shape)
     for j, action in enumerate(legal_actions):
-        my_action_batch[j, :] = cards_to_array(parse_action(action))
+        my_action_batch[j, :] = cards_to_array(to_ints(action))
 
     bomb = _repeat(_one_hot_bomb(bomb_num), n)
 
@@ -166,8 +160,8 @@ def build_features(
             _repeat(cards_to_array(to_ints(played_cards["landlord"])), n),
             _repeat(cards_to_array(to_ints(played_cards[teammate])), n),
             last_action,
-            _repeat(cards_to_array(parse_action(last_move_dict["landlord"])), n),
-            _repeat(cards_to_array(parse_action(last_move_dict[teammate])), n),
+            _repeat(cards_to_array(to_ints(last_move_dict["landlord"])), n),
+            _repeat(cards_to_array(to_ints(last_move_dict[teammate])), n),
             _repeat(_one_hot(num_cards_left["landlord"], 20), n),
             _repeat(_one_hot(num_cards_left[teammate], 17), n),
             bomb,
@@ -177,7 +171,7 @@ def build_features(
     x_batch = np.hstack(parts).astype(np.float32)
 
     z = action_seq_to_array(
-        _process_action_seq([parse_action(a) for a in card_play_action_seq])
+        _process_action_seq([to_ints(a) for a in card_play_action_seq])
     )
     z_batch = np.repeat(z[np.newaxis, :, :], n, axis=0).astype(np.float32)
 

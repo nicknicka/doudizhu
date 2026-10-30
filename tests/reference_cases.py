@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from ddz.policy.features import FULL_DECK
+from ddz.cards import FULL_DECK
 
 POSITIONS = ("landlord", "landlord_up", "landlord_down")
 

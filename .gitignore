@@ -13,8 +13,8 @@ models/
 *.ckpt
 *.onnx
 
-# 运行期数据
-data/
+# 运行期数据（锚定根目录：不加斜杠会把 tests/data/ 也一起忽略）
+/data/
 
 # macOS
 .DS_Store

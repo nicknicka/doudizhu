@@ -6,46 +6,31 @@ import argparse
 import sys
 from pathlib import Path
 
-from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy
+from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnError
 from ddz.policy.legality import legal_actions
 from ddz.record.io import load, save
-from ddz.record.schema import Advice
 from ddz.record.state import derive
 
 
 def _cmd_suggest(args: argparse.Namespace) -> int:
+    """读局面 → 要建议 → 写记录。这里只做编排，不含业务逻辑。"""
     record = load(args.infile)
-    snapshot = derive(record)
+    policy = DouZeroPolicy(args.models)
 
-    if snapshot.acting != record.me:
-        print(
-            f"当前该 {snapshot.acting} 行动，而记录里的我方是 {record.me}；"
-            "这张票只支持轮到我方时给建议。",
-            file=sys.stderr,
-        )
+    try:
+        advice = policy.advise(record, top_k=args.top_k)
+    except NotYourTurnError as exc:
+        print(exc, file=sys.stderr)
         return 2
 
-    actions = legal_actions(snapshot)
-    policy = DouZeroPolicy(args.models)
-    candidates, diagnostics = policy.rank(snapshot, actions, top_k=args.top_k)
+    snapshot = derive(record)
+    save(record.with_advice(advice), args.out)
 
-    advice = Advice(
-        after_step=len(record.steps),
-        position=snapshot.acting,
-        model=diagnostics["model"],
-        candidates=candidates,
-        diagnostics=diagnostics,
-    )
-    updated = record.__class__(
-        **{**record.__dict__, "advice": record.advice + (advice,)}
-    )
-    save(updated, args.out)
-
-    print(f"局面：{snapshot.acting} 行动，手牌 {len(snapshot.my_hand)} 张，"
-          f"合法动作 {len(actions)} 个")
-    for rank, candidate in enumerate(candidates, start=1):
+    print(f"局面：{advice.position} 行动，手牌 {len(snapshot.my_hand)} 张，"
+          f"合法动作 {advice.diagnostics['n_actions_scored']} 个")
+    for rank, candidate in enumerate(advice.candidates, start=1):
         action = candidate.action
-        shown = "不出" if action.kind == "pass" else "".join(action.cards)
+        shown = "不出" if action.is_pass else "".join(action.cards)
         print(f"  {rank}. {shown:14s} 估计 {candidate.score:+.4f}")
     print(f"  （{advice.note}）")
     print(f"已写入 {args.out}")

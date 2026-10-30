@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 
 from ddz.policy.features import build_features
-from ddz.record.schema import Action, Candidate
-from ddz.record.state import Snapshot
+from ddz.policy.legality import legal_actions
+from ddz.record.schema import Action, Advice, Candidate, MatchRecord
+from ddz.record.state import Snapshot, derive
 
 DEFAULT_MODEL_DIR = Path("models/douzero_WP")
 
@@ -26,6 +27,10 @@ MODEL_FILES: dict[str, str] = {
 
 INPUT_NAMES = ("x", "z")
 OUTPUT_NAME = "values"
+
+
+class NotYourTurnError(RuntimeError):
+    """当前不该我方行动，因此不给建议。"""
 
 
 class MissingWeightsError(FileNotFoundError):
@@ -100,12 +105,31 @@ class DouZeroPolicy:
         )
         candidates = [Candidate(action=a, score=float(s)) for s, a in order[:top_k]]
 
-        diagnostics = {
+        return candidates, self._diagnostics(snapshot, len(actions), top_k)
+
+    def _diagnostics(self, snapshot: Snapshot, n_scored: int, top_k: int) -> dict:
+        return {
             "model": str(self.model_path(snapshot.acting)),
             "position": snapshot.acting,
-            "n_actions_scored": len(actions),
+            "n_actions_scored": n_scored,
             "top_k": top_k,
             "score_kind": "Q 值（期望回报），不是校准胜率",
             "n_pool_cards": len(snapshot.pool),
         }
-        return candidates, diagnostics
+
+    def advise(self, record: MatchRecord, top_k: int = 3) -> Advice:
+        """给一个局面产出建议。轮不到我方时抛 ``NotYourTurnError``。"""
+        snapshot = derive(record)
+        if snapshot.acting != record.me:
+            raise NotYourTurnError(
+                f"当前该 {snapshot.acting} 行动，而记录里的我方是 {record.me}；"
+                "只有轮到我方时才给建议。"
+            )
+        candidates, diagnostics = self.rank(snapshot, legal_actions(snapshot), top_k=top_k)
+        return Advice(
+            after_step=len(record.steps),
+            position=snapshot.acting,
+            model=diagnostics["model"],
+            candidates=candidates,
+            diagnostics=diagnostics,
+        )

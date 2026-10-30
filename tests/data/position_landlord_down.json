@@ -1,0 +1,48 @@
+{
+  "created_at": "2026-10-31T00:00:00+08:00",
+  "initial": {
+    "my_hand": [
+      "3",
+      "4",
+      "4",
+      "6",
+      "6",
+      "6",
+      "8",
+      "9",
+      "T",
+      "J",
+      "J",
+      "Q",
+      "K",
+      "K",
+      "A",
+      "A",
+      "R"
+    ],
+    "three_landlord_cards": [
+      "7",
+      "9",
+      "2"
+    ]
+  },
+  "me": "landlord_down",
+  "record_id": "fixture-seed7-landlord_down",
+  "ruleset": "standard-3p-v1",
+  "schema_version": 1,
+  "source": "sim",
+  "steps": [
+    {
+      "action": {
+        "cards": [
+          "7",
+          "7",
+          "7"
+        ],
+        "type": "play"
+      },
+      "index": 0,
+      "player": "landlord"
+    }
+  ]
+}

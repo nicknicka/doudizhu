@@ -12,6 +12,7 @@ import pytest
 
 from ddz.cli.main import main
 from ddz.policy.douzero import DEFAULT_MODEL_DIR
+from ddz.policy.legality import legal_actions
 from ddz.record.io import load
 from ddz.record.schema import Action, Step
 from ddz.record.state import derive
@@ -53,19 +54,25 @@ class TestSuggest:
         assert scores == sorted(scores, reverse=True)
 
     def test_candidates_are_legal(self, fixture, tmp_path):
-        """候选只包含规则允许的动作，且用到的牌都在手牌里。"""
+        """候选必须在**独立算出的合法动作集合**里，且用到的牌都在手牌里。
+
+        只检查"牌在手"是不够的：手里的牌也能拼出非法牌型
+        （比如三张 3 加一张 4 组成的"假炸弹"），那样断言会漏掉。
+        """
         out = tmp_path / "advice.json"
         run_suggest(fixture, out)
 
         result = load(out)
         snapshot = derive(result)
+
+        legal = {(a.kind, a.cards) for a in legal_actions(snapshot)}
         hand = Counter(snapshot.my_hand)
 
         for candidate in result.advice[0].candidates:
-            if candidate.action.kind == "pass":
-                continue
-            used = Counter(candidate.action.cards)
-            assert not (used - hand), f"候选用了手上没有的牌：{candidate.action.cards}"
+            action = candidate.action
+            assert (action.kind, action.cards) in legal, f"候选不合法：{action}"
+            if action.is_play:
+                assert not (Counter(action.cards) - hand), "候选用了手上没有的牌"
 
     def test_marks_scores_as_model_estimates(self, fixture, tmp_path):
         """必须写明这不是真实胜率。"""
@@ -120,18 +127,23 @@ class TestSuggest:
 
 class TestDeterminism:
     def test_same_input_gives_byte_identical_output(self, fixture, tmp_path):
-        """同一局面重跑，输出逐字节相同。"""
+        """同一局面重跑，输出逐字节相同。
+
+        注意：这条路径上**没有任何随机源**（模型推理是确定性的、采样尚未引入），
+        所以不需要 seed 也能保证逐字节相同 —— 这比"同 seed 相同"更强。
+        等到 S2 引入粒子采样时，seed 才成为必要条件。
+        """
         first, second = tmp_path / "a.json", tmp_path / "b.json"
         assert run_suggest(fixture, first) == 0
         assert run_suggest(fixture, second) == 0
         assert first.read_bytes() == second.read_bytes()
 
-    def test_advice_is_appended_not_replacing(self, fixture, tmp_path):
-        """重复跑不会覆盖已有建议，而是追加。"""
+    def test_rerun_replaces_advice_for_the_same_step(self, fixture, tmp_path):
+        """同一决策点重跑是替换而不是堆积，否则反复运行会堆出矛盾建议。"""
         out = tmp_path / "advice.json"
         run_suggest(fixture, out)
         run_suggest(out, out)
-        assert len(load(out).advice) == 2
+        assert len(load(out).advice) == 1
 
     def test_input_file_is_not_modified(self, fixture, tmp_path):
         before = fixture.read_bytes()

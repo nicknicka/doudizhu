@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterator
 
-from ddz.policy.features import FULL_DECK
+from ddz.cards import FULL_DECK
 from ddz.record.schema import (
     INITIAL_HAND_SIZE,
     TURN_ORDER,
@@ -49,7 +49,7 @@ def _acting_player(steps: tuple[Step, ...]) -> str:
 
     last_play_index = None
     for i, step in enumerate(steps):
-        if step.action.kind == "play":
+        if step.action.is_play:
             last_play_index = i
     if last_play_index is None:
         raise ValueError("记录里一次出牌都没有，第一手必须是有人领出")
@@ -83,7 +83,7 @@ def derive(record: MatchRecord, steps: tuple[Step, ...] | None = None) -> Snapsh
         cards = step.action.cards
         sequence.append(cards)
         move_dict[step.player] = cards
-        if step.action.kind == "play":
+        if step.action.is_play:
             played[step.player].extend(cards)
             if _is_bomb(cards):
                 bomb_num += 1

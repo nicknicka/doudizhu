@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ddz.policy.features import FULL_DECK
+from ddz.cards import FULL_DECK
 from ddz.record.io import dumps, loads
 from ddz.record.schema import Action, Step
 from ddz.record.state import _acting_player, derive, replay

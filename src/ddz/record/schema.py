@@ -11,8 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ddz.cards import normalize
+
 SCHEMA_VERSION = 1
 RULESET = "standard-3p-v1"
+
+# 固定的免责措辞：模型输出是 Q 值，不是校准过的胜率。
+SCORE_DISCLAIMER = "模型给出的估计，不是真实胜率"
 
 # 出手顺序：地主 → 地主下家 → 地主上家 →（回到地主）
 TURN_ORDER: tuple[str, ...] = ("landlord", "landlord_down", "landlord_up")
@@ -43,8 +48,16 @@ class Action:
         if self.kind == "play" and not self.cards:
             raise ValueError("play 必须带牌")
 
+    @property
+    def is_play(self) -> bool:
+        return self.kind == "play"
+
+    @property
+    def is_pass(self) -> bool:
+        return self.kind == "pass"
+
     def to_json(self) -> dict[str, Any]:
-        if self.kind == "pass":
+        if self.is_pass:
             return {"type": "pass"}
         return {"type": "play", "cards": list(self.cards)}
 
@@ -86,6 +99,20 @@ class Initial:
     my_hand: tuple[str, ...]
     three_landlord_cards: tuple[str, ...]
     opponents: dict[str, tuple[str, ...]] | None = None
+
+    def __post_init__(self) -> None:
+        # 手牌统一按字符表顺序存放：同一手牌只有一种写法，round-trip 才稳定。
+        # 字符表之外的牌直接拒绝，不静默丢弃。
+        object.__setattr__(self, "my_hand", normalize(self.my_hand))
+        object.__setattr__(
+            self, "three_landlord_cards", normalize(self.three_landlord_cards)
+        )
+        if self.opponents is not None:
+            object.__setattr__(
+                self,
+                "opponents",
+                {pos: normalize(hand) for pos, hand in self.opponents.items()},
+            )
 
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -134,7 +161,14 @@ class Advice:
     model: str
     candidates: list[Candidate]
     diagnostics: dict[str, Any] = field(default_factory=dict)
-    note: str = "模型给出的估计，不是真实胜率"
+    note: str = SCORE_DISCLAIMER
+
+    def __post_init__(self) -> None:
+        if not self.candidates:
+            raise ValueError("建议至少要有一个候选")
+        scores = [c.score for c in self.candidates]
+        if scores != sorted(scores, reverse=True):
+            raise ValueError("候选必须按 score 降序存放")
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -154,7 +188,7 @@ class Advice:
             model=data["model"],
             candidates=[Candidate.from_json(c) for c in data["candidates"]],
             diagnostics=dict(data.get("diagnostics", {})),
-            note=data.get("note", "模型给出的估计，不是真实胜率"),
+            note=data.get("note", SCORE_DISCLAIMER),
         )
 
 
@@ -179,6 +213,17 @@ class MatchRecord:
         for expected, step in enumerate(self.steps):
             if step.index != expected:
                 raise ValueError(f"步骤序号不连续：期望 {expected}，实际 {step.index}")
+
+    def with_advice(self, advice: "Advice") -> "MatchRecord":
+        """挂上一条建议。
+
+        同一个 ``after_step`` 上重复跑是**替换**而不是追加 —— 否则反复运行会堆出
+        一堆互相矛盾的建议，而且输出不再稳定。
+        """
+        kept = tuple(a for a in self.advice if a.after_step != advice.after_step)
+        return MatchRecord(
+            **{**self.__dict__, "advice": kept + (advice,)}
+        )
 
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -210,9 +255,9 @@ class MatchRecord:
             created_at=data["created_at"],
             me=data["me"],
             initial=Initial.from_json(data["initial"]),
-            steps=tuple(Step.from_json(s) for s in data.get("steps", [])),
+            steps=tuple(Step.from_json(s) for s in data["steps"]),
             advice=tuple(Advice.from_json(a) for a in data.get("advice", [])),
             outcome=data.get("outcome"),
             schema_version=version,
-            ruleset=data.get("ruleset", RULESET),
+            ruleset=data["ruleset"],
         )
