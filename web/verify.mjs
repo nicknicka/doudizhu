@@ -84,7 +84,17 @@ try {
     problems.push('点击概率列表没有钉住该牌');
   }
 
-  // 交互 5：打开自己的记录
+  // 交互 5：概率列表能用键盘钉住（鼠标能点不够，"做好"要能 tab 到）
+  const row2 = page.locator('#plist li[data-card]').nth(1);
+  await row2.focus();
+  await page.keyboard.press('Enter');
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(200);
+  if (!(await row2.evaluate(el => el.classList.contains('is-focus')))) {
+    problems.push('概率列表无法用键盘钉住');
+  }
+
+  // 交互 6：打开自己的记录
   const demo = await (await fetch(`${BASE}/api/demo`)).json();
   const file = path.join(tmpdir(), 'my-game.json');
   writeFileSync(file, JSON.stringify(demo.record));
@@ -109,5 +119,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；渲染四处 + 步号(点/键) + 交叉高亮 + 钉住 + 载入记录 均正常');
+  : '✔ 无 pageerror / console error；渲染四处 + 步号(点/键) + 交叉高亮 + 钉住(鼠标/键盘) + 载入记录 均正常');
 process.exit(problems.length ? 1 : 0);

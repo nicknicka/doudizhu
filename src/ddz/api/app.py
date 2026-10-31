@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import functools
-import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
 from ddz.record.schema import SCORE_DISCLAIMER, MatchRecord
-from ddz.record.state import derive
+from ddz.record.state import derive, my_turn_steps
 from ddz.rules import legal_actions
 from ddz.source import sim
 
@@ -44,39 +44,13 @@ METRIC_PARTICLES = 200
 METRIC_STRIDE = 3
 CALIBRATION_GAMES = 8
 
-# 设计 token 由外部随机串派生（构建侧，不入库）。串不在时退回一个稳定值，
-# 好让刚克隆出来的仓库也能把页面渲染出来。
-_SEED_FILE = WEB / "design-seed.txt"
-_FALLBACK_SEED = "doudizhu-web-default"
-
-PALETTES = [
-    ("暖纸",   "#f2eee6", "#1b1917", "#8a8177", "#b8452f", "#b8452f", "#4a6b8a"),
-    ("深夜青", "#0e1416", "#e4ecee", "#7d8a8d", "#4fa3a5", "#4fa3a5", "#c98a4b"),
-    ("米白靛", "#faf8f4", "#201e1b", "#8d8880", "#3d5a80", "#3d5a80", "#c07a4a"),
-]
-FONTS = [
-    ('Georgia,"Songti SC",serif', 'ui-monospace,"SF Mono",Menlo,monospace'),
-    ('"Helvetica Neue",-apple-system,"PingFang SC",sans-serif', 'ui-monospace,"SF Mono",Menlo,monospace'),
-    ('ui-monospace,"SF Mono",Menlo,monospace', 'ui-monospace,"SF Mono",Menlo,monospace'),
-]
-SIDES = ["right", "left"]
+# 设计 token 与模板放在一起（web/tokens.json）——「长什么样」是 web 的事，
+# 后端只负责把占位符替换掉。
+_TOKENS_FILE = WEB / "tokens.json"
 
 
 def design_tokens() -> dict[str, str]:
-    seed = (
-        _SEED_FILE.read_text(encoding="utf-8").strip()
-        if _SEED_FILE.exists()
-        else _FALLBACK_SEED
-    )
-    h = hashlib.sha256(seed.encode()).digest()
-    _, ground, ink, muted, accent, a, b = PALETTES[h[0] % len(PALETTES)]
-    disp, data = FONTS[h[1] % len(FONTS)]
-    return {
-        "__GROUND__": ground, "__INK__": ink, "__MUTED__": muted, "__ACCENT__": accent,
-        "__SIDE_A__": a, "__SIDE_B__": b,
-        "__FONT_DISPLAY__": disp, "__FONT_DATA__": data,
-        "__SIDE__": SIDES[h[2] % len(SIDES)],
-    }
+    return json.loads(_TOKENS_FILE.read_text(encoding="utf-8"))
 
 
 def render_page() -> str:
@@ -84,15 +58,6 @@ def render_page() -> str:
     for key, value in design_tokens().items():
         tpl = tpl.replace(key, value)
     return tpl
-
-
-def my_turn_steps(record: MatchRecord) -> list[int]:
-    """记录里所有「轮到我方」的决策点（0 = 开局）。页面拿它画步号按钮。"""
-    return [
-        step
-        for step in range(len(record.steps) + 1)
-        if derive(record, steps=record.steps[:step]).acting == record.me
-    ]
 
 
 def analyze(
@@ -136,7 +101,7 @@ def analyze(
         "me": record.me,
         "total_steps": len(record.steps),
         "step": target,
-        "my_steps": mine,
+        "my_steps": list(mine),
         "acting": snapshot.acting,
         "my_hand": list(snapshot.my_hand),
         "remaining": dict(snapshot.num_cards_left),

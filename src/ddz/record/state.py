@@ -73,6 +73,18 @@ def _is_bomb(cards: tuple[str, ...]) -> bool:
     return set(cards) == {"B", "R"} and len(cards) == 2
 
 
+def my_turn_steps(record: MatchRecord) -> tuple[int, ...]:
+    """记录里所有「轮到我方」的决策点（0 = 开局）。
+
+    CLI 的校准与展示页后端都要这份序列，所以放记录层，别各算一遍。
+    """
+    return tuple(
+        step
+        for step in range(len(record.steps) + 1)
+        if derive(record, steps=record.steps[:step]).acting == record.me
+    )
+
+
 def derive(record: MatchRecord, steps: tuple[Step, ...] | None = None) -> Snapshot:
     """推导某个时刻的局面。``steps`` 缺省用记录里的全部步骤。"""
     steps = record.steps if steps is None else steps

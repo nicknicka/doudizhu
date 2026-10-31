@@ -13,10 +13,10 @@ from ddz.record.schema import (
     MatchRecord,
     Step,
 )
-from ddz.record.state import Snapshot, derive, replay
+from ddz.record.state import Snapshot, derive, my_turn_steps, replay
 
 __all__ = [
     "Action", "Advice", "Candidate", "Initial", "MatchRecord", "Step", "Snapshot",
     "SCHEMA_VERSION", "RULESET", "TURN_ORDER", "INITIAL_HAND_SIZE",
-    "save", "load", "dumps", "loads", "derive", "replay",
+    "save", "load", "dumps", "loads", "derive", "my_turn_steps", "replay",
 ]

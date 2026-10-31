@@ -16,7 +16,7 @@ from typing import Iterable
 from ddz.policy.douzero import DouZeroPolicy
 from ddz.rules import legal_actions
 from ddz.record.schema import MatchRecord
-from ddz.record.state import derive
+from ddz.record.state import derive, my_turn_steps
 
 # 必须随任何展示一起出现的措辞。模型输出不是概率，别让读者误会。
 SCORE_CAVEAT = "模型输出是 Q 值（期望回报），不是校准过的胜率"
@@ -98,11 +98,7 @@ def calibrate(
         # stride 作用在**我方自己的决策点序列**上，而不是全局步号。
         # 出手顺序每 3 步轮转一次，全局 stride 取 3 的倍数时永远只命中同一个位置 ——
         # 那样采出来的不是"我方决策的样本"，而是"某个座位的样本"。
-        my_steps = [
-            step for step in range(len(record.steps) + 1)
-            if derive(record, steps=record.steps[:step]).acting == record.me
-        ]
-        for step in my_steps[::step_stride]:
+        for step in my_turn_steps(record)[::step_stride]:
             snapshot = derive(record, steps=record.steps[:step])
             actions = legal_actions(snapshot)
             if not actions:

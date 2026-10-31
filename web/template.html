@@ -41,12 +41,12 @@
           background:color-mix(in srgb,var(--ink) 5%,transparent)}
   .banner[data-kind="error"]{border-left-color:var(--accent);color:var(--accent)}
 
-  .state{display:flex;gap:56px;margin-bottom:64px;font-family:var(--data)}
+  .state{display:flex;flex-wrap:wrap;gap:40px 56px;margin-bottom:64px;font-family:var(--data)}
   .state div{line-height:1}
-  .state .n{font-size:38px;font-weight:300;letter-spacing:-.02em}
+  .state .n{font-size:38px;font-weight:300;letter-spacing:-.02em;white-space:nowrap}
   .state .k{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:10px}
   .state .n.hi{color:var(--accent)}
-  .state .n.sm{font-size:26px}
+  .state .n.sm{font-size:24px}
 
   h2{font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;
      color:var(--muted);margin:0 0 28px}
@@ -157,6 +157,7 @@
       <h2 class="side-h">某张牌在谁手上</h2>
       <ul class="plist" id="plist"></ul>
       <h2 class="side-h">校准 · 估计值 vs 实际胜率</h2>
+      <p class="caveat" id="calib-src"></p>
       <table class="calib" id="calib"></table>
       <p class="caveat" id="calib-caveat"></p>
     </aside>
@@ -178,7 +179,7 @@ const S = {record: null, point: null, metrics: null, calibration: null,
            caveat: '', disclaimer: '', pinned: null, busy: false};
 
 const cv = $('cloud'), cx = cv.getContext('2d');
-let order = [], grid = [];
+let order = [], grid = [], hoverCard = null;
 const countIn = (a, c) => a.filter(x => x === c).length;
 
 /* ---------- 粒子云：每个粒子是一次完整分配 ---------- */
@@ -262,7 +263,7 @@ function renderPlist(){
   const head = '<li class="head"><span></span>'
     + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
   $('plist').innerHTML = head + p.cards.map(r =>
-    `<li data-card="${r.card}"><span class="c">${r.card}</span>`
+    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${r.card} 在谁手上"><span class="c">${r.card}</span>`
     + p.opponents.map((o,i)=>{
         const v = r.by[o];
         return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
@@ -272,7 +273,7 @@ function renderPlist(){
 
 function renderCalib(){
   const c = S.calibration;
-  if (!c){ $('calib').innerHTML = ''; $('calib-caveat').textContent = ''; return; }
+  if (!c){ $('calib').innerHTML = ''; $('calib-src').textContent = ''; $('calib-caveat').textContent = ''; return; }
   $('calib').innerHTML =
     '<tr><th>估计区间</th><th>样本</th><th>平均估计</th><th>实际</th></tr>'
     + c.buckets.map(b=>
@@ -281,17 +282,21 @@ function renderCalib(){
       ).join('')
     + `<tr><td>合计</td><td>${c.n_samples}</td>`
     + `<td>${c.mean_estimate.toFixed(3)}</td><td>${c.actual_rate.toFixed(3)}</td></tr>`;
+  $('calib-src').textContent = '以上来自演示数据集（8 局仿真），与当前打开的记录无关。';
   $('calib-caveat').textContent = S.caveat;
 }
 
 function renderFoot(){
   const m = S.metrics;
   if (!m){ $('foot').innerHTML = ''; return; }
+  // 页脚同样是数据集级指标，不是当前这份记录的成绩
   $('foot').innerHTML = [
     ['Top-1', (m.top1*100).toFixed(1)+'%', `基线 ${(m.top1_base*100).toFixed(1)}%`],
     ['对数似然', m.ll, `基线 ${m.ll_base}`],
     ['决策点', m.n_positions, `${m.n_cards} 计分项`],
   ].map(([k,v,s])=>`<div><div class="k">${k}</div><div class="v">${v}<small>${s}</small></div></div>`).join('');
+  $('foot').insertAdjacentHTML('afterbegin',
+    '<div class="k" style="align-self:center">演示数据集<br>（10 局仿真）</div>');
 }
 
 function renderAll(){
@@ -318,14 +323,25 @@ $('plist').addEventListener('click', e => {
   S.pinned = (S.pinned === li.dataset.card) ? null : li.dataset.card;
   focus(null);
 });
+$('plist').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const li = e.target.closest('li[data-card]'); if (!li) return;
+  e.preventDefault();
+  S.pinned = (S.pinned === li.dataset.card) ? null : li.dataset.card;
+  focus(null);
+});
 
+cv.addEventListener('click', () => {
+  if (hoverCard) { S.pinned = (S.pinned === hoverCard) ? null : hoverCard; focus(null); }
+});
 cv.addEventListener('mousemove', e => {
   if (!order.length) return;
   const r = cv.getBoundingClientRect();
   const c = Math.floor((e.clientX - r.left) / (r.width / order.length));
-  if (c >= 0 && c < order.length) focus(order[c]);
+  hoverCard = (c >= 0 && c < order.length) ? order[c] : null;
+  focus(hoverCard);
 });
-cv.addEventListener('mouseleave', () => focus(null));
+cv.addEventListener('mouseleave', () => { hoverCard = null; focus(null); });
 
 function step(delta){
   if (S.busy || !S.point) return;
@@ -416,7 +432,8 @@ async function readFile(file){
     setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
   }
 }
-$('file').addEventListener('change', e => readFile(e.target.files[0]));
+// 立刻清空：否则改好同一个文件再选一次，change 不会再触发
+$('file').addEventListener('change', e => { readFile(e.target.files[0]); e.target.value = ''; });
 document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
 document.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
 document.addEventListener('drop', e => {
