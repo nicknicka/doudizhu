@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -82,10 +83,43 @@ def build_data() -> dict:
     }
 
 
+PALETTES = [
+    ("暖纸",   "#f2eee6", "#1b1917", "#8a8177", "#b8452f", "#b8452f", "#4a6b8a"),
+    ("深夜青", "#0e1416", "#e4ecee", "#7d8a8d", "#4fa3a5", "#4fa3a5", "#c98a4b"),
+    ("米白靛", "#faf8f4", "#201e1b", "#8d8880", "#3d5a80", "#3d5a80", "#c07a4a"),
+]
+FONTS = [
+    ('Georgia,"Songti SC",serif', 'ui-monospace,"SF Mono",Menlo,monospace'),
+    ('"Helvetica Neue",-apple-system,"PingFang SC",sans-serif', 'ui-monospace,"SF Mono",Menlo,monospace'),
+    ('ui-monospace,"SF Mono",Menlo,monospace', 'ui-monospace,"SF Mono",Menlo,monospace'),
+]
+SIDES = ["right", "left"]
+
+
+def design_tokens() -> dict[str, str]:
+    """从**外部**随机串确定性派生设计决定。
+
+    串由 `openssl rand` 生成、只留在构建侧（web/design-seed.txt）——
+    它本身绝不出现在成品页面里，页面只带派生结果。
+    """
+    seed = (Path(__file__).parent / "design-seed.txt").read_text().strip()
+    h = hashlib.sha256(seed.encode()).digest()
+    _, ground, ink, muted, accent, a, b = PALETTES[h[0] % len(PALETTES)]
+    disp, data = FONTS[h[1] % len(FONTS)]
+    return {
+        "__GROUND__": ground, "__INK__": ink, "__MUTED__": muted, "__ACCENT__": accent,
+        "__SIDE_A__": a, "__SIDE_B__": b,
+        "__FONT_DISPLAY__": disp, "__FONT_DATA__": data,
+        "__SIDE__": SIDES[h[2] % len(SIDES)],
+    }
+
+
 def main() -> int:
     data = build_data()
     tpl = (Path(__file__).parent / "template.html").read_text(encoding="utf-8")
     out = tpl.replace("/*__DATA__*/null", json.dumps(data, ensure_ascii=False))
+    for k, v in design_tokens().items():
+        out = out.replace(k, v)
     (Path(__file__).parent / "index.html").write_text(out, encoding="utf-8")
     print(f"  index.html 已生成：{len(data['points'])} 个决策点，"
           f"{len(data['points'][0]['particles'])} 个粒子/点")

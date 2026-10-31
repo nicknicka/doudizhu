@@ -29,3 +29,7 @@ web/index.html
 # Node 展示页工具链
 node_modules/
 package-lock.json
+
+# 设计随机串：外部生成，仅构建侧，不进成品
+web/design-seed.txt
+web/design-tokens.txt
