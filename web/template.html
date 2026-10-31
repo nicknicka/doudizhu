@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>斗地主决策助手 · 推断可视化</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+  /* 底色是暖的近黑，不是 GitHub 深蓝 —— 后者是"AI 工具"的视觉最大公约数。
+     全场只有一个 accent（锈红），所有色彩都从这几个变量来。 */
+  :root{
+    --ground:#131110; --panel:#1b1816; --line:#2e2823;
+    --ink:#e9e3db; --muted:#8d8177; --accent:#c8553d; --accent-2:#5b8c6e;
+    --mono: ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+       font:13px/1.65 var(--mono);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 32px 64px}
+  header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+  h1{margin:0 0 6px;font-size:19px;font-weight:600;letter-spacing:.01em}
+  .sub{color:var(--muted);font-size:12px}
+  .cols{display:grid;grid-template-columns:1fr 306px;gap:22px;align-items:start}
+  section{background:var(--panel);border:1px solid var(--line);padding:18px}
+  section+section{margin-top:22px}
+  h2{margin:0 0 14px;font-size:10.5px;font-weight:600;letter-spacing:.16em;
+     text-transform:uppercase;color:var(--muted)}
+  .steps{display:flex;gap:8px;margin-bottom:16px}
+  .steps button{background:none;border:1px solid var(--line);color:var(--muted);
+    font:inherit;font-size:11.5px;padding:4px 11px;cursor:pointer;transition:all .18s}
+  .steps button:hover{border-color:var(--accent);color:var(--ink)}
+  .steps button[aria-current="true"]{border-color:var(--accent);color:var(--accent)}
+  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .fact .k{color:var(--muted);font-size:10.5px;letter-spacing:.1em}
+  .fact .v{font-size:15px;margin-top:3px}
+  .fact .v em{color:var(--accent);font-style:normal}
+  canvas{display:block;width:100%;height:264px}
+  .legend{display:flex;gap:18px;margin-top:12px;color:var(--muted);font-size:11px}
+  .dot{display:inline-block;width:7px;height:7px;margin-right:6px;vertical-align:1px}
+  .cands{list-style:none;margin:0;padding:0}
+  .cands li{display:grid;grid-template-columns:54px 1fr 62px;gap:10px;align-items:center;
+    padding:5px 0;border-bottom:1px solid var(--line)}
+  .cands li:last-child{border-bottom:0}
+  .cands .bar{height:3px;background:var(--line);position:relative}
+  .cands .bar i{position:absolute;inset:0 auto 0 0;background:var(--accent);display:block}
+  .cands .sc{text-align:right;color:var(--muted)}
+  .note{margin:12px 0 0;color:var(--muted);font-size:11px;
+        border-left:2px solid var(--accent);padding-left:10px}
+  .probs{list-style:none;margin:0;padding:0;font-size:12px}
+  .probs li{display:flex;justify-content:space-between;padding:4px 0;
+    border-bottom:1px solid var(--line)}
+  .probs li:last-child{border-bottom:0}
+  .probs b{font-weight:500;color:var(--accent)}
+  .foot{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:22px;
+    border-top:1px solid var(--line);padding-top:18px}
+  .foot .k{color:var(--muted);font-size:10.5px;letter-spacing:.1em}
+  .foot .v{font-size:17px;margin-top:2px}
+  .foot .v small{font-size:11px;color:var(--muted);display:block;letter-spacing:0}
+  .switching{opacity:.35}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>斗地主决策助手</h1>
+    <div class="sub" id="meta"></div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <section id="z1">
+        <h2>① 局面 · 现在是谁、还剩什么</h2>
+        <div class="steps" id="steps"></div>
+        <div class="facts">
+          <div class="fact"><div class="k">我方手牌</div><div class="v" id="f-hand"></div></div>
+          <div class="fact"><div class="k">各家剩余</div><div class="v" id="f-left"></div></div>
+          <div class="fact"><div class="k">上一手</div><div class="v" id="f-last"></div></div>
+        </div>
+      </section>
+
+      <section id="z2">
+        <h2>② 分布 · 每个粒子是一次完整分配</h2>
+        <canvas id="cloud"></canvas>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--accent)"></i><span id="lg-a"></span></span>
+          <span><i class="dot" style="background:var(--accent-2)"></i><span id="lg-b"></span></span>
+          <span id="lg-n"></span>
+        </div>
+        <p class="note">每一行是一条假设：这些牌分给了谁。200 行叠起来的浓淡，就是某张牌在某人手上的概率。</p>
+      </section>
+
+      <section id="z3">
+        <h2>③ 候选 · 模型给出的估计</h2>
+        <ul class="cands" id="cands"></ul>
+        <p class="note">模型输出是 Q 值（期望回报），不是校准过的胜率。它可用于候选之间的比较，不能当概率读。</p>
+      </section>
+    </div>
+
+    <aside>
+      <section id="z4">
+        <h2>某张牌在谁手上</h2>
+        <ul class="probs" id="probs"></ul>
+      </section>
+      <section id="z5">
+        <h2>这个数字凭什么</h2>
+        <p class="note" style="border:0;padding:0;color:var(--muted)">
+          只用公开信息：牌池 = 全牌 − 我方手牌 − 已出的牌。<br>
+          不读真值，也不做「他没压说明没大牌」这类推断——留着大牌不出是合法策略。
+        </p>
+      </section>
+    </aside>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+
+let pts = DATA.points, cur = 0;
+
+/* ── 粒子云 ───────────────────────────────────────────────
+   每行 = 一次完整分配。按牌池顺序逐格上色，行高 1px 叠起来，
+   浓的地方自然变亮 —— 这就是"概率"的来源，不是另外算出来的。 */
+const cv = $('cloud'), cx = cv.getContext('2d');
+const ROWS = 200;
+
+function layout(){
+  const r = devicePixelRatio || 1;
+  cv.width = cv.clientWidth * r; cv.height = cv.clientHeight * r;
+  cx.setTransform(r,0,0,r,0,0);
+  draw(1);
+}
+function poolOrder(){
+  // 牌池排序只做一次，保证同一张牌在每一行都落在同一列
+  const p = pts[cur];
+  const all = [];
+  for (const [a,b] of p.particles) all.push(...a, ...b);
+  return [...new Set(all)].sort((x,y)=>'3456789TJQKA2BR'.indexOf(x)-'3456789TJQKA2BR'.indexOf(y));
+}
+function draw(alpha){
+  const p = pts[cur], order = poolOrder();
+  const w = cv.clientWidth / order.length, h = cv.clientHeight / ROWS;
+  cx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
+  cx.globalAlpha = alpha;
+  for (let r=0; r<Math.min(ROWS, p.particles.length); r++){
+    const [a,b] = p.particles[r];
+    const ca = new Set(a), cb = new Set(b);
+    const aDup = {}, bDup = {};
+    for (let c=0;c<order.length;c++){
+      const card = order[c];
+      let owner = 0;
+      if (ca.has(card) && (aDup[card]=(aDup[card]||0)+1) <= countIn(a,card)) owner = 1;
+      else if (bDup[card]=(bDup[card]||0)+1 <= countIn(b,card)) owner = 2;
+      cx.fillStyle = owner===1 ? '#c8553d' : owner===2 ? '#5b8c6e' : '#2e2823';
+      cx.fillRect(c*w, r*h, Math.max(w-0.6,0.4), Math.max(h-0.4,0.6));
+    }
+  }
+  cx.globalAlpha = 1;
+}
+const countIn = (arr, card) => arr.filter(c=>c===card).length;
+
+/* ── 面板填充 ───────────────────────────────────────────── */
+function render(){
+  const p = pts[cur];
+  $('meta').textContent = `${DATA.record_id} · 共 ${DATA.total_steps} 手 · 我方 ${DATA.me}`;
+  $('f-hand').textContent = p.my_hand.join(' ');
+  $('f-left').innerHTML = Object.entries(p.remaining)
+    .map(([k,v]) => k===DATA.me ? `<em>${v}</em>` : v).join(' · ');
+  $('f-last').textContent = p.last_move.length ? p.last_move.join(' ') : '可自由领出';
+
+  $('lg-a').textContent = p.opponents[0];
+  $('lg-b').textContent = p.opponents[1];
+  $('lg-n').textContent = `${p.particles.length} 个粒子 · 牌池 ${p.pool_size} 张`;
+
+  const max = Math.max(...p.candidates.map(c=>Math.abs(c.score))) || 1;
+  $('cands').innerHTML = p.candidates.map(c=>`
+    <li><span>${c.label}</span>
+        <span class="bar"><i style="width:${Math.abs(c.score)/max*100}%"></i></span>
+        <span class="sc">${c.score>0?'+':''}${c.score.toFixed(4)}</span></li>`).join('');
+
+  // 逐张牌的边际概率：直接数粒子，不另外建模
+  const order = poolOrder(), probs = [];
+  for (const card of order){
+    const hit = p.particles.filter(([a])=>a.includes(card)).length / p.particles.length;
+    if (hit===0 || hit===1) continue;             // 确定的不用问
+    probs.push([card, hit]);
+  }
+  probs.sort((x,y)=>Math.abs(y[1]-.5)-Math.abs(x[1]-.5));
+  $('probs').innerHTML = probs.slice(0,7).map(([c,hit])=>
+    `<li><span>${c}</span><b>${(hit*100).toFixed(0)}% ${p.opponents[0]}</b></li>`).join('');
+
+  $('foot').innerHTML = [
+    ['Top-1 命中率', DATA.metrics.top1, `独立抛硬币 ${(DATA.metrics.top1_base*100).toFixed(1)}%`],
+    ['对数似然', DATA.metrics.ll, `基线 ${DATA.metrics.ll_base}`],
+    ['覆盖决策点', DATA.metrics.n_positions, `${DATA.metrics.n_cards} 个计分项`],
+    ['粒子数', p.particles.length, '每次完整分配'],
+  ].map(([k,v,s])=>{
+    const num = typeof v === 'number' && v < 1 ? (v*100).toFixed(1)+'%' : v;
+    return `<div><div class="k">${k}</div><div class="v">${num}<small>${s}</small></div></div>`;
+  }).join('');
+
+  $('steps').querySelectorAll('button').forEach((b,i)=>
+    b.setAttribute('aria-current', String(i===cur)));
+}
+
+/* ── 步号切换 ───────────────────────────────────────────── */
+function go(i){
+  if (i===cur) return; cur = i; render();
+  if (reduce){ layout(); return; }
+  // 粒子云重排：先让云退下去，重画，再让它亮回来。
+  // 这是"分层过渡"不是逐格 morph —— 逐格 tween 6800 个格子在浏览器里不划算，
+  // 视觉上这个处理已经能读出"重新分了一次"。
+  gsap.to(cv, {opacity:.18, duration:.18, onComplete(){
+    layout();
+    gsap.to(cv, {opacity:1, duration:.42, ease:'power2.out'});
+  }});
+  gsap.fromTo('#z1,#z3,aside section', {y:-6}, {y:0, duration:.3, ease:'power2.out'});
+}
+
+/* ── 入场 ───────────────────────────────────────────────── */
+function boot(){
+  $('steps').innerHTML = pts.map((p,i)=>
+    `<button type="button" data-i="${i}">第 ${p.step} 手</button>`).join('');
+  $('steps').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if (b) go(+b.dataset.i);
+  });
+  render(); layout();
+
+  if (reduce) return;
+  gsap.timeline({defaults:{ease:'power3.out'}})
+    .from('header', {opacity:0, y:-10, duration:.5})
+    .from('#z1', {opacity:0, y:14, duration:.5}, '-=.25')
+    .from('#z2', {opacity:0, y:14, duration:.5}, '-=.3')
+    .from('#z3', {opacity:0, y:14, duration:.5}, '-=.32')
+    .from('aside section', {opacity:0, x:12, duration:.45, stagger:.1}, '-=.4')
+    .from('#foot > div', {opacity:0, y:8, duration:.4, stagger:.07}, '-=.35');
+}
+addEventListener('resize', layout);
+boot();
+</script>
+</body>
+</html>

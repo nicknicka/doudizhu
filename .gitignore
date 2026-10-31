@@ -22,3 +22,6 @@ models/
 # 编辑器
 .idea/
 .vscode/
+
+# 展示页生成产物（由 web/build.py 从 template.html 生成）
+web/index.html
