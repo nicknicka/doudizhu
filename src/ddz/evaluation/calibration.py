@@ -95,31 +95,37 @@ def calibrate(
             continue  # 结果推不出来的记录直接跳过，不污染样本
         won = 1 if my_side(record.me) == winner else 0
 
-        for step in range(0, len(record.steps) + 1, step_stride):
+        # stride 作用在**我方自己的决策点序列**上，而不是全局步号。
+        # 出手顺序每 3 步轮转一次，全局 stride 取 3 的倍数时永远只命中同一个位置 ——
+        # 那样采出来的不是"我方决策的样本"，而是"某个座位的样本"。
+        my_steps = [
+            step for step in range(len(record.steps) + 1)
+            if derive(record, steps=record.steps[:step]).acting == record.me
+        ]
+        for step in my_steps[::step_stride]:
             snapshot = derive(record, steps=record.steps[:step])
-            if snapshot.acting != record.me:
-                continue  # 只评估"我方决策"时的估计
             actions = legal_actions(snapshot)
             if not actions:
                 continue
-            scores = policy.score(snapshot, actions)
-            samples.append((float(max(scores)), won))
+            samples.append((float(max(policy.score(snapshot, actions))), won))
 
     if not samples:
         raise NotCalibratableError("没有采到任何可校准的样本")
 
     values = [s for s, _ in samples]
-    lo, hi = min(values), max(values)
-    width = (hi - lo) / n_buckets or 1.0
+    # 桶界固定为 [-1, 1]：DouZero 的胜负目标是这个量纲，固定界让不同数据集之间
+    # 的校准表可以直接比较。用 min/max 动态分桶的话，换个数据集桶界就变了。
+    lo, hi = -1.0, 1.0
+    width = (hi - lo) / n_buckets
 
     buckets: list[Bucket] = []
     for i in range(n_buckets):
         low = lo + i * width
         high = low + width
-        # 最后一个桶收右端点，避免最大值被漏掉
+        # 最后一个桶收右边的一切（含浮点误差越界的值），保证没有样本被漏掉
         picked = [
             (s, w) for s, w in samples
-            if (low <= s < high) or (i == n_buckets - 1 and s == hi)
+            if (low <= s < high) or (i == n_buckets - 1 and s >= low)
         ]
         if not picked:
             continue
