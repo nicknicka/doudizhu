@@ -32,6 +32,7 @@ def snapshot(request) -> Snapshot:
 def empty_snapshot(**overrides) -> Snapshot:
     base = dict(
         acting="landlord",
+        me="landlord_up",
         my_hand=(),
         pool=(),
         played_cards={p: () for p in TURN_ORDER},
@@ -57,9 +58,17 @@ class TestBaselines:
         assert all(b.impossible for b in bounds_for(state, "7").values())
 
     def test_a_player_who_ran_out_holds_nothing(self):
-        state = empty_snapshot(pool=("K", "K"), num_cards_left={"landlord": 2, "landlord_down": 0, "landlord_up": 0})
+        state = empty_snapshot(
+            pool=("K", "K"),
+            num_cards_left={"landlord": 2, "landlord_down": 0, "landlord_up": 0},
+        )
         assert bounds_for(state, "K")["landlord_down"].impossible
-        assert bounds_for(state, "K")["landlord_up"].impossible
+
+
+    def test_my_own_position_is_not_reported(self):
+        """我手上有什么我自己知道，判定不该给"我自己"一行。"""
+        state = empty_snapshot(my_hand=("K", "K", "K"), pool=("K",))
+        assert set(bounds_for(state, "K")) == {"landlord", "landlord_down"}
 
     def test_unknown_card_is_rejected(self, snapshot):
         with pytest.raises(ValueError, match="字符表之外"):
@@ -72,16 +81,24 @@ class TestPigeonhole:
 
         这是鸽笼，不是猜测：牌不会凭空消失。
         """
+        # 自洽：我方 1 张 + 牌池 3 张 = 这局还剩 4 张；两家手上合计必须是 3 张
         state = empty_snapshot(
             my_hand=("K",),
             pool=("K", "K", "K"),
-            num_cards_left={"landlord": 1, "landlord_down": 1, "landlord_up": 1},
+            num_cards_left={"landlord": 1, "landlord_down": 2, "landlord_up": 1},
         )
-        verdicts = bounds_for(state, "K")
         assert unseen_copies(state, "K") == 3
-        for player in TURN_ORDER:
-            assert verdicts[player].low == 1, "每家必然至少一张"
-            assert verdicts[player].certain
+        verdicts = bounds_for(state, "K")
+
+        # 下家只剩 2 张，容不下全部三张 —— 地主必然至少拿 1 张
+        assert verdicts["landlord"].low == 1
+        assert verdicts["landlord"].certain
+        # 地主只剩 1 张，容不下三张 —— 下家必然至少拿 2 张
+        assert verdicts["landlord_down"].low == 2
+        assert verdicts["landlord_down"].certain
+        # 上限也由剩余张数卡住：两家加起来正好分完三张
+        assert verdicts["landlord"].high == 1
+        assert verdicts["landlord_down"].high == 2
 
     def test_no_lower_bound_when_others_have_room(self, snapshot):
         for bound in bounds_for(snapshot, "2").values():
@@ -159,8 +176,9 @@ class TestCli:
     def test_lists_every_position(self, tmp_path, capsys):
         assert main(["who", "--in", str(fixture_path("landlord_up")), "--card", "2"]) == 0
         out = capsys.readouterr().out
-        for player in TURN_ORDER:
+        for player in ("landlord", "landlord_down"):
             assert player in out
+        assert "landlord_up" not in out, "不该列出我方"
         assert "不读真值" in out
 
     def test_reports_an_impossible_card(self, capsys):

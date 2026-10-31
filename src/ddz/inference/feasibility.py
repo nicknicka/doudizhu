@@ -49,19 +49,28 @@ def unseen_copies(snapshot: Snapshot, card: str) -> int:
     return snapshot.pool.count(card)
 
 
+def opponents_of(snapshot: Snapshot) -> tuple[str, ...]:
+    """除我之外的两家。"""
+    return tuple(p for p in TURN_ORDER if p != snapshot.me)
+
+
 def bounds_for(snapshot: Snapshot, card: str) -> dict[str, Bounds]:
-    """每个玩家手上这张牌的张数区间，附带可读理由。"""
+    """**两个对手**手上这张牌的张数区间，附带可读理由。
+
+    不含我自己：我手上有什么我自己知道，再给一段"他可能有多少张"是误导。
+    """
     remaining = unseen_copies(snapshot, card)
     hand_size = snapshot.num_cards_left
+    opponents = opponents_of(snapshot)
 
     result: dict[str, Bounds] = {}
-    for player in TURN_ORDER:
+    for player in opponents:
         reasons: list[str] = []
 
         capacity = min(remaining, hand_size[player])
         # 鸽笼：其他玩家最多能容纳的份额之外，剩下的必然落在这个人手上
         others_capacity = sum(
-            min(remaining, hand_size[q]) for q in TURN_ORDER if q != player
+            min(remaining, hand_size[q]) for q in opponents if q != player
         )
         low = max(0, remaining - others_capacity)
 

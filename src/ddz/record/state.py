@@ -27,6 +27,9 @@ class Snapshot:
     """某个决策点的**可见**状态。"""
 
     acting: str
+    me: str
+    """这份局面的视角属于谁 —— ``my_hand`` 就是他的牌。判定对手时要用到。"""
+
     my_hand: tuple[str, ...]
     pool: tuple[str, ...]
     """未现身的牌 —— 另两家手牌的并集。公开可推导：全牌 − 我方手牌 − 已出的牌。"""
@@ -109,6 +112,7 @@ def derive(record: MatchRecord, steps: tuple[Step, ...] | None = None) -> Snapsh
 
     return Snapshot(
         acting=_acting_player(steps),
+        me=record.me,
         my_hand=tuple(my_hand),
         pool=tuple(sorted(c for c, n in pool.items() for _ in range(n))),
         played_cards={p: tuple(v) for p, v in played.items()},
