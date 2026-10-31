@@ -98,15 +98,26 @@ def _cmd_undo(args: argparse.Namespace) -> int:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
-    """看当前局面。"""
+    """看局面。带 --step N 就直接跳回第 N 个决策点（0 = 开局）。"""
     record = load(args.infile)
+
+    if args.step is not None:
+        if not 0 <= args.step <= len(record.steps):
+            print(f"步号要在 0 到 {len(record.steps)} 之间，收到 {args.step}", file=sys.stderr)
+            return 2
+        # 截断到该步：回放与"跳过去"是同一件事
+        record = manual.truncate(record, args.step)
+
     snapshot = derive(record)
 
-    print(f"记录 {record.record_id}（{record.source}）  我方 {record.me}")
+    where = "开局" if not record.steps else f"第 {len(record.steps)} 手之后"
+    print(f"记录 {record.record_id}（{record.source}）  我方 {record.me}  【{where}】")
     print(f"我方手牌 {len(snapshot.my_hand)} 张：{''.join(snapshot.my_hand)}")
     print(f"牌池 {len(snapshot.pool)} 张（另两家手牌并集，公开可推导）")
     print("各家剩余：" + "  ".join(f"{p}={n}" for p, n in snapshot.num_cards_left.items()))
-    print(f"已录 {len(record.steps)} 手，现在该 {snapshot.acting} 行动")
+    print("各家已出：" + "  ".join(
+        f"{p}={''.join(cards) or '—'}" for p, cards in snapshot.played_cards.items()))
+    print(f"现在该 {snapshot.acting} 行动")
     if snapshot.last_move:
         print(f"上一手：{''.join(snapshot.last_move)}")
     else:
@@ -182,6 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("show", help="看当前局面")
     show.add_argument("--in", dest="infile", type=Path, required=True)
+    show.add_argument("--step", type=int, default=None,
+                      help="跳到第 N 个决策点（0 = 开局，缺省 = 当前）")
     show.add_argument("--suggest", action="store_true")
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)

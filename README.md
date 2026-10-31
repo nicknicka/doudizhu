@@ -61,7 +61,7 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`153 passed`（未下载权重时相关用例会跳过）。
+预期结果：`181 passed`（未下载权重时相关用例会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
 
@@ -95,6 +95,9 @@ ddz play --in game.json --out game.json --player landlord_down --pass
 # 3. 录错了撤掉最后一手；也可以截断到第 N 手从那儿继续
 ddz undo --in game.json --out game.json
 ddz show --in game.json --suggest
+
+# 4. 回放：只凭记录文件跳回任意一个决策点（0 = 开局）
+ddz show --in game.json --step 0
 ```
 
 每一步都校验：轮次对不对、牌型认不认得、牌有没有出过、压不压得住。录不进去就直接报错，
