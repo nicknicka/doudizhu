@@ -7,6 +7,7 @@
 <link rel="icon" href="data:,">
 <script src="vendor/gsap.min.js"></script>
 <style>
+  /* 配色 / 字体来自 web/tokens.json，后端渲染时注入 */
   @font-face{
     font-family:Pixel;
     src:url(vendor/fusion-pixel-zh-hans.woff2) format("woff2");
@@ -24,26 +25,32 @@
        font-family:var(--display);font-size:12px;line-height:1.75;
        background-image:repeating-linear-gradient(0deg,
          color-mix(in srgb,var(--ink) 2.5%,transparent) 0 1px, transparent 1px 4px)}
-  .page{max-width:1040px;margin:0 auto;padding:72px 40px 96px}
-  .cols{display:grid;grid-template-columns:1fr 268px;gap:64px;align-items:start}
-  .cols[data-side="left"]{grid-template-columns:268px 1fr}
+  .page{max-width:1080px;margin:0 auto;padding:64px 40px 96px}
+  .cols{display:grid;grid-template-columns:1fr 288px;gap:56px;align-items:start}
+  .cols[data-side="left"]{grid-template-columns:288px 1fr}
   .cols[data-side="left"] > aside{order:-1}
 
-  header{margin-bottom:40px;padding-bottom:20px;border-bottom:var(--px) solid var(--ink)}
+  header{margin-bottom:32px;padding-bottom:18px;border-bottom:var(--px) solid var(--ink)}
   h1{margin:0;font-size:24px;font-weight:400;line-height:1.2}
   h1::before{content:"◆ ";color:var(--accent)}
   .who{font-size:12px;color:var(--muted);margin-top:8px}
-  .tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px;font-size:12px;
-         color:var(--muted)}
-  .tools .file{display:inline-flex;align-items:center;cursor:pointer;padding:3px 10px;
-    color:var(--ink);background:var(--ground);border:var(--px) solid var(--ink);
-    box-shadow:2px 2px 0 var(--ink);transition:none}
-  .tools .file:hover{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
-  .tools .file:active{transform:translate(2px,2px);box-shadow:none}
-  .tools .file input{display:none}
+  .tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px;font-size:12px}
+  .tools span.sep{color:var(--muted);margin:0 2px}
+  .tools .note{color:var(--muted)}
+
+  button,.file{font:inherit;font-size:12px;cursor:pointer;padding:3px 12px;
+    color:var(--ink);background:var(--ground);
+    border:var(--px) solid var(--ink);border-radius:0;box-shadow:2px 2px 0 var(--ink)}
+  button:hover:enabled,.file:hover{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
+  button:active:enabled,.file:active{transform:translate(2px,2px);box-shadow:none}
+  button:disabled{opacity:.35;cursor:default;box-shadow:none}
+  button.go{background:var(--accent);color:var(--ground)}
+  button.go:hover:enabled{color:var(--ground);opacity:.9}
+  .file{display:inline-flex;align-items:center}
+  .file input{display:none}
   body.dragging .page{outline:var(--px) dashed var(--accent);outline-offset:-20px}
 
-  .banner{margin:0 0 32px;padding:8px 12px;font-size:12px;
+  .banner{margin:0 0 28px;padding:8px 12px;font-size:12px;
           border:var(--px) solid var(--ink);border-left-width:8px;
           border-left-color:var(--muted);color:var(--muted);background:var(--ground)}
   .banner[data-kind="error"]{border-left-color:var(--accent);color:var(--accent)}
@@ -51,79 +58,100 @@
   @keyframes flash{0%{background:color-mix(in srgb,var(--accent) 22%,var(--ground))}
                    100%{background:var(--ground)}}
 
-  .entry{margin:0 0 40px;padding:12px 16px;font-size:12px;
-         border:var(--px) solid var(--ink);box-shadow:var(--shadow);background:var(--ground)}
-  .entry .row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 0}
-  .entry .row + .row{margin-top:6px;padding-top:10px;
-                     border-top:var(--px) dashed color-mix(in srgb,var(--ink) 22%,transparent)}
-  .entry .k{width:48px;color:var(--muted)}
-  .entry .who-inline{color:var(--accent)}
-  .entry input,.entry select{font:inherit;font-size:12px;font-family:var(--data);color:var(--ink);
-    background:var(--ground);padding:3px 8px;
-    border:var(--px) solid var(--ink);border-radius:0}
-  .entry input:focus,.entry select:focus{outline:var(--px) solid var(--accent);outline-offset:1px}
-  .entry button{font:inherit;font-size:12px;cursor:pointer;padding:3px 12px;
-    color:var(--ink);background:var(--ground);
-    border:var(--px) solid var(--ink);border-radius:0;box-shadow:2px 2px 0 var(--ink)}
-  .entry button:hover:enabled{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
-  .entry button:active:enabled{transform:translate(2px,2px);box-shadow:none}
-  .entry button:disabled{opacity:.35;cursor:default;box-shadow:none}
-  .entry .go{background:var(--accent);color:var(--ground);border-color:var(--ink)}
-
-  .state{display:flex;flex-wrap:wrap;gap:24px 40px;margin-bottom:40px}
-  .state div{line-height:1.2}
-  .state .n{font-size:24px;white-space:nowrap}
-  .state .k{font-size:12px;color:var(--muted);margin-top:6px}
-
-  h2{font-size:12px;font-weight:400;color:var(--muted);margin:0 0 12px;text-transform:uppercase}
-  .steps{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .steps button{font:inherit;font-size:12px;cursor:pointer;padding:3px 8px;
-    color:var(--ink);background:var(--ground);
-    border:var(--px) solid var(--ink);box-shadow:2px 2px 0 var(--ink)}
-  .steps button:hover{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
-  .steps button:active{transform:translate(2px,2px);box-shadow:none}
+  /* ---------- 牌桌：三家一屏 ---------- */
+  .board{border:var(--px) solid var(--ink);box-shadow:var(--shadow);
+         background:color-mix(in srgb,var(--ink) 5%,var(--ground));
+         padding:16px;margin-bottom:28px}
+  .seat{border:var(--px) solid color-mix(in srgb,var(--ink) 45%,transparent);
+        padding:8px 10px;background:var(--ground);min-height:64px}
+  .seat.is-me{border-color:var(--accent)}
+  .seat.is-acting{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+  .seat-head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+  .seat-head b{font-weight:400;font-size:12px}
+  .seat-head em{font-style:normal;font-size:12px;color:var(--ground);background:var(--accent);
+                padding:0 4px}
+  .seat-head .cnt{margin-left:auto;font-size:12px}
+  .seat-head .turn-flag{font-size:12px;color:var(--accent)}
+  .seat-hand{display:flex;flex-wrap:wrap;gap:2px;min-height:30px;align-items:flex-start}
+  .seat-played{font-size:12px;color:var(--muted);margin-top:6px}
+  .seat-bet{font-size:12px;color:var(--ink);margin-top:6px}
+  .seat-bet.is-none{color:var(--muted)}
+  .seat-bet.is-win{color:var(--accent)}
+  /* 牌面与牌背 */
+  i.c{display:inline-grid;place-items:center;min-width:24px;height:30px;font-style:normal;
+      padding:0 2px;
+      font-size:12px;color:var(--ink);background:var(--ground);
+      border:var(--px) solid var(--ink)}
+  i.bk{display:inline-block;width:9px;height:26px;
+        background:repeating-linear-gradient(45deg,var(--side-a) 0 2px,
+                  color-mix(in srgb,var(--side-a) 45%,var(--ground)) 2px 4px);
+        border:1px solid var(--ink)}
+  i.more{font-style:normal;font-size:12px;color:var(--muted);align-self:center;margin-left:4px}
+  .board-mid{margin:10px 0;padding:8px 0;text-align:center;
+             border-top:var(--px) dashed color-mix(in srgb,var(--ink) 35%,transparent);
+             border-bottom:var(--px) dashed color-mix(in srgb,var(--ink) 35%,transparent)}
+  .board-mid .trick{display:flex;align-items:center;justify-content:center;gap:8px}
+  .board-mid .lbl{color:var(--muted)}
+  .board-mid .turn{font-size:12px;color:var(--accent);margin-top:4px}
+  .board-mid .turn.none{color:var(--muted)}
+  .seat-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .replay{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .replay .lbl{font-size:12px;color:var(--muted)}
+  .steps{display:flex;flex-wrap:wrap;gap:4px}
+  .steps button{padding:2px 8px;box-shadow:none}
   .steps button[aria-current="true"]{background:var(--accent);color:var(--ground)}
-  .nav-hint{margin:0 0 40px;font-size:12px;color:var(--muted)}
-  .nav-hint b{font-weight:400;color:var(--ink)}
 
-  ul.bets{list-style:none;margin:0;padding:0}
-  ul.bets li{position:relative;display:grid;grid-template-columns:1fr auto;
-             align-items:baseline;padding:14px 0;
-             border-bottom:var(--px) solid color-mix(in srgb,var(--ink) 25%,transparent)}
-  ul.bets li:last-child{border-bottom:0}
-  ul.bets .play{font-size:24px;line-height:1.3}
-  ul.bets .play.pass{color:var(--muted)}
-  ul.bets .sc{font-size:12px;color:var(--muted)}
-  ul.bets li[aria-current="true"]{padding-left:16px}
-  ul.bets li[aria-current="true"] .play{color:var(--accent)}
-  ul.bets li[aria-current="true"] .sc{color:var(--accent)}
-  ul.bets li[aria-current="true"]::before{content:"";position:absolute;left:0;top:14px;bottom:14px;
-    width:6px;background:var(--accent);animation:breathe 2.4s steps(2,end) infinite}
-  @keyframes breathe{0%,100%{opacity:1}50%{opacity:.3}}
+  /* ---------- 牌盘输入 ---------- */
+  .pad{border:var(--px) solid var(--ink);box-shadow:var(--shadow);
+       background:var(--ground);padding:12px 16px;margin-bottom:28px}
+  .pad-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .pad-head .k{color:var(--muted);width:48px}
+  .pad-head .count{color:var(--muted);margin-left:auto}
+  .pad-head select{font:inherit;font-size:12px;color:var(--ink);background:var(--ground);
+                   padding:3px 8px;border:var(--px) solid var(--ink);border-radius:0}
+  .seg-group{display:inline-flex}
+  .seg-group button{border-right-width:0}
+  .seg-group button:last-child{border-right-width:var(--px)}
+  .seg.is-on{background:var(--ink);color:var(--ground)}
+  .seg.is-on:hover:enabled{color:var(--ground);background:var(--ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:10px;min-height:32px}
+  .chips.alt{margin-top:6px}
+  .chips .empty{color:var(--muted)}
+  .keypad{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px;
+          border-top:var(--px) dashed color-mix(in srgb,var(--ink) 35%,transparent);padding-top:10px}
+  .keypad button{position:relative;min-width:40px;padding:3px 6px;box-shadow:none}
+  .keypad button.has{background:var(--ink);color:var(--ground)}
+  .keypad button em{font-style:normal;color:var(--accent);font-size:12px;margin-left:3px}
+  .keypad button.has em{color:var(--ground)}
+  .picks{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .picks button{box-shadow:none;display:inline-flex;gap:8px;align-items:baseline}
+  .picks button .sc{color:var(--muted)}
+  .picks button:first-child{border-color:var(--accent)}
+  .picks button:first-child .sc{color:var(--accent)}
+  .hint{margin:8px 0 0;font-size:12px;color:var(--muted)}
+  .hint.warn{color:var(--accent)}
 
-  aside{position:sticky;top:72px}
-  .cloud{position:relative;margin-bottom:28px}
+  h2{font-size:12px;font-weight:400;color:var(--muted);margin:0 0 10px;text-transform:uppercase}
+  .cloud{margin-bottom:8px}
+  canvas{display:block;width:100%;height:224px;cursor:crosshair;
+         border:var(--px) solid var(--ink);background:var(--ground);image-rendering:pixelated}
   .cloud.is-empty canvas{opacity:.3}
   .cloud.is-empty::before{content:"轮到你时，这里会出现粒子云";
-    position:absolute;left:0;right:0;top:0;height:192px;display:grid;place-items:center;
+    position:absolute;left:0;right:0;top:0;height:224px;display:grid;place-items:center;
     font-size:12px;color:var(--muted);pointer-events:none}
-  canvas{display:block;width:100%;height:192px;cursor:crosshair;
-         border:var(--px) solid var(--ink);background:var(--ground);image-rendering:pixelated}
-  .keys{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
-  .keys i{display:inline-block;width:8px;height:8px;margin-right:5px}
-  .side-h{font-size:12px;font-weight:400;color:var(--muted);
-          margin:0 0 10px;text-transform:uppercase}
-  .plist{list-style:none;margin:0 0 28px;padding:0;font-size:12px;
-         max-height:280px;overflow-y:auto}
-  .plist li{display:grid;grid-template-columns:20px 1fr 1fr;gap:8px;align-items:baseline;
-            padding:4px 8px;margin:0 -8px;color:var(--muted)}
-  .plist li.head{padding:0 8px 4px;color:var(--muted);position:sticky;top:0;
-                 background:var(--ground);border-bottom:var(--px) solid var(--ink)}
-  .plist li[data-card]{cursor:pointer}
-  .plist li[data-card]:hover{background:color-mix(in srgb,var(--ink) 8%,var(--ground))}
+  .cloud{position:relative}
+  .keys{display:flex;gap:14px;font-size:12px;color:var(--muted);margin:8px 0 28px}
+  .keys i{display:inline-block;width:9px;height:9px;margin-right:5px}
+
+  .plist-wrap{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+  .plist{list-style:none;margin:0;padding:0;font-size:12px}
+  .plist li{display:grid;grid-template-columns:22px 1fr 1fr;gap:8px;align-items:baseline;
+            padding:5px 6px;color:var(--muted);cursor:pointer;
+            border-bottom:1px solid color-mix(in srgb,var(--ink) 15%,transparent)}
+  .plist li.head{cursor:default;color:var(--muted);border-bottom:var(--px) solid var(--ink)}
   .plist li.is-focus{background:color-mix(in srgb,var(--accent) 20%,var(--ground));
                      outline:var(--px) solid var(--ink)}
-  .plist .c{color:var(--ink);font-size:24px;line-height:1.2}
+  .plist .c{color:var(--ink);font-size:16px;font-style:normal}
   .plist .p{text-align:right}
   .plist .p b{font-weight:400;color:var(--ink)}
   .plist .p small{display:block;font-size:12px}
@@ -131,8 +159,7 @@
   .plist .p.b small{color:var(--side-b)}
 
   .calib{width:100%;border-collapse:collapse;font-size:12px;color:var(--muted)}
-  .calib th{font-weight:400;text-align:right;padding:0 0 6px;
-            border-bottom:var(--px) solid var(--ink)}
+  .calib th{font-weight:400;text-align:right;padding:0 0 6px;border-bottom:var(--px) solid var(--ink)}
   .calib th:first-child{text-align:left}
   .calib td{text-align:right;padding:4px 0;
             border-top:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
@@ -144,19 +171,15 @@
   footer .k{font-size:12px;color:var(--muted)}
   footer .v{font-size:24px;line-height:1.3;margin-top:4px}
   footer .v small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
-
-  .caveat{margin:16px 0 0;font-size:12px;color:var(--muted)}
+  .caveat{margin:12px 0 0;font-size:12px;color:var(--muted)}
   @media (max-width:820px){
-    .page{padding:48px 20px 72px}
-    .cols,.cols[data-side="left"]{grid-template-columns:1fr;gap:40px}
+    .page{padding:40px 18px 64px}
+    .cols,.cols[data-side="left"]{grid-template-columns:1fr;gap:36px}
     .cols[data-side="left"] > aside{order:0}
-    aside{position:static}
-    .state{gap:20px 28px}
-    h1{font-size:24px}
+    .seat-row{grid-template-columns:1fr}
+    .plist{grid-template-columns:1fr}
   }
-  @media (prefers-reduced-motion: reduce){
-    *{animation:none!important;transition:none!important}
-  }
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
@@ -165,62 +188,72 @@
     <h1>斗地主决策助手</h1>
     <div class="who" id="who"></div>
     <div class="tools">
-      <label class="file" for="file">打开我的记录
-        <input type="file" id="file" accept="application/json,.json">
-      </label>
-      <span>用 <code>ddz new</code> / <code>ddz play</code> 录一局，把 JSON 选进来（也可以直接拖到页面上）</span>
+      <label class="file" for="file">打开记录<input type="file" id="file" accept="application/json,.json"></label>
+      <button type="button" id="new-toggle">开新局</button>
+      <button type="button" id="undo">撤销</button>
+      <button type="button" id="export">导出</button>
+      <span class="note" id="tool-note"></span>
     </div>
   </header>
 
   <div class="banner" id="banner">正在向后端取数…</div>
 
-  <section class="entry" id="entry">
-    <div class="row">
+  <section class="pad" id="pad-new" hidden>
+    <div class="pad-head">
       <span class="k">开局</span>
       <select id="new-me">
         <option value="landlord">地主</option>
         <option value="landlord_down">下家</option>
         <option value="landlord_up" selected>上家</option>
       </select>
-      <input id="new-hand" size="26" placeholder="我方手牌，如 34556789TTJJKK222">
-      <input id="new-cards" size="8" placeholder="三张底牌，如 792">
-      <button class="go" id="new-go" type="button">开局</button>
+      <span class="seg-group">
+        <button class="seg is-on" type="button" id="tgt-hand">手牌</button>
+        <button class="seg" type="button" id="tgt-cards">底牌</button>
+      </span>
+      <span class="count" id="new-count"></span>
+      <button class="go" type="button" id="new-go">开局</button>
+      <button type="button" id="new-clear">清空</button>
     </div>
-    <div class="row">
+    <div class="chips" id="new-chips"></div>
+    <div class="keypad" id="new-keys"></div>
+    <p class="hint" id="new-hint"></p>
+  </section>
+
+  <section class="board" id="board"></section>
+
+  <section class="pad" id="pad-play">
+    <div class="pad-head">
       <span class="k">录一手</span>
-      <span class="who-inline" id="play-who"></span>
-      <input id="play-cards" size="16" placeholder="出的牌，如 33">
-      <button class="go" id="play-go" type="button">出牌</button>
-      <button id="play-pass" type="button">不要</button>
-      <button id="undo" type="button">撤销</button>
-      <button id="export" type="button">导出 JSON</button>
+      <span id="play-who"></span>
+      <span class="count" id="play-count"></span>
+      <button type="button" id="play-latest" hidden>→ 回到最新</button>
+      <button class="go" type="button" id="play-go">出牌</button>
+      <button type="button" id="play-pass">不要</button>
+      <button type="button" id="play-clear">清空</button>
     </div>
+    <div class="chips" id="play-chips"></div>
+    <div class="keypad" id="play-keys"></div>
+    <div class="picks" id="play-picks"></div>
+    <p class="hint" id="play-hint"></p>
   </section>
 
   <div class="cols" id="cols">
     <main>
-      <div class="state" id="state"></div>
-      <div class="steps" id="steps"></div>
-      <p class="nav-hint"><b>← →</b> 切换决策点 · 悬停粒子云看某张牌 · <b>点击 / 回车</b>钉住</p>
-
-      <h2>候选</h2>
-      <ul class="bets" id="bets"></ul>
-      <p class="caveat" id="disclaimer"></p>
-    </main>
-
-    <aside>
+      <h2>粒子分布 · 每个粒子是一种可能的分配</h2>
       <div class="cloud">
         <canvas id="cloud"></canvas>
-        <div class="keys">
-          <span><i id="ka" style="background:var(--side-a)"></i><span id="la"></span></span>
-          <span><i id="kb" style="background:var(--side-b)"></i><span id="lb"></span></span>
-        </div>
       </div>
-      <h2 class="side-h">某张牌在谁手上</h2>
-      <ul class="plist" id="plist"></ul>
-      <h2 class="side-h">校准 · 估计值 vs 实际胜率</h2>
-      <p class="caveat" id="calib-src"></p>
+      <div class="keys">
+        <span><i id="ka" style="background:var(--side-a)"></i><span id="la"></span></span>
+        <span><i id="kb" style="background:var(--side-b)"></i><span id="lb"></span></span>
+      </div>
+      <h2>某张牌在谁手上</h2>
+      <div class="plist-wrap" id="plist"></div>
+    </main>
+    <aside>
+      <h2>校准 · 估计值 vs 实际胜率</h2>
       <table class="calib" id="calib"></table>
+      <p class="caveat" id="calib-src"></p>
       <p class="caveat" id="calib-caveat"></p>
     </aside>
   </div>
@@ -229,29 +262,34 @@
 </div>
 
 <script>
-const RANK = '3456789TJQKA2BR';
-const ROWS = 64;              // 目标行数：少画一点、格子大一点才像像素
+const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2','B','R'];
+const NAME = {3:'3',4:'4',5:'5',6:'6',7:'7',8:'8',9:'9',T:'10',J:'J',Q:'Q',K:'K',A:'A',2:'2',B:'小王',R:'大王'};
+const ROWS = 64;
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = id => document.getElementById(id);
 const short = {landlord:'地主', landlord_down:'下家', landlord_up:'上家'};
 const label = o => short[o] || o;
+const ORDER = ['landlord','landlord_down','landlord_up'];
 
 /* 后端取来的状态。页面自己不算任何业务数字。 */
-const S = {record: null, meta: null, snap: null, point: null,
-           metrics: null, calibration: null, caveat: '', pinned: null, busy: false};
+const S = {record:null, meta:null, snap:null, point:null, metrics:null,
+           calibration:null, caveat:'', pinned:null, busy:false};
+const SEL = {hand:[], cards:[], play:[]};     // 开局：手牌 / 底牌；录一手：本手
+let target = 'hand';                          // 开局时点牌往哪儿加
+const NEED = {landlord:20, landlord_down:17, landlord_up:17};
 
 const cv = $('cloud'), cx = cv.getContext('2d');
 let order = [], grid = [], hoverCard = null;
 let rowStride = 1, rowCount = 0, currentFocus = null;
-const FX = {reveal: 1};        // 0→1 的扫描式入场
-const countIn = (a, c) => a.filter(x => x === c).length;
+const FX = {reveal:1};
+const countIn = (a,c) => a.filter(x => x === c).length;
 
-/* ---------- 粒子云：每个粒子是一次完整分配 ---------- */
+/* ================= 粒子云 ================= */
 function buildCloud(){
   const p = S.point;
-  if (!p){ order = []; grid = []; return; }
+  if (!p){ order = []; grid = []; rowCount = 0; return; }
   order = [];
-  for (const r of RANK){
+  for (const r of RANKS){
     const n = Math.max(0, ...p.particles.map(([a,b]) => countIn(a,r) + countIn(b,r)));
     for (let i=0;i<n;i++) order.push(r);
   }
@@ -270,14 +308,11 @@ function buildCloud(){
   rowStride = Math.max(1, Math.ceil(grid.length / ROWS));
   rowCount = Math.ceil(grid.length / rowStride);
 }
-
 function sizeCanvas(){
   const r = devicePixelRatio || 1;
   cv.width = cv.clientWidth * r; cv.height = cv.clientHeight * r;
   cx.setTransform(r,0,0,r,0,0);
 }
-
-/* focus = 牌面字符；非空时只让这张牌的列全亮，其余压暗 */
 function draw(focus){
   if (!order.length || !rowCount) return;
   const w = cv.clientWidth / order.length, h = cv.clientHeight / rowCount;
@@ -290,88 +325,115 @@ function draw(focus){
     for (let c=0;c<order.length;c++){
       cx.globalAlpha = (focus && order[c] !== focus) ? .12 : 1;
       cx.fillStyle = row[c]===1 ? A : row[c]===2 ? B : 'transparent';
-      // 留 1px 缝：格子分得开，才像像素而不是色块
       if (row[c]) cx.fillRect(c*w, y, Math.max(w-1,1), Math.max(h-1,1));
     }
   }
   cx.globalAlpha = 1;
 }
 
-/* ---------- 渲染 ---------- */
-function renderState(){
-  const v = S.snap;
-  const played = Object.values(v.played).map(x=>x.join('')).filter(Boolean).join(' ');
-  const rest = Object.entries(v.remaining).map(([k,n])=>`${label(k)} ${n}`).join(' · ');
-  $('state').innerHTML = [
-    ['剩余', rest, 'hi'],
-    ['已出', played || '—', ''],
-    ['上一手', v.last_move.length ? v.last_move.join('') : '—', ''],
-  ].map(([k,val,cls])=>`<div><div class="n ${cls}">${val}</div><div class="k">${k}</div></div>`).join('');
+/* ================= 牌桌 ================= */
+// 牌面上位置窄，"小王/大王"会撑破卡片，缩成"小/大"
+const SHORT = {B:'小', R:'大'};
+function card(c){ return `<i class="c">${SHORT[c] || NAME[c] || c}</i>`; }
+function back(){ return '<i class="bk"></i>'; }
+
+function seat(player){
+  const v = S.snap, isMe = player === S.meta.me;   // snapshot 里没有 me，我方在 meta 上
+  const remaining = v.remaining[player];
+  const played = v.played[player] || [];
+  const acting = v.acting === player;
+  let hand;
+  if (isMe){
+    hand = (v.my_hand || []).map(card).join('');
+  } else {
+    const shown = Math.min(remaining, 14);
+    hand = back().repeat(shown) + (remaining > shown ? `<i class="more">+${remaining-shown}</i>` : '');
+  }
+  return `<div class="seat${isMe?' is-me':''}${acting?' is-acting':''}">
+    <div class="seat-head"><b>${label(player)}</b>${isMe?'<em>我</em>':''}
+      ${acting?'<span class="turn-flag">▶ 该他出</span>':''}
+      <span class="cnt">${remaining} 张</span></div>
+    <div class="seat-hand">${hand}</div>
+    <div class="seat-played">已出：${played.length ? played.map(x => NAME[x] || x).join(' ') : '—'}</div>
+  </div>`;
 }
 
+function renderBoard(){
+  const v = S.snap;
+  const trick = v.last_move.length
+    ? v.last_move.map(card).join('')
+    : '<span class="lbl">自由领出</span>';
+  const mine = v.acting === v.me;
+  $('board').innerHTML =
+    seat('landlord')
+    + `<div class="board-mid">
+         <div class="trick"><span class="lbl">上一手</span>${trick}</div>
+         <div class="turn${mine?'':' none'}">${mine ? '轮到你出牌' : `现在该 ${label(v.acting)} 出牌`}</div>
+       </div>`
+    + `<div class="seat-row">${seat('landlord_down')}${seat('landlord_up')}</div>`
+    + `<div class="replay"><span class="lbl">我方决策点</span>`
+    + `<div class="steps" id="steps">${(S.meta.my_steps || []).map(st =>
+        `<button type="button" data-step="${st}" aria-current="${st === v.step}">${st}</button>`
+      ).join('')}</div><span class="lbl">← → 切换</span></div>`;
+}
+
+/* ================= 牌盘 ================= */
+function keypad(host, sel){
+  host.innerHTML = RANKS.map(r => {
+    const n = countIn(sel, r);
+    return `<button type="button" data-key="${r}" class="${n?'has':''}">${NAME[r]}`
+         + (n ? `<em>${n}</em>` : '') + '</button>';
+  }).join('');
+}
+function chips(host, sel, emptyText){
+  host.innerHTML = sel.length
+    ? sel.map((c,i) => `<span data-drop="${i}">${card(c)}</span>`).join('')
+    : `<span class="empty">${emptyText}</span>`;
+}
+
+/* ================= 渲染 ================= */
 function renderWho(){
   const m = S.meta, v = S.snap;
-  const where = v.step === m.total_steps ? `第 ${v.step} 手（最新）` : `第 ${v.step} 手`;
-  $('who').textContent =
-    `${m.record_id} · ${m.source} · ${where} · 我方 ${label(m.me)} · 现在该 ${label(v.acting)} 行动`;
+  const latest = v.step === m.total_steps;
+  $('who').textContent = `${m.record_id} · ${m.source} · 第 ${v.step} 手`
+    + `${latest ? '（最新）' : `（历史，共 ${m.total_steps} 手）`} · 我方 ${label(m.me)}`;
+  $('tool-note').textContent = latest ? '' : '· 看历史局面时不能续录';
 }
 
-function renderSteps(){
-  const m = S.meta;
-  $('steps').innerHTML = m.my_steps
-    .map(s => `<button type="button" data-step="${s}" aria-current="${s===S.snap.step}">第 ${s} 手</button>`)
-    .join('');
-}
-
-function renderBets(){
-  if (!S.point){
-    $('bets').innerHTML = '';
-    $('disclaimer').textContent = '现在不是你出牌，先把对手这一手录进去。';
-    return;
-  }
+function renderCloudPanel(){
   const p = S.point;
-  $('bets').innerHTML = p.candidates.map((c,i)=>
-    `<li${i===0?' aria-current="true"':''}>
-       <span class="play${c.label==='不出'?' pass':''}">${c.label}</span>
-       <span class="sc">${c.score>0?'+':''}${c.score.toFixed(3)}</span>
-     </li>`).join('');
-  $('disclaimer').textContent = p.disclaimer;
-}
-
-function renderPlist(){
-  const p = S.point;
-  if (!p){
-    $('plist').innerHTML = '';
-    $('la').textContent = ''; $('lb').textContent = '';
-    $('cloud').classList.add('is-empty');
-    return;
-  }
-  $('cloud').classList.remove('is-empty');
+  $('cloud').classList.toggle('is-empty', !p);
+  if (!p){ $('la').textContent = ''; $('lb').textContent = ''; return; }
   $('la').textContent = p.opponents[0]; $('lb').textContent = p.opponents[1];
   const head = '<li class="head"><span></span>'
     + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
-  $('plist').innerHTML = head + p.cards.map(r =>
-    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${r.card} 在谁手上">`
-    + `<span class="c">${r.card}</span>`
+  const rows = list => head + list.map(r =>
+    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${NAME[r.card]} 在谁手上">`
+    + `<span class="c">${NAME[r.card]}</span>`
     + p.opponents.map((o,i)=>{
         const v = r.by[o];
         return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
              + `<small>${v.expected.toFixed(2)} 张</small></span>`;
       }).join('') + '</li>').join('');
+  // 分两栏，每栏各带一次表头 —— 否则读者不知道哪一列是哪一家
+  const half = Math.ceil(p.cards.length / 2);
+  $('plist').innerHTML =
+    `<ul class="plist">${rows(p.cards.slice(0, half))}</ul>`
+    + `<ul class="plist">${rows(p.cards.slice(half))}</ul>`;
 }
 
 function renderCalib(){
   const c = S.calibration;
   if (!c){ $('calib').innerHTML = ''; $('calib-src').textContent = ''; $('calib-caveat').textContent = ''; return; }
   $('calib').innerHTML =
-    '<tr><th>估计区间</th><th>样本</th><th>平均估计</th><th>实际</th></tr>'
+    '<tr><th>估计区间</th><th>样本</th><th>平均</th><th>实际</th></tr>'
     + c.buckets.map(b=>
         `<tr><td>${b.low.toFixed(2)}~${b.high.toFixed(2)}</td><td>${b.n}</td>`
         + `<td>${b.mean_estimate.toFixed(3)}</td><td>${b.actual_rate.toFixed(3)}</td></tr>`
       ).join('')
     + `<tr><td>合计</td><td>${c.n_samples}</td>`
     + `<td>${c.mean_estimate.toFixed(3)}</td><td>${c.actual_rate.toFixed(3)}</td></tr>`;
-  $('calib-src').textContent = '以上来自演示数据集（8 局仿真），与当前打开的记录无关。';
+  $('calib-src').textContent = '演示数据集（8 局仿真），与当前记录无关。';
   $('calib-caveat').textContent = S.caveat;
 }
 
@@ -387,38 +449,86 @@ function renderFoot(){
     '<div class="k" style="align-self:center">演示数据集<br>（10 局仿真）</div>');
 }
 
-function renderEntry(){
-  const acting = S.snap ? S.snap.acting : null;
-  $('play-who').textContent = acting ? `现在该 ${label(acting)} 出牌` : '';
-  const ready = !!S.record;
-  for (const id of ['play-cards','play-go','play-pass']) $(id).disabled = !ready;
-  $('undo').disabled = !ready || S.record.steps.length === 0;
-  $('export').disabled = !ready;
+function renderNew(){
+  const need = NEED[$('new-me').value];
+  $('new-count').textContent = `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
+  // 手牌与底牌放在同一行，靠 zone 区分归属；点一张拿掉一张
+  $('new-chips').innerHTML =
+    (SEL.hand.length
+      ? SEL.hand.map((c,i)=>`<span data-zone="hand" data-drop="${i}">${card(c)}</span>`).join('')
+      : '<span class="empty">手牌还没选</span>')
+    + `<span class="empty" style="margin:0 10px">│</span>`
+    + (SEL.cards.length
+      ? SEL.cards.map((c,i)=>`<span data-zone="cards" data-drop="${i}">${card(c)}</span>`).join('')
+      : '<span class="empty">底牌还没选</span>');
+  keypad($('new-keys'), SEL.hand.concat(SEL.cards));
+  $('tgt-hand').classList.toggle('is-on', target === 'hand');
+  $('tgt-cards').classList.toggle('is-on', target === 'cards');
+  const ok = SEL.hand.length === need && SEL.cards.length === 3;
+  $('new-go').disabled = !ok;
+  $('new-hint').className = 'hint' + (ok ? '' : ' warn');
+  $('new-hint').textContent = ok
+    ? '可以开局了。'
+    : `点下面的牌加进「${target === 'hand' ? '手牌' : '底牌'}」；点上面的牌可以拿掉。`;
+}
+
+function renderPlay(){
+  const v = S.snap, m = S.meta;
+  const latest = v.step === m.total_steps;
+  const mine = v.acting === v.me;
+  $('play-who').textContent = `现在该 ${label(v.acting)} 出牌`;
+  $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
+  chips($('play-chips'), SEL.play, '点下面的牌组成这一手；不要的话直接按「不要」');
+  keypad($('play-keys'), SEL.play);
+  $('play-go').disabled = !latest || !SEL.play.length;
+  $('play-pass').disabled = !latest;
+  $('play-clear').disabled = !latest || !SEL.play.length;
+
+  // 轮到我方、且看的是最新局面时，把模型排好序的合法动作变成"点一下就录"
+  const picks = (mine && latest && S.point) ? S.point.actions.slice(0, 8) : [];
+  $('play-picks').innerHTML = picks.map((a,i)=>
+    `<button type="button" data-pick="${i}"><span>${a.label}</span>` +
+    `<span class="sc">${a.score>0?'+':''}${a.score.toFixed(3)}</span></button>`).join('');
+  $('play-picks').dataset.json = JSON.stringify(picks);
+  $('play-picks').hidden = !picks.length;
+
+  $('play-latest').hidden = latest;
+  $('play-hint').className = 'hint';
+  if (!latest){
+    $('play-hint').textContent = '你在看历史局面 —— 回到最新那一手才能继续录。';
+    $('play-hint').className = 'hint warn';
+  } else if (mine && picks.length){
+    $('play-hint').textContent = '这些是模型给所有合法动作排的序（Q 值，不是胜率）。点一下就把这一手记下来，也可以自己在下面点牌。';
+  } else {
+    $('play-hint').textContent = `${label(v.acting)} 出的牌从下面点出来；他没有出就按「不要」。`;
+  }
 }
 
 function renderAll(){
   $('cols').dataset.side = '__SIDE__';
-  renderWho(); renderState(); renderSteps(); renderBets(); renderPlist();
-  renderCalib(); renderFoot(); renderEntry();
+  renderWho(); renderBoard(); renderNew(); renderPlay();
+  renderCloudPanel(); renderCalib(); renderFoot();
   buildCloud(); sizeCanvas();
   S.pinned = null; focus(null);
 }
 
-/* ---------- 交互 ---------- */
-function focus(card){
-  const active = card || S.pinned;
+/* ================= 交互 ================= */
+function focus(cardName){
+  const active = cardName || S.pinned;
   currentFocus = active;
   draw(active);
   document.querySelectorAll('#plist li[data-card]').forEach(li =>
     li.classList.toggle('is-focus', li.dataset.card === active));
 }
-
-function togglePin(card){
-  if (!card) return;
-  S.pinned = (S.pinned === card) ? null : card;
+function togglePin(cardName){
+  if (!cardName) return;
+  S.pinned = (S.pinned === cardName) ? null : cardName;
   focus(null);
 }
-
+$('board').addEventListener('click', e => {
+  const b = e.target.closest('button[data-step]');
+  if (b) refresh(Number(b.dataset.step));
+});
 $('plist').addEventListener('mouseover', e => {
   const li = e.target.closest('li[data-card]'); if (li) focus(li.dataset.card);
 });
@@ -431,7 +541,6 @@ $('plist').addEventListener('keydown', e => {
   const li = e.target.closest('li[data-card]'); if (!li) return;
   e.preventDefault(); togglePin(li.dataset.card);
 });
-
 cv.addEventListener('click', () => togglePin(hoverCard));
 cv.addEventListener('mousemove', e => {
   if (!order.length) return;
@@ -442,37 +551,30 @@ cv.addEventListener('mousemove', e => {
 });
 cv.addEventListener('mouseleave', () => { hoverCard = null; focus(null); });
 
-function step(delta){
+function stepTo(delta){
   if (S.busy || !S.meta) return;
   const list = S.meta.my_steps, i = list.indexOf(S.snap.step);
   const next = list[i + delta];
   if (next !== undefined) refresh(next);
 }
 addEventListener('keydown', e => {
-  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
-  if (typing) return;
-  if (e.key === 'ArrowLeft') step(-1);
-  else if (e.key === 'ArrowRight') step(1);
+  const t = document.activeElement.tagName;
+  if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+  if (e.key === 'ArrowLeft') stepTo(-1);
+  else if (e.key === 'ArrowRight') stepTo(1);
 });
 
-$('steps').addEventListener('click', e => {
-  const b = e.target.closest('button[data-step]');
-  if (b) refresh(Number(b.dataset.step));
-});
-
-/* ---------- 取数 ---------- */
+/* ================= 取数 ================= */
 function setBanner(text, kind){
   const b = $('banner');
   const changed = b.textContent !== (text || '');
   b.hidden = !text; b.textContent = text || ''; b.dataset.kind = kind || '';
-  // 变了就闪一下：反馈要看得见，而不是悄悄换行字
   if (changed && text && !reduce){
     b.classList.remove('flash');
-    void b.offsetWidth;          // 强制重排，动画才会重放
+    void b.offsetWidth;
     b.classList.add('flash');
   }
 }
-
 async function api(path, body){
   let res;
   try {
@@ -488,22 +590,20 @@ async function api(path, body){
   if (!res.ok) throw new Error((data && data.detail) || `后端返回 ${res.status}`);
   return data;
 }
-
 function idleNote(){
   if (!S.snap) return '';
   return S.point ? '' : `现在该 ${label(S.snap.acting)} 出牌 —— 还没轮到你，把这一手录进去。`;
 }
-
-/* 拉一次分析并渲染。返回是否成功，好让「载入失败就退回上一份」有依据。 */
-async function refresh(target, note){
+async function refresh(target_, note){
   if (S.busy || !S.record) return false;
   S.busy = true;
   setBanner('分析中…', '');
   let ok = false;
   try {
-    const view = await api('/api/analyze', {record: S.record, step: target ?? null});
+    const view = await api('/api/analyze', {record: S.record, step: target_ ?? null});
     S.meta = view; S.snap = view.snapshot; S.point = view.point;
-    if (!reduce) FX.reveal = 0;      // 先归零，接下来的扫描才有得扫
+    SEL.play = [];
+    if (!reduce) FX.reveal = 0;
     renderAll();
     setBanner(note || idleNote(), '');
     ok = true;
@@ -512,100 +612,128 @@ async function refresh(target, note){
   } finally {
     S.busy = false;
   }
-  // 动效刻意留在 try 之外：gsap 一旦加载不到，要作为 pageerror 冒出来，
-  // 而不是被当成"分析失败"吞进错误横幅里。
   if (ok && !reduce){
-    // 粒子云从下往上"扫"出来；步进缓动（steps）把像素感守住
     gsap.to(FX, {reveal:1, duration:.5, ease:"steps(7)", onUpdate:()=>draw(currentFocus)});
-    if ($('bets').children.length)
-      gsap.fromTo('#bets li', {y:8,opacity:0},
-        {y:0,opacity:1,duration:.4,stagger:.06,ease:"steps(4)"});
   } else {
     FX.reveal = 1; draw(currentFocus);
   }
   return ok;
 }
-
-/* 会改记录的三个动作：新开一局 / 录一手 / 撤销。改完统一重算。 */
 async function mutate(path, body, note){
   if (S.busy) return false;
   const previous = S.record;
   S.busy = true;
   setBanner('提交中…', '');
   try {
-    const res = await api(path, body);
-    S.record = res.record;
+    S.record = (await api(path, body)).record;
   } catch (err){
     S.busy = false;
     setBanner(err.message, 'error');
     return false;
   }
   S.busy = false;
-  const ok = await refresh(null, note);
+  // 录完一手要看"当前位置"，不是默认视图 —— 牌桌得跟着动
+  const ok = await refresh(S.record.steps.length, note);
   if (!ok) S.record = previous;
   return ok;
 }
-
 async function loadRecord(record, note){
   const previous = S.record;
   S.record = record;
   if (!(await refresh(null, note))) S.record = previous;
 }
-
 async function boot(){
   try {
     const d = await api('/api/demo');
     S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-    await loadRecord(d.record, '演示局：随机自对弈的一局仿真数据。也可以自己开局或打开记录。');
+    await loadRecord(d.record, '演示局：随机自对弈的一局。点「开新局」录自己的牌局，或「打开记录」。');
   } catch (err){
     setBanner(err.message, 'error');
   }
 }
 
-/* ---------- 录入 ---------- */
+/* ================= 开局 ================= */
+$('new-toggle').addEventListener('click', () => {
+  const el = $('pad-new');
+  el.hidden = !el.hidden;
+  if (!el.hidden) renderNew();
+});
+$('new-me').addEventListener('change', () => { SEL.hand = []; renderNew(); });
+$('tgt-hand').addEventListener('click', () => { target = 'hand'; renderNew(); });
+$('tgt-cards').addEventListener('click', () => { target = 'cards'; renderNew(); });
+$('new-clear').addEventListener('click', () => { SEL.hand = []; SEL.cards = []; target = 'hand'; renderNew(); });
+$('new-keys').addEventListener('click', e => {
+  const b = e.target.closest('button[data-key]'); if (!b) return;
+  const r = b.dataset.key;
+  const total = countIn(SEL.hand, r) + countIn(SEL.cards, r);
+  if (total >= 4) { setBanner(`${NAME[r]} 一副牌只有 4 张。`, 'error'); return; }
+  SEL[target].push(r);
+  // 手牌满了就自动把落点切到底牌，省一次点击
+  if (target === 'hand' && SEL.hand.length >= NEED[$('new-me').value]) target = 'cards';
+  renderNew();
+});
+$('new-chips').addEventListener('click', e => {
+  const s = e.target.closest('[data-drop]'); if (!s) return;
+  SEL[s.dataset.zone].splice(Number(s.dataset.drop), 1);
+  renderNew();
+});
 $('new-go').addEventListener('click', () => {
   const me = $('new-me').value;
-  const hand = $('new-hand').value.trim();
-  const cards = $('new-cards').value.trim();
-  if (!hand || !cards){ setBanner('手牌和三张底牌都要填。', 'error'); return; }
-  mutate('/api/game/new', {me, my_hand: hand, landlord_cards: cards},
-         `已开局：我方 ${label(me)}，手牌 ${hand.length} 张，底牌 ${cards}。`);
+  mutate('/api/game/new',
+         {me, my_hand: SEL.hand.join(''), landlord_cards: SEL.cards.join('')},
+         `已开局：我方 ${label(me)}。`)
+    .then(ok => { if (ok){ $('pad-new').hidden = true; SEL.hand = []; SEL.cards = []; } });
 });
 
-function recordStep(cards, shown){
-  const player = S.snap.acting;
-  return mutate('/api/game/step', {record: S.record, player, cards},
-                `已录：${label(player)} ${shown}。`);
-}
-$('play-go').addEventListener('click', async () => {
-  const cards = $('play-cards').value.trim();
-  if (!cards){ setBanner('要么填牌点「出牌」，要么点「不要」。', 'error'); return; }
-  // 只有录进去了才清空：被拒的话留着，让人直接改了再点，别逼着重打
-  if (await recordStep(cards, cards)) $('play-cards').value = '';
+/* ================= 录一手 ================= */
+$('play-keys').addEventListener('click', e => {
+  const b = e.target.closest('button[data-key]'); if (!b) return;
+  SEL.play.push(b.dataset.key); renderPlay();
 });
-$('play-go').disabled = true;
-$('play-pass').addEventListener('click', () => recordStep('', '不要'));
-$('undo').addEventListener('click', () => mutate('/api/game/undo', {record: S.record}, '已撤销最后一手。'));
+$('play-chips').addEventListener('click', e => {
+  const s = e.target.closest('[data-drop]'); if (!s) return;
+  SEL.play.splice(Number(s.dataset.drop), 1); renderPlay();
+});
+$('play-clear').addEventListener('click', () => { SEL.play = []; renderPlay(); });
+$('play-latest').addEventListener('click', () => refresh(S.meta.total_steps));
+$('play-go').addEventListener('click', async () => {
+  const player = S.snap.acting, cards = SEL.play.join('');
+  if (await mutate('/api/game/step', {record:S.record, player, cards},
+                   `已录：${label(player)} ${cards}。`)) SEL.play = [];
+});
+$('play-pass').addEventListener('click', async () => {
+  const player = S.snap.acting;
+  if (await mutate('/api/game/step', {record:S.record, player, cards:''},
+                   `已录：${label(player)} 不要。`)) SEL.play = [];
+});
+$('play-picks').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-pick]'); if (!b) return;
+  const a = JSON.parse($('play-picks').dataset.json || '[]')[Number(b.dataset.pick)];
+  if (!a) return;
+  const player = S.snap.acting;
+  if (await mutate('/api/game/step', {record:S.record, player, cards:a.cards.join('')},
+                   `已录：${label(player)} ${a.cards.length ? a.cards.join('') : '不要'}。`)) SEL.play = [];
+});
+
+/* ================= 工具 ================= */
+$('undo').addEventListener('click', () => mutate('/api/game/undo', {record:S.record}, '已撤销最后一手。'));
 $('export').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(S.record, null, 2) + '\n'], {type: 'application/json'});
+  const blob = new Blob([JSON.stringify(S.record, null, 2) + '\n'], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${S.record.record_id || 'record'}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 });
-
-/* ---------- 打开自己的记录 ---------- */
 async function readFile(file){
   if (!file) return;
   try {
-    const record = JSON.parse(await file.text());
-    await loadRecord(record, `已载入 ${file.name}（侧栏校准表与页脚指标仍来自演示数据集）`);
+    await loadRecord(JSON.parse(await file.text()),
+                     `已载入 ${file.name}（校准表与页脚指标仍来自演示数据集）`);
   } catch (err){
     setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
   }
 }
-// 立刻清空：否则改好同一个文件再选一次，change 不会再触发
 $('file').addEventListener('change', e => { readFile(e.target.files[0]); e.target.value = ''; });
 document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
 document.addEventListener('dragleave', () => document.body.classList.remove('dragging'));

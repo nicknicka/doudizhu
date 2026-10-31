@@ -52,6 +52,7 @@ def test_analyze_describes_the_snapshot():
     got = analyze(make_record(), FakePolicy())
     assert got["snapshot"]["step"] == 2, "默认应走到第一个轮到我方的决策点"
     assert got["snapshot"]["acting"] == "landlord_up" == got["me"]
+    assert got["snapshot"]["me"] == "landlord_up", "快照要带上「我方是谁」，页面靠它分席位"
     assert got["snapshot"]["remaining"] == {"landlord": 18, "landlord_down": 17, "landlord_up": 17}
     assert got["snapshot"]["last_move"] == ["9", "9"]
     assert got["point"]["opponents"] == ["landlord", "landlord_down"]
@@ -77,9 +78,12 @@ def test_analyze_card_probabilities_are_conserved():
     assert abs(total - got["snapshot"]["pool_size"]) < 0.5, f"期望张数加总 {total} 对不上牌池"
 
 
-def test_analyze_refuses_a_step_where_it_is_not_my_turn():
-    with pytest.raises(ValueError, match="不是我方"):
-        analyze(make_record(), FakePolicy(), step=1)
+def test_analyze_shows_a_position_that_is_not_my_turn_without_a_point():
+    """看历史局面（这儿是第 1 手，该下家）也得能显示牌桌 —— 只是没有候选。"""
+    got = analyze(make_record(), FakePolicy(), step=1)
+    assert got["snapshot"]["step"] == 1
+    assert got["snapshot"]["acting"] == "landlord_down"
+    assert got["point"] is None
 
 
 def test_analyze_refuses_a_step_out_of_range():
@@ -260,3 +264,16 @@ def test_analyze_before_my_turn_gives_the_position_without_a_point():
     assert got["current_acting"] == "landlord"
     assert got["snapshot"]["step"] == 0
     assert got["snapshot"]["remaining"] == {"landlord": 20, "landlord_down": 17, "landlord_up": 17}
+
+
+def test_analyze_hands_back_every_legal_action_with_its_cards():
+    """页面靠它做"点一下就把这一手记下来"，所以每个动作都得带具体牌面。"""
+    got = analyze(make_record(), FakePolicy())
+    actions = got["point"]["actions"]
+    labels = {a["label"]: a for a in actions}
+    assert "不出" in labels and labels["不出"]["cards"] == []
+    assert labels["AA"]["cards"] == ["A", "A"]
+    # 全量动作是 top-k 的超集，且分数降序
+    assert len(actions) >= len(got["point"]["candidates"])
+    scores = [a["score"] for a in actions]
+    assert scores == sorted(scores, reverse=True)

@@ -64,6 +64,7 @@ def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
     """页面「局面」那一栏要的东西。"""
     return {
         "step": step,
+        "me": snapshot.me,
         "acting": snapshot.acting,
         "my_hand": list(snapshot.my_hand),
         "remaining": dict(snapshot.num_cards_left),
@@ -80,14 +81,15 @@ def analyze(
     particles: int = DEFAULT_PARTICLES,
     top_k: int = DEFAULT_TOP_K,
 ) -> dict[str, Any]:
-    """算出一个决策点要显示的全部东西。
+    """算出一个局面要显示的全部东西。
 
-    返回分两层：``snapshot`` 是**当前显示的那个局面**（一定在），``point`` 是
-    决策点专属的东西（候选、粒子、逐张概率）—— 只有当这个局面确实轮到我方
-    时才存在。刚开完局还没轮到我方时，``point`` 就是 ``None``，页面照样显示局面。
+    返回分两层：``snapshot`` 是**要显示的那个局面**（一定在），``point`` 是
+    决策点专属的东西（候选、粒子、逐张概率）—— 只有那个局面确实轮到我方时才存在。
+    轮不到我方时 ``point`` 是 ``None``，页面照样把牌桌显示出来。
 
-    ``step=None`` 表示"给我当前该看的那个点"：优先当前就该我动的那个点，
-    否则退回第一个轮到我方的决策点；一个都没有时 ``point`` 为 ``None``。
+    ``step`` 指"看第几手之后的局面"。``None`` 交给后端挑一个默认视图：第一个
+    轮到我方的决策点（一局打完时那就等于终局，没什么可看的，所以不能拿终局当默认）。
+    调用方想看"记录当前位置"就显式传手数 —— 网页在录完一手后就是这么做的。
     """
     if particles < 1:
         raise ValueError("粒子数至少为 1")
@@ -97,20 +99,11 @@ def analyze(
     mine = my_turn_steps(record)
     end = len(record.steps)
 
-    if step is None:
-        target = end if end in mine else (mine[0] if mine else None)
-    else:
-        if not 0 <= step <= end:
-            raise ValueError(f"步号要在 0 到 {end} 之间，收到 {step}")
-        if step not in mine:
-            raise ValueError(
-                f"第 {step} 手轮到 {derive(record, steps=record.steps[:step]).acting}，"
-                f"不是我方（{record.me}）"
-            )
-        target = step
+    target = (mine[0] if mine else end) if step is None else step
+    if not 0 <= target <= end:
+        raise ValueError(f"步号要在 0 到 {end} 之间，收到 {step}")
 
-    shown_step = end if target is None else target
-    shown = derive(record, steps=record.steps[:shown_step])
+    shown = derive(record, steps=record.steps[:target])
 
     view: dict[str, Any] = {
         "record_id": record.record_id,
@@ -120,28 +113,33 @@ def analyze(
         "my_steps": list(mine),
         "current_step": end,
         "current_acting": derive(record).acting,
-        "snapshot": _snapshot_view(shown, shown_step),
+        "snapshot": _snapshot_view(shown, target),
         "point": None,
     }
-    if target is None:
-        return view
+    if target not in mine:
+        return view          # 轮不到我方：只给局面，不给候选与分布
 
     actions = legal_actions(shown)
     if not actions:
         raise ValueError("这个局面下我方没有合法动作")
-    candidates, diagnostics = policy.rank(shown, actions, top_k=top_k)
+    # 一次把所有合法动作都打上分：页面既要 top-k 做建议，也要完整清单
+    # 让用户"点一下就把这一手记下来"，而不是自己敲牌。
+    ranked, diagnostics = policy.rank(shown, actions, top_k=len(actions))
     dist = sample(shown, n_particles=particles, seed=target)
+
+    def row(candidate) -> dict[str, Any]:
+        action = candidate.action
+        return {
+            "label": "不出" if action.is_pass else "".join(action.cards),
+            "score": round(candidate.score, 4),
+            "cards": list(action.cards),      # 不要的话就是 []
+        }
 
     view["point"] = {
         "step": target,
         "opponents": list(dist.opponents),
-        "candidates": [
-            {
-                "label": "不出" if c.action.is_pass else "".join(c.action.cards),
-                "score": round(c.score, 4),
-            }
-            for c in candidates
-        ],
+        "candidates": [row(c) for c in ranked[:top_k]],
+        "actions": [row(c) for c in ranked],
         "cards": card_summary(dist, shown.pool),
         "particles": [
             [list(p.hands[o]) for o in dist.opponents] for p in dist.particles
