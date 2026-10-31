@@ -16,7 +16,7 @@ from typing import Iterator
 import rlcard
 
 from ddz.record.schema import Action, Initial, MatchRecord, Step
-from ddz.record.state import derive
+from ddz.record.state import replay
 
 # RLCard 的 player_id：0 地主、1 地主下家、2 地主上家（出手顺序也是 0→1→2）
 PLAYER_ID_TO_POSITION = {0: "landlord", 1: "landlord_down", 2: "landlord_up"}
@@ -35,7 +35,6 @@ class SimulatedGame:
     start_hands: dict[str, tuple[str, ...]]
     three_landlord_cards: tuple[str, ...]
     steps: tuple[Step, ...]
-    winner: str
 
 
 def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
@@ -62,14 +61,11 @@ def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
         )
         state, player_id = env.step(raw, raw_action=True)
 
-    payoffs = list(env.get_payoffs())
-    winner = "landlord" if payoffs[0] == 1 else "peasants"
     return SimulatedGame(
         seed=seed,
         start_hands=start_hands,
         three_landlord_cards=landlord_cards,
         steps=tuple(steps),
-        winner=winner,
     )
 
 
@@ -91,11 +87,10 @@ def to_records(game: SimulatedGame) -> tuple[MatchRecord, ...]:
                 },
             ),
             steps=game.steps,
-            outcome={"winner": game.winner},
         )
-        # 每一局都必须能推导；推导不出来说明记录不成立，宁可当场炸掉
-        for i in range(len(record.steps) + 1):
-            derive(record, steps=record.steps[:i])
+        # 每一局都必须能回放；回放不出来说明记录不成立，宁可当场炸掉。
+        # 不写 outcome：胜负由 steps 就能推出来，写进去等于同一事实两个来源
+        list(replay(record))
         records.append(record)
     return tuple(records)
 

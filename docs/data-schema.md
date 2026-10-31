@@ -29,7 +29,7 @@
 | `initial` | object | 是 | 开局信息 |
 | `steps` | list | 是 | 出牌序列，`index` 必须从 0 连续 |
 | `advice` | list | 否 | 模型给出的建议 |
-| `outcome` | object | 否 | 最终结果，仅完整对局有 |
+| `outcome` | object | 否 | 最终结果。**可由 `steps` 推出**（谁先出完谁赢），所以生成器不写它——留这个字段只为容纳外部来源现成带的结论 |
 
 ### `initial`
 

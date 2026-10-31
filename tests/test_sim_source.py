@@ -112,4 +112,4 @@ class TestCli:
         from ddz.source import manual
 
         fresh = manual.start("landlord_up", "34556789TTJJKK222", "792")
-        assert set(simulated.to_json()) - set(fresh.to_json()) <= {"outcome"}
+        assert set(simulated.to_json()) == set(fresh.to_json())
