@@ -65,6 +65,18 @@ def canonical_combo(cards) -> str:
         raise ValueError(f"不是合法牌型：{sorted(cards)!r}") from None
 
 
+def beat_options(hand_cards, last_move) -> set[str]:
+    """已知「某人的手牌」与上一手时，能压上去的组合串集合。
+
+    注意：这里传的手牌不一定是真的——校验别人的出牌时，我们会把整个牌池当手牌传，
+    因为对手具体怎么分我们不知道。这样只能验证「这手牌型压得住」，
+    验证不了「他确实拿得出」。
+    """
+    target = canonical_combo(last_move)
+    raw = get_gt_cards(_HandHolder("".join(hand_cards)), _PlayedHolder(target))
+    return {combo for combo in raw if combo != RLCARD_PASS}
+
+
 def legal_actions(snapshot: Snapshot) -> list[Action]:
     """我方在当前局面下的全部合法动作。
 
@@ -76,13 +88,7 @@ def legal_actions(snapshot: Snapshot) -> list[Action]:
         combos = sorted(DoudizhuJudger.playable_cards_from_hand(hand))
         return [Action(kind="play", cards=tuple(c)) for c in combos]
 
-    target = canonical_combo(snapshot.last_move)
-    raw = get_gt_cards(_HandHolder(hand), _PlayedHolder(target))
-
-    actions: list[Action] = []
-    for combo in raw:
-        if combo == RLCARD_PASS:
-            actions.append(Action(kind="pass"))
-        else:
-            actions.append(Action(kind="play", cards=tuple(combo)))
-    return actions
+    options = beat_options(snapshot.my_hand, snapshot.last_move)
+    return [Action(kind="pass")] + [
+        Action(kind="play", cards=tuple(combo)) for combo in sorted(options)
+    ]

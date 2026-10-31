@@ -50,7 +50,7 @@ class InputSource(Protocol):
     def records(self) -> Iterator[MatchRecord]: ...
 ```
 
-- `source/manual.py` —— 手动结构化录入（S1 首选）
+- `source/manual.py` —— 手动结构化录入，**函数式**：记录不可变，每次录入返回新记录，所以「改错了」就是丢掉上一步，不需要撤销栈。每一步都校验轮次与合法性，录不出一局规则上不成立的牌
 - `source/sim.py` —— 用 RLCard 自对弈生成，带真值，供评测（S2）
 
 两者产出**同一种** `MatchRecord`，不写格式转换器。

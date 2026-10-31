@@ -61,7 +61,7 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`115 passed`（未下载权重时相关用例会跳过）。
+预期结果：`147 passed`（未下载权重时相关用例会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
 
@@ -81,6 +81,28 @@ python3.11 -m venv .venv
 ```
 
 输入是一个局面记录，输出是同一记录**追加了 `advice` 段**。同一局面重跑，输出逐字节相同。
+
+### 录一局真实牌局
+
+```bash
+# 1. 录入开局：我方手牌 + 三张底牌 + 我的位置
+ddz new --me landlord_up --hand 34556789TTJJKK222 --landlord-cards 792 --out game.json
+
+# 2. 逐手录，每步都会校验轮次与合法性；录完轮到我方时可以直接要建议
+ddz play --in game.json --out game.json --player landlord --cards 55 --suggest
+ddz play --in game.json --out game.json --player landlord_down --pass
+
+# 3. 录错了撤掉最后一手；也可以截断到第 N 手从那儿继续
+ddz undo --in game.json --out game.json
+ddz show --in game.json --suggest
+```
+
+每一步都校验：轮次对不对、牌型认不认得、牌有没有出过、压不压得住。录不进去就直接报错，
+所以不会攒出一局规则上不成立的牌。
+
+**限制**：必须从开局录起。牌池是「全牌 − 我方手牌 − 已出的牌」推出来的，
+不录前史就会算出一个偏大的池子，模型会收到错的输入。要支持"中途冷启动"需要扩展
+Schema（显式存入此前各家的出牌），见 [docs/data-schema.md](docs/data-schema.md)。
 
 依赖版本与踩过的坑都记在 [docs/environment.md](docs/environment.md)，包括 RLCard 1.2.0 的动作接口差异、仿真器观测里的信息泄漏，以及模型特征对推断的依赖。
 
