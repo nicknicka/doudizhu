@@ -55,6 +55,20 @@ class TestStart:
         with pytest.raises(IllegalEntryError, match="超出全牌数量"):
             manual.start("landlord_up", five_threes, LANDLORD_CARDS)
 
+    def test_landlord_hand_must_contain_the_landlord_cards(self):
+        """地主的三张底牌已经在他那 20 张里，不在一块儿就是不成立的。"""
+        from ddz.cards import FULL_DECK
+
+        twenty = tuple(c for c in FULL_DECK if c != "R")[:20]  # 不含 R、不含 9
+        assert len(twenty) == 20
+        with pytest.raises(IllegalEntryError, match="应当在自己手上"):
+            manual.start("landlord", twenty, "79R")
+
+    def test_peasant_hand_plus_landlord_cards_cannot_exceed_the_deck(self):
+        """农民手牌 + 底牌合计不能超过一副牌。"""
+        with pytest.raises(IllegalEntryError, match="合计超出"):
+            manual.start("landlord_up", "3333" + HAND_17[4:], "333")
+
     def test_rejects_wrong_landlord_card_count(self):
         with pytest.raises(IllegalEntryError, match="底牌应为 3 张"):
             manual.start("landlord_up", HAND_17, "79")
@@ -105,6 +119,36 @@ class TestAppend:
     def test_rejects_a_malformed_timestamp(self):
         with pytest.raises(IllegalEntryError, match="ISO 8601"):
             manual.start("landlord_up", HAND_17, LANDLORD_CARDS, created_at="昨天下午")
+
+    def test_rejects_playing_more_cards_than_remaining(self, fresh):
+        """出牌张数不能超过本人剩余张数。
+
+        先把地主的手牌打薄：他一张一张领出，另外两家一直过（每轮 3 手）。
+        打到他只剩 4 张时，再让他出一手 5 张的顺子，必须被拒。
+        """
+        from collections import Counter
+
+        record = fresh
+        for _ in range(16):
+            card = derive(record).pool[0]
+            record = manual.append_step(record, "landlord", Action(kind="play", cards=(card,)))
+            record = manual.append_step(record, "landlord_down", Action(kind="pass"))
+            record = manual.append_step(record, "landlord_up", Action(kind="pass"))
+
+        remaining = derive(record).num_cards_left["landlord"]
+        assert remaining == 4, f"预期地主剩 4 张，实际 {remaining}"
+
+        # 从牌池里找一个五张顺子（牌型合法，但张数超过剩余）
+        pool = Counter(derive(record).pool)
+        ranks = "3456789TJQKA"
+        straight = next(
+            ranks[i : i + 5] for i in range(len(ranks) - 4)
+            if all(pool[r] >= 1 for r in ranks[i : i + 5])
+        )
+        with pytest.raises(IllegalEntryError, match="只剩"):
+            manual.append_step(
+                record, "landlord", Action(kind="play", cards=tuple(straight))
+            )
 
     def test_rejects_an_unknown_card_type(self, fresh):
         with pytest.raises(IllegalEntryError, match="不是合法牌型"):

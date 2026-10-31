@@ -83,12 +83,17 @@ def _cmd_undo(args: argparse.Namespace) -> int:
     """撤掉最后一手。"""
     record = load(args.infile)
     try:
-        record = manual.undo(record)
+        # --keep N：截断到第 N 手，从那儿继续录（改早期错误不必重录后缀）
+        record = (
+            manual.truncate(record, args.keep)
+            if args.keep is not None
+            else manual.undo(record)
+        )
     except IllegalEntryError as exc:
         print(exc, file=sys.stderr)
         return 2
     save(record, args.out)
-    print(f"已撤销，还剩 {len(record.steps)} 手 → {args.out}")
+    print(f"还剩 {len(record.steps)} 手 → {args.out}")
     return 0
 
 
@@ -168,9 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     play.set_defaults(func=_cmd_play)
 
-    undo = sub.add_parser("undo", help="撤掉最后一手")
+    undo = sub.add_parser("undo", help="撤掉最后一手，或用 --keep 截断到第 N 手")
     undo.add_argument("--in", dest="infile", type=Path, required=True)
     undo.add_argument("--out", type=Path, required=True)
+    undo.add_argument("--keep", type=int, default=None,
+                      help="保留前 N 手并丢弃其余（改早期错误用）")
     undo.set_defaults(func=_cmd_undo)
 
     show = sub.add_parser("show", help="看当前局面")

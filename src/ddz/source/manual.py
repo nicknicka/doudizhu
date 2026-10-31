@@ -76,6 +76,17 @@ def start(
     if over:
         raise IllegalEntryError(f"底牌超出全牌数量：{dict(over)}")
 
+    if me == "landlord":
+        # 地主的三张底牌已经在他那 20 张里
+        missing = Counter(landlord_cards) - Counter(hand)
+        if missing:
+            raise IllegalEntryError(f"地主的底牌应当在自己手上，缺少：{dict(missing)}")
+    else:
+        # 农民：自己的手牌 + 底牌不能超过整副牌
+        over = Counter(hand) + Counter(landlord_cards) - FULL_DECK_COUNTS
+        if over:
+            raise IllegalEntryError(f"手牌与底牌合计超出全牌数量：{dict(over)}")
+
     stamp = created_at or now()
     _validate_timestamp(stamp)
     return MatchRecord(
@@ -98,6 +109,12 @@ def _validate_play(record: MatchRecord, snapshot, player: str, action: Action) -
 
     # Snapshot 里的 my_hand 是 record.me 的手牌，所以只有轮到本人时
     # 才能做完整的合法性校验；别人的手牌我们本来就不该知道。
+    remaining = snapshot.num_cards_left[player]
+    if len(action.cards) > remaining:
+        raise IllegalEntryError(
+            f"{player} 只剩 {remaining} 张，出不了 {len(action.cards)} 张"
+        )
+
     if player == record.me:
         if action not in legal_actions(snapshot):
             raise IllegalEntryError(f"这手不合法：{combo}")
