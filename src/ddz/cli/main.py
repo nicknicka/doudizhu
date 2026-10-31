@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from ddz.inference import bounds_for, unseen_copies
 from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnError
 from ddz.record.io import load, save
 from ddz.record.schema import Action, TURN_ORDER
@@ -129,6 +130,39 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_who(args: argparse.Namespace) -> int:
+    """某张牌可能在谁手上。"""
+    record = load(args.infile)
+    if args.step is not None:
+        try:
+            record = record.upto(args.step)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+    snapshot = derive(record)
+
+    try:
+        remaining = unseen_copies(snapshot, args.card)
+        verdicts = bounds_for(snapshot, args.card)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    print(f"{args.card}：还有 {remaining} 张没现身")
+    for player, bound in verdicts.items():
+        if bound.impossible:
+            tag = "不可能"
+        elif bound.certain:
+            tag = f"必然至少 {bound.low} 张"
+        else:
+            tag = "有可能"
+        print(f"  {player:14s} {bound.low}–{bound.high} 张   {tag}")
+        for reason in bound.reasons:
+            print(f"      · {reason}")
+    print("（只用公开信息：牌池与各家剩余张数；不读真值）")
+    return 0
+
+
 def _cmd_simulate(args: argparse.Namespace) -> int:
     """批量产出带真值的仿真记录，供评测使用。"""
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -212,6 +246,12 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     show.set_defaults(func=_cmd_show)
+
+    who = sub.add_parser("who", help="某张牌可能在谁手上")
+    who.add_argument("--in", dest="infile", type=Path, required=True)
+    who.add_argument("--card", required=True, help="一张牌，如 K")
+    who.add_argument("--step", type=int, default=None, help="在第 N 个决策点判断")
+    who.set_defaults(func=_cmd_who)
 
     simulate = sub.add_parser("simulate", help="批量产出带真值的仿真记录")
     simulate.add_argument("--games", type=int, required=True, help="产出多少局")
