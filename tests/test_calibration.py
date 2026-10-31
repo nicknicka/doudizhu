@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from ddz.cli.main import main
@@ -60,14 +58,44 @@ class TestReport:
         with pytest.raises(ValueError, match="分桶数"):
             calibrate(records, DouZeroPolicy(), n_buckets=0)
 
-    def test_raises_when_there_is_nothing_to_calibrate(self, tmp_path):
-        from ddz.record.io import load
-
+    def test_raises_when_there_is_nothing_to_calibrate(self):
         empty = sim.to_records(sim.play_one_game(1))[0]
         truncated = empty.__class__(**{**empty.__dict__, "steps": ()})
         # 一步不走、谁都还没出完 —— 胜负推不出来
         with pytest.raises(NotCalibratableError):
             calibrate([truncated], DouZeroPolicy(), step_stride=1)
+
+
+class TestReproducibility:
+    def test_numbers_are_identical_across_processes(self, tmp_path):
+        """跨进程也必须完全一致。
+
+        项目里已经栽过两次 —— set 的迭代顺序随 PYTHONHASHSEED 变化会让
+        RNG 流或遍历顺序错位。这条链路看起来是确定的（legal_actions 排序后返回），
+        但"看起来"不算证据，所以照旧用不同哈希种子各跑一次子进程比对。
+        """
+        import os
+        import subprocess
+        import sys
+
+        out_dir = tmp_path / "sim"
+        subprocess.run([sys.executable, "-m", "ddz", "simulate", "--games", "1",
+                        "--seed", "6", "--out-dir", str(out_dir)],
+                       check=True, capture_output=True)
+
+        outputs = []
+        for hash_seed in ("0", "1", "2"):
+            result = subprocess.run(
+                [sys.executable, "-m", "ddz", "calibrate", "--in-dir", str(out_dir),
+                 "--buckets", "3", "--stride", "40"],
+                check=True, capture_output=True, text=True,
+                env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            )
+            outputs.append("\n".join(
+                line for line in result.stdout.splitlines() if line.startswith("|")
+            ))
+        for other in outputs[1:]:
+            assert other == outputs[0], "不同进程跑出的校准表不一致"
 
 
 class TestCaveat:

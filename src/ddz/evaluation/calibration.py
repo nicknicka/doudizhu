@@ -11,11 +11,11 @@ Q 值可以比较动作之间的优劣，但把它直接当概率读，需要有
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable
 
 from ddz.policy.douzero import DouZeroPolicy
 from ddz.rules import legal_actions
-from ddz.record.schema import MatchRecord, TURN_ORDER
+from ddz.record.schema import MatchRecord
 from ddz.record.state import derive
 
 # 必须随任何展示一起出现的措辞。模型输出不是概率，别让读者误会。
@@ -56,7 +56,6 @@ class Bucket:
 class CalibrationReport:
     buckets: tuple[Bucket, ...]
     n_samples: int
-    n_skipped: int
     mean_estimate: float
     actual_rate: float
 
@@ -88,14 +87,12 @@ def calibrate(
         raise ValueError("分桶数至少为 1")
 
     samples: list[tuple[float, int]] = []
-    skipped = 0
 
     for record in records:
         try:
             winner = winner_side(record)
         except NotCalibratableError:
-            skipped += 1
-            continue
+            continue  # 结果推不出来的记录直接跳过，不污染样本
         won = 1 if my_side(record.me) == winner else 0
 
         for step in range(0, len(record.steps) + 1, step_stride):
@@ -139,7 +136,6 @@ def calibrate(
     return CalibrationReport(
         buckets=tuple(buckets),
         n_samples=len(samples),
-        n_skipped=skipped,
         mean_estimate=sum(values) / len(values),
         actual_rate=sum(w for _, w in samples) / len(samples),
     )
