@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ddz.inference import bounds_for, unseen_copies
+from ddz.inference import bounds_for, sample, unseen_copies
 from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnError
 from ddz.record.io import load, save
 from ddz.record.schema import Action, TURN_ORDER
@@ -133,6 +133,33 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_infer(args: argparse.Namespace) -> int:
+    """采样出另两家手牌的分布。"""
+    record = load(args.infile)
+    try:
+        record = _record_at_step(record, args.step)
+        distribution = sample(derive(record), n_particles=args.particles, seed=args.seed)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    diag = distribution.diagnostics
+    print(f"采样 {diag['n_particles']} 个粒子，池子 {diag['pool_size']} 张，"
+          f"其中不同分法 {diag['n_distinct_partitions']} 种，"
+          f"被可靠约束拦下 {diag['n_rejected']} 个")
+
+    cards = [args.card] if args.card else sorted(set(derive(record).pool))
+    for card in cards:
+        parts = []
+        for player in distribution.opponents:
+            prob = distribution.probability(card, player)
+            exp = distribution.expected_count(card, player)
+            parts.append(f"{player} {prob:.0%}（期望 {exp:.2f} 张）")
+        print(f"  {card}: " + "   ".join(parts))
+    print("（只用可靠约束：牌池与各家剩余张数；不做「能压就压」这类假设）")
+    return 0
+
+
 def _cmd_who(args: argparse.Namespace) -> int:
     """某张牌可能在谁手上。"""
     record = load(args.infile)
@@ -248,6 +275,14 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     show.set_defaults(func=_cmd_show)
+
+    infer = sub.add_parser("infer", help="采样出另两家手牌的分布")
+    infer.add_argument("--in", dest="infile", type=Path, required=True)
+    infer.add_argument("--step", type=int, default=None, help="在第 N 个决策点采样")
+    infer.add_argument("--particles", type=int, default=200)
+    infer.add_argument("--seed", type=int, default=0)
+    infer.add_argument("--card", default=None, help="只看某一张牌")
+    infer.set_defaults(func=_cmd_infer)
 
     who = sub.add_parser("who", help="某张牌可能在谁手上")
     who.add_argument("--in", dest="infile", type=Path, required=True)
