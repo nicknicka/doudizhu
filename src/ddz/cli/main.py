@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from ddz.evaluation import MissingGroundTruthError, evaluate
 from ddz.inference import bounds_for, sample, unseen_copies
 from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnError
 from ddz.record.io import load, save
@@ -131,6 +132,36 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
     if args.suggest:
         _print_advice(record, DouZeroPolicy(args.models), args.top_k)
+    return 0
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    """在批量仿真局上评测推断质量，并与基线并列呈现。"""
+    paths = sorted(args.in_dir.glob("*.json"))
+    if not paths:
+        print(f"{args.in_dir} 里没有记录文件", file=sys.stderr)
+        return 2
+    records = [load(p) for p in paths]
+
+    try:
+        ours, baseline = evaluate(
+            records, n_particles=args.particles, seed=args.seed, step_stride=args.stride
+        )
+    except MissingGroundTruthError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    print("参数：" f"{len(records)} 条记录（{len(records) // 3} 局）· "
+          f"{args.particles} 个粒子 · seed={args.seed} · 每 {args.stride} 步采一次")
+    print()
+    print("| 方案 | Top-1 命中率 | 对数似然 | 计分项 |")
+    print("|---|---|---|---|")
+    print(ours.as_row("我们的推断"))
+    print(baseline.as_row("独立抛硬币基线"))
+    print()
+    print(f"覆盖 {ours.n_positions} 个决策点。对数似然上限是 0，越接近 0 越好。")
+    print("基线是每张未现身牌独立抛硬币 —— 无视剩余张数，会产出「某人 20 张」"
+          "这种不可能的分法。")
     return 0
 
 
@@ -290,6 +321,15 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     show.set_defaults(func=_cmd_show)
+
+    evaluate_cmd = sub.add_parser("evaluate", help="在批量仿真局上评测推断质量")
+    evaluate_cmd.add_argument("--in-dir", type=Path, required=True,
+                              help="放仿真记录的目录（ddz simulate 的产物）")
+    evaluate_cmd.add_argument("--particles", type=int, default=200)
+    evaluate_cmd.add_argument("--seed", type=int, default=0)
+    evaluate_cmd.add_argument("--stride", type=int, default=1,
+                              help="每多少步采一次（调大可以跑快些）")
+    evaluate_cmd.set_defaults(func=_cmd_evaluate)
 
     infer = sub.add_parser("infer", help="采样出另两家手牌的分布")
     infer.add_argument("--in", dest="infile", type=Path, required=True)
