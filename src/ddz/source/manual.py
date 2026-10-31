@@ -159,9 +159,10 @@ def undo(record: MatchRecord) -> MatchRecord:
 
 def truncate(record: MatchRecord, keep: int) -> MatchRecord:
     """只保留前 ``keep`` 手，从那里继续录 —— 对应「不用重来整局」。"""
-    if not 0 <= keep <= len(record.steps):
-        raise IllegalEntryError(f"只能保留 0 到 {len(record.steps)} 手，收到 {keep}")
-    return MatchRecord(**{**record.__dict__, "steps": record.steps[:keep]})
+    try:
+        return record.upto(keep)
+    except ValueError as exc:
+        raise IllegalEntryError(str(exc)) from exc
 
 
 def parse_cards(text: str) -> tuple[str, ...]:

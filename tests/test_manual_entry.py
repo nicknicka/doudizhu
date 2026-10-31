@@ -171,7 +171,7 @@ class TestUndoAndTruncate:
         assert len(manual.truncate(record, 0).steps) == 0
 
     def test_truncate_out_of_range_is_rejected(self, fresh):
-        with pytest.raises(IllegalEntryError, match="只能保留"):
+        with pytest.raises(IllegalEntryError, match="步号要在"):
             manual.truncate(fresh, 5)
 
 

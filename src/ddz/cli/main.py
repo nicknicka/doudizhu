@@ -102,11 +102,12 @@ def _cmd_show(args: argparse.Namespace) -> int:
     record = load(args.infile)
 
     if args.step is not None:
-        if not 0 <= args.step <= len(record.steps):
-            print(f"步号要在 0 到 {len(record.steps)} 之间，收到 {args.step}", file=sys.stderr)
+        # 「跳到第 N 个决策点」= 把记录截断到那里再推导
+        try:
+            record = record.upto(args.step)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
             return 2
-        # 截断到该步：回放与"跳过去"是同一件事
-        record = manual.truncate(record, args.step)
 
     snapshot = derive(record)
 

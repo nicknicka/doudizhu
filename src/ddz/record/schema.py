@@ -214,6 +214,12 @@ class MatchRecord:
             if step.index != expected:
                 raise ValueError(f"步骤序号不连续：期望 {expected}，实际 {step.index}")
 
+    def upto(self, step: int) -> "MatchRecord":
+        """只保留前 ``step`` 手 —— 回放/跳到第 N 个决策点用的就是它。"""
+        if not 0 <= step <= len(self.steps):
+            raise ValueError(f"步号要在 0 到 {len(self.steps)} 之间，收到 {step}")
+        return MatchRecord(**{**self.__dict__, "steps": self.steps[:step]})
+
     def with_advice(self, advice: "Advice") -> "MatchRecord":
         """挂上一条建议。
 

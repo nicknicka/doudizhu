@@ -85,10 +85,12 @@ class TestReadOnly:
             main(["show", "--in", str(fixture), "--step", str(step)])
         assert fixture.read_bytes() == before
 
-    def test_replay_leaves_no_side_files(self, fixture, tmp_path, capsys):
-        before = set(tmp_path.iterdir())
+    def test_replay_leaves_no_side_files(self, fixture, capsys):
+        """要看**输入文件所在的那个目录**有没有多出东西，而不是临时目录。"""
+        directory = fixture.parent
+        before = sorted(p.name for p in directory.iterdir())
         main(["show", "--in", str(fixture), "--step", "0"])
-        assert set(tmp_path.iterdir()) == before
+        assert sorted(p.name for p in directory.iterdir()) == before
 
 
 class TestRealAndSimulatedAgree:
@@ -106,15 +108,25 @@ class TestRealAndSimulatedAgree:
         assert "现在该 landlord_up 行动" in out
         assert "landlord=777" in out
 
-    def test_actor_agrees_between_simulated_and_recorded(self, fixture, tmp_path, capsys):
-        """回放的行动方，对仿真记录与真实记录走的是同一条推导。"""
-        real = build_real_record(tmp_path)
-        for step in (0, 1, 2):
+    def test_actor_sequence_is_pinned_independently(self, capsys):
+        """把行动方序列**写死**在测试里，作为独立于 derive 的对照。
+
+        期望值是照着 fixture 的 steps 手算的（地主出 → 下家 → 上家），
+        不是调用被测代码算出来的 —— 否则就是同源断言。
+        """
+        path = fixture_path("landlord_up")
+        expected = ["landlord", "landlord_down", "landlord_up"]
+        for step, actor in enumerate(expected):
             capsys.readouterr()
-            main(["show", "--in", str(fixture), "--step", str(min(step, len(load(fixture).steps)))])
-            simulated = capsys.readouterr().out
-            main(["show", "--in", str(real), "--step", str(step)])
-            recorded = capsys.readouterr().out
-            # 两者格式相同：都包含同一组字段
-            for field in ("各家剩余：", "各家已出：", "上一手：", "现在该 "):
-                assert field in simulated and field in recorded
+            assert main(["show", "--in", str(path), "--step", str(step)]) == 0
+            assert f"现在该 {actor} 行动" in capsys.readouterr().out
+
+    def test_actor_agrees_with_derivation_for_both_record_kinds(self, fixture, tmp_path, capsys):
+        """仿真记录与真实记录，报出的行动方都必须与同一套推导一致。"""
+        for path in (fixture, build_real_record(tmp_path)):
+            record = load(path)
+            for step in range(len(record.steps) + 1):
+                expected = derive(record, steps=record.steps[:step]).acting
+                capsys.readouterr()
+                assert main(["show", "--in", str(path), "--step", str(step)]) == 0
+                assert f"现在该 {expected} 行动" in capsys.readouterr().out
