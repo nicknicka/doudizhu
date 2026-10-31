@@ -25,3 +25,7 @@ models/
 
 # 展示页生成产物（由 web/build.py 从 template.html 生成）
 web/index.html
+
+# Node 展示页工具链
+node_modules/
+package-lock.json
