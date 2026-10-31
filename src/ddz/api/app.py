@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import json
+import collections
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,9 @@ def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
         "played": {p: list(c) for p, c in snapshot.played_cards.items()},
         "last_move": list(snapshot.last_move),
         "pool_size": len(snapshot.pool),
+        # 牌池按点数计：牌盘的张数上限与（将来的）记牌器共用这一份。
+        # 只列还没现身的点数 —— 一个都没有的点数由页面自己补 0。
+        "pool_counts": dict(collections.Counter(snapshot.pool)),
     }
 
 

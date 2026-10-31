@@ -121,8 +121,10 @@
           border-top:var(--px) dashed color-mix(in srgb,var(--ink) 35%,transparent);padding-top:10px}
   .keypad button{position:relative;min-width:40px;padding:3px 6px;box-shadow:none}
   .keypad button.has{background:var(--ink);color:var(--ground)}
-  .keypad button em{font-style:normal;color:var(--accent);font-size:12px;margin-left:3px}
-  .keypad button.has em{color:var(--ground)}
+  /* 张数是上标：与点数分开，一眼能分辨"这是几"和"我选了几张" */
+  /* sup 只会出现在已选的键上，所以直接用反色 */
+  .keypad button sup{color:var(--ground);vertical-align:super;line-height:0;margin-left:2px}
+  .keypad button.spent{opacity:.45}
   .picks{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .picks button{box-shadow:none;display:inline-flex;gap:8px;align-items:baseline}
   .picks button .sc{color:var(--muted)}

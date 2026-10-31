@@ -7,13 +7,23 @@ import { setBanner } from './api.js';
 
 let deps = { refresh: async () => {}, mutate: async () => false };
 
-function keypad(host, sel){
+/**
+ * 牌盘。``capOf(点数)`` 给出这个点数最多还能选几张 —— 开局是一副牌的 4 张，
+ * 录一手是牌池里还剩几张。到顶的键标成 spent，点了会说明原因。
+ * 张数做成上标：点数与张数是两件事，别挤在同一行同样大小。
+ */
+function keypad(host, sel, capOf, disabled){
   host.innerHTML = RANKS.map(r => {
     const n = countIn(sel, r);
-    return `<button type="button" data-key="${r}" class="${n?'has':''}">${NAME[r]}`
-         + (n ? `<em>${n}</em>` : '') + '</button>';
+    const spent = capOf ? n >= capOf(r) : false;
+    return `<button type="button" data-key="${r}"${disabled ? ' disabled' : ''}`
+         + ` class="${n ? 'has' : ''}${spent ? ' spent' : ''}">${NAME[r]}`
+         + (n ? `<sup>${n}</sup>` : '') + '</button>';
   }).join('');
 }
+
+/** 牌池里每个点数还剩几张。数据来自后端，页面不自己数。 */
+const poolCounts = () => (S.snap && S.snap.pool_counts) || {};
 
 function chips(host, sel, emptyText){
   host.innerHTML = sel.length
@@ -33,7 +43,7 @@ function renderNew(){
     + (SEL.cards.length
       ? SEL.cards.map((c,i)=>`<span data-zone="cards" data-drop="${i}">${card(c)}</span>`).join('')
       : '<span class="empty">底牌还没选</span>');
-  keypad($('new-keys'), SEL.hand.concat(SEL.cards));
+  keypad($('new-keys'), SEL.hand.concat(SEL.cards), () => 4);
   $('tgt-hand').classList.toggle('is-on', PAD.target === 'hand');
   $('tgt-cards').classList.toggle('is-on', PAD.target === 'cards');
   const ok = SEL.hand.length === need && SEL.cards.length === 3;
@@ -51,7 +61,9 @@ function renderPlay(){
   $('play-who').textContent = `现在该 ${label(v.acting)} 出牌`;
   $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
   chips($('play-chips'), SEL.play, '点下面的牌组成这一手；不要的话直接按「不要」');
-  keypad($('play-keys'), SEL.play);
+  // 历史局面下不能续录，牌盘直接停用 —— 否则上限算的是那个旧局面的牌池
+  const pool = poolCounts();
+  keypad($('play-keys'), SEL.play, r => pool[r] || 0, !latest);
   $('play-go').disabled = !latest || !SEL.play.length;
   $('play-pass').disabled = !latest;
   $('play-clear').disabled = !latest || !SEL.play.length;
@@ -119,7 +131,15 @@ export function init({ refresh, mutate }){
   /* ---------- 录一手 ---------- */
   $('play-keys').addEventListener('click', e => {
     const b = e.target.closest('button[data-key]'); if (!b) return;
-    SEL.play.push(b.dataset.key); renderPlay();
+    const r = b.dataset.key;
+    const cap = poolCounts()[r] || 0;
+    if (countIn(SEL.play, r) >= cap){
+      setBanner(cap === 0
+        ? `${NAME[r]} 全部现过身了（在我手上或已经打出），不可能再出。`
+        : `牌池里 ${NAME[r]} 只剩 ${cap} 张。`, 'error');
+      return;
+    }
+    SEL.play.push(r); renderPlay();
   });
   $('play-chips').addEventListener('click', e => {
     const s = e.target.closest('[data-drop]'); if (!s) return;

@@ -100,13 +100,14 @@ try {
   if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
   if (!(await text(page, '#board')).includes('该他出')) problems.push('开局后没标出该谁出牌');
 
-  // 交互 4：非法出牌必须被拦下，且选中的牌要留着让人直接改
+  // 交互 4：交给服务端拒的那种 —— 3 和 4 凑一起不是任何合法牌型
+  // （牌池上限管不到这一层，它只挡"牌池里没有的牌"）
   expectingError = true;
-  await tapPlay(['3','3']);
+  await tapPlay(['3','4']);
   await page.click('#play-go');
   await page.waitForTimeout(900);
   expectingError = false;
-  if (!(await text(page, '#banner')).includes('已经出过')) problems.push('非法出牌没被拦下');
+  if (!(await text(page, '#banner')).includes('不是合法牌型')) problems.push('非法出牌没被服务端拦下');
   if ((await page.locator('#play-chips i.c').count()) !== 2) problems.push('出牌被拒后把选中的牌清掉了');
 
   // 交互 5：合法录两手 → 轮到我方，出现候选与步号
@@ -120,7 +121,20 @@ try {
   if (!(await page.locator('#steps button').count())) problems.push('轮到我方后没有决策点');
   await page.screenshot({ path: '/tmp/ddz-web-2.png', fullPage: true });
 
-  // 交互 6：点候选 = 直接录这一手。
+  // 交互 6：牌盘的张数上限 —— 我手上有三张 3，牌池只剩一张，第二张必须被挡下。
+  // 顺带说明：老用例拿"地主打对 3"当非法出牌，现在被这一层正当地先挡住了。
+  await tapPlay(['3']);
+  const sup = page.locator('#play-keys button sup');
+  if ((await sup.count()) !== 1) problems.push('牌盘没把已选张数标出来');
+  else if ((await sup.first().textContent()).trim() !== '1') problems.push('牌盘的张数标注不对');
+  await tapPlay(['3']);          // 第二张
+  if ((await page.locator('#play-chips i.c').count()) !== 1) {
+    problems.push('牌盘没有挡住超过牌池张数的选牌');
+  }
+  if (!(await text(page, '#banner')).includes('只剩')) problems.push('挡住选牌时没有说明原因');
+  await page.click('#play-clear');
+
+  // 交互 7：点候选 = 直接录这一手。
   // 注意：录完不一定就轮到我方，所以不能拿"步号变多"当判据 —— 看反馈与已出手数。
   const picks = await page.locator('#play-picks button').count();
   const boardBefore = await text(page, '#board');
@@ -130,7 +144,7 @@ try {
   // 比整块牌桌：点「不出」时"已出"不会变，但该谁出、上一手一定变
   if ((await text(page, '#board')) === boardBefore) problems.push('点候选后牌桌没有跟着走');
 
-  // 交互 7：撤销
+  // 交互 8：撤销
   await page.click('#undo');
   await page.waitForTimeout(1000);
   if (!(await text(page, '#banner')).includes('已撤销')) problems.push('撤销没有反馈');
@@ -149,5 +163,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌 + 候选一键录 + 撤销 均正常');
+  : '✔ 无 pageerror / console error；牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 均正常');
 process.exit(problems.length ? 1 : 0);

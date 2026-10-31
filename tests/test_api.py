@@ -277,3 +277,14 @@ def test_analyze_hands_back_every_legal_action_with_its_cards():
     assert len(actions) >= len(got["point"]["candidates"])
     scores = [a["score"] for a in actions]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_analyze_reports_pool_counts():
+    """牌盘的张数上限（以及将来的记牌器）吃的就是这一份数据。"""
+    got = analyze(make_record(), FakePolicy())
+    counts = got["snapshot"]["pool_counts"]
+    assert got["snapshot"]["pool_size"] == 35
+    assert sum(counts.values()) == 35, "各点数之和必须等于牌池张数"
+    assert counts["3"] == 1, "我手上有三张 3，牌池只剩一张"
+    assert counts["A"] == 2, "我手上有两张 A"
+    assert counts["T"] == 4, "一张 T 都没现身"
