@@ -147,8 +147,8 @@ def _cmd_infer(args: argparse.Namespace) -> int:
     diag = distribution.diagnostics
     print(f"采样 {diag['n_particles']} 个粒子，池子 {diag['pool_size']} 张，"
           f"其中不同分法 {diag['n_distinct_partitions']} 种")
-    print(f"被可靠约束拦下 {diag['n_rejected']} 个 —— 洗牌切片必然满足张数约束，"
-          "这个计数是 0 属于设计使然，不是没做过滤")
+    print("候选由构造保证合法（洗牌后按张数切分），因此不做拒绝采样，"
+          "也没有「过滤掉多少非法组合」这种计数")
 
     if args.dump:
         payload = {

@@ -150,7 +150,7 @@ class TestCli:
         out = capsys.readouterr().out
         assert "采样 50 个粒子" in out
         assert "不同分法" in out
-        assert "不用" not in out and "可靠约束" in out
+        assert "构造保证合法" in out
 
     def test_honours_the_seed(self, capsys):
         args = ["infer", "--in", str(fixture_path("landlord_up")),

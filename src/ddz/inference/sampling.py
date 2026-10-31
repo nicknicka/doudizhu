@@ -14,7 +14,8 @@ import random
 from dataclasses import dataclass
 from typing import Mapping
 
-from ddz.inference.feasibility import bounds_for, opponents_of
+from ddz.cards import normalize
+from ddz.inference.feasibility import opponents_of
 from ddz.record.state import Snapshot
 
 
@@ -45,11 +46,6 @@ class Distribution:
         total = sum(p.hands[player].count(card) for p in self.particles)
         return total / len(self.particles)
 
-    def marginal(self, player: str) -> dict[str, float]:
-        """该玩家手上"每张牌至少有一张"的概率表。"""
-        cards = {c for p in self.particles for c in p.hands[player]}
-        return {c: self.probability(c, player) for c in sorted(cards)}
-
 
 def sample(snapshot: Snapshot, n_particles: int = 200, seed: int = 0) -> Distribution:
     """从牌池里采样出 ``n_particles`` 个合法的完整假设。"""
@@ -68,29 +64,24 @@ def sample(snapshot: Snapshot, n_particles: int = 200, seed: int = 0) -> Distrib
     rng = random.Random(seed)
 
     particles: list[Particle] = []
-    rejected = 0
     seen: set[tuple] = set()
 
-    # 洗牌后切一刀：得到的必然满足张数约束，所以是"抽样即可行"而不是"先抽后筛"。
-    # 仍然逐个用可靠约束复核一遍 —— 复核不通过说明约束或纪录有问题，宁可当场计数。
-    while len(particles) < n_particles:
+    # 洗牌后切一刀：得到的**必然**满足张数约束，所以这里是"构造即合法"，
+    # 不做拒绝采样。因此没有"过滤掉多少非法组合"这种计数 —— 一个恒定为零的
+    # 计数器只会误导读者。
+    for _ in range(n_particles):
         shuffled = list(snapshot.pool)
         rng.shuffle(shuffled)
         cut = sizes[first]
-        candidate = {first: tuple(sorted(shuffled[:cut])), opponents[1]: tuple(sorted(shuffled[cut:]))}
-
-        if not _satisfies_sound_constraints(snapshot, candidate):
-            rejected += 1
-            if rejected > n_particles * 10:
-                raise RuntimeError("候选被大量拒绝，约束或记录有问题")
-            continue
-
+        candidate = {
+            first: normalize(shuffled[:cut]),
+            opponents[1]: normalize(shuffled[cut:]),
+        }
         particles.append(Particle(hands=candidate))
         seen.add(tuple(sorted(candidate.items())))
 
     diagnostics = {
         "n_particles": len(particles),
-        "n_rejected": rejected,
         "n_distinct_partitions": len(seen),
         "pool_size": len(snapshot.pool),
         "opponents": opponents,
@@ -98,15 +89,3 @@ def sample(snapshot: Snapshot, n_particles: int = 200, seed: int = 0) -> Distrib
     return Distribution(
         particles=tuple(particles), opponents=opponents, diagnostics=diagnostics
     )
-
-
-def _satisfies_sound_constraints(snapshot: Snapshot, hands: Mapping[str, tuple[str, ...]]) -> bool:
-    """逐个牌复核可靠约束 —— 抽样本身已保证成立，这里是断言式的守门。"""
-    for player, hand in hands.items():
-        if len(hand) != snapshot.num_cards_left[player]:
-            return False
-        for card in hand:
-            bound = bounds_for(snapshot, card)[player]
-            if bound.impossible:
-                return False
-    return True
