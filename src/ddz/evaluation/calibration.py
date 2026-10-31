@@ -122,10 +122,14 @@ def calibrate(
     for i in range(n_buckets):
         low = lo + i * width
         high = low + width
-        # 最后一个桶收右边的一切（含浮点误差越界的值），保证没有样本被漏掉
+        # 首个桶收左边的一切、末个桶收右边的一切：DouZero 是回归头，
+        # 输出可能略微越出 [-1, 1]，不加这两条会有样本被静默丢掉。
+        first, last = i == 0, i == n_buckets - 1
         picked = [
             (s, w) for s, w in samples
-            if (low <= s < high) or (i == n_buckets - 1 and s >= low)
+            if (low <= s < high)
+            or (first and s < low)
+            or (last and s >= high)
         ]
         if not picked:
             continue
