@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ddz.cards import CARD_ORDER, FULL_DECK_COUNTS
+from ddz.cards import CARD_ORDER
 from ddz.record.schema import TURN_ORDER
 from ddz.record.state import Snapshot
 
@@ -40,12 +40,13 @@ class Bounds:
 
 
 def unseen_copies(snapshot: Snapshot, card: str) -> int:
-    """这张牌还有几张没现身。"""
+    """这张牌还有几张没现身 —— 就是它在牌池里的张数。
+
+    牌池已经由记录层推好了（全牌 − 我方手牌 − 已出的牌），这里不重算一遍。
+    """
     if card not in CARD_ORDER:
         raise ValueError(f"字符表之外的牌：{card!r}")
-    return FULL_DECK_COUNTS[card] - snapshot.my_hand.count(card) - sum(
-        cards.count(card) for cards in snapshot.played_cards.values()
-    )
+    return snapshot.pool.count(card)
 
 
 def bounds_for(snapshot: Snapshot, card: str) -> dict[str, Bounds]:
@@ -77,19 +78,3 @@ def bounds_for(snapshot: Snapshot, card: str) -> dict[str, Bounds]:
 
         result[player] = Bounds(low=low, high=capacity, reasons=tuple(reasons))
     return result
-
-
-def possible_holders(snapshot: Snapshot, card: str) -> tuple[str, ...]:
-    """这张牌**有可能**在谁手上。"""
-    return tuple(
-        player
-        for player, bound in bounds_for(snapshot, card).items()
-        if not bound.impossible
-    )
-
-
-def certain_holders(snapshot: Snapshot, card: str) -> tuple[str, ...]:
-    """这张牌**必然**在谁手上（鸽笼能推出来的那一部分）。"""
-    return tuple(
-        player for player, bound in bounds_for(snapshot, card).items() if bound.certain
-    )

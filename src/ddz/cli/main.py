@@ -14,6 +14,11 @@ from ddz.record.state import derive
 from ddz.source import IllegalEntryError, manual, sim
 
 
+def _record_at_step(record, step: int | None):
+    """跳到第 N 个决策点；步号非法时抛 ValueError。None 表示不动。"""
+    return record if step is None else record.upto(step)
+
+
 def _print_advice(record, policy, top_k: int) -> None:
     snapshot = derive(record)
     if snapshot.acting != record.me:
@@ -102,13 +107,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
     """看局面。带 --step N 就直接跳回第 N 个决策点（0 = 开局）。"""
     record = load(args.infile)
 
-    if args.step is not None:
-        # 「跳到第 N 个决策点」= 把记录截断到那里再推导
-        try:
-            record = record.upto(args.step)
-        except ValueError as exc:
-            print(exc, file=sys.stderr)
-            return 2
+    try:
+        record = _record_at_step(record, args.step)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
 
     snapshot = derive(record)
 
@@ -133,12 +136,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
 def _cmd_who(args: argparse.Namespace) -> int:
     """某张牌可能在谁手上。"""
     record = load(args.infile)
-    if args.step is not None:
-        try:
-            record = record.upto(args.step)
-        except ValueError as exc:
-            print(exc, file=sys.stderr)
-            return 2
+    try:
+        record = _record_at_step(record, args.step)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
     snapshot = derive(record)
 
     try:

@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from ddz.cards import FULL_DECK, FULL_DECK_COUNTS
+from ddz.cards import FULL_DECK_COUNTS
 from ddz.cli.main import main
-from ddz.inference import bounds_for, certain_holders, possible_holders, unseen_copies
+from ddz.inference import bounds_for, unseen_copies
 from ddz.record.io import load
 from ddz.record.schema import TURN_ORDER, Initial, MatchRecord
 from ddz.record.state import Snapshot, derive
