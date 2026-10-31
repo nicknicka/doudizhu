@@ -10,7 +10,7 @@ from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnErro
 from ddz.record.io import load, save
 from ddz.record.schema import Action, TURN_ORDER
 from ddz.record.state import derive
-from ddz.source import IllegalEntryError, manual
+from ddz.source import IllegalEntryError, manual, sim
 
 
 def _print_advice(record, policy, top_k: int) -> None:
@@ -129,6 +129,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_simulate(args: argparse.Namespace) -> int:
+    """批量产出带真值的仿真记录，供评测使用。"""
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for record in sim.generate(args.games, args.seed):
+        save(record, args.out_dir / f"{record.record_id}.json")
+        written += 1
+    print(f"已产出 {args.games} 局 × 3 个视角 = {written} 条记录 → {args.out_dir}")
+    print("每条都带三家开局手牌（真值），且每一步都能回放。")
+    return 0
+
+
 def _cmd_suggest(args: argparse.Namespace) -> int:
     """读局面 → 要建议 → 写记录。这里只做编排，不含业务逻辑。"""
     record = load(args.infile)
@@ -200,6 +212,12 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     show.set_defaults(func=_cmd_show)
+
+    simulate = sub.add_parser("simulate", help="批量产出带真值的仿真记录")
+    simulate.add_argument("--games", type=int, required=True, help="产出多少局")
+    simulate.add_argument("--seed", type=int, default=0, help="随机种子；同种子产出同一批")
+    simulate.add_argument("--out-dir", type=Path, required=True)
+    simulate.set_defaults(func=_cmd_simulate)
 
     return parser
 
