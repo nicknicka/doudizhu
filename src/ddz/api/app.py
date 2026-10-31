@@ -239,6 +239,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="斗地主决策助手", docs_url=None, redoc_url=None)
     # 页面只带一个本地依赖（GSAP），挂在 /vendor 下 —— 断网也要能开
     app.mount("/vendor", StaticFiles(directory=WEB / "vendor"), name="vendor")
+    # 展示页的脚本按模块分文件，从 /app 取
+    app.mount("/app", StaticFiles(directory=WEB / "app"), name="app")
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
