@@ -151,8 +151,9 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         print(exc, file=sys.stderr)
         return 2
 
-    print("参数：" f"{len(records)} 条记录（{len(records) // 3} 局）· "
-          f"{args.particles} 个粒子 · seed={args.seed} · 每 {args.stride} 步采一次")
+    # CLI 不推算"每局几条视角"这种业务规则，只报事实
+    print(f"参数：{len(records)} 条记录 · {args.particles} 个粒子 · "
+          f"seed={args.seed} · 每 {args.stride} 步采一次 · 无模型参与（纯推断评测）")
     print()
     print("| 方案 | Top-1 命中率 | 对数似然 | 计分项 |")
     print("|---|---|---|---|")

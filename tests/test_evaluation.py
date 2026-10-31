@@ -39,6 +39,39 @@ class TestMetrics:
         b = evaluate(records, n_particles=20, seed=3, step_stride=3)
         assert a == b
 
+    def test_numbers_are_identical_across_processes(self, tmp_path):
+        """必须在**不同进程**之间也完全一致。
+
+        同一进程内重跑测不出这件事：`set` 的迭代顺序随 PYTHONHASHSEED 变化，
+        会让抛硬币的随机流错位，基线数字跟着漂。这里故意用不同的哈希种子跑。
+        """
+        import os
+        import subprocess
+        import sys
+
+        out_dir = tmp_path / "sim"
+        subprocess.run([sys.executable, "-m", "ddz", "simulate", "--games", "1",
+                        "--seed", "9", "--out-dir", str(out_dir)],
+                       check=True, capture_output=True)
+
+        outputs = []
+        for hash_seed in ("0", "1", "2"):
+            result = subprocess.run(
+                [sys.executable, "-m", "ddz", "evaluate", "--in-dir", str(out_dir),
+                 "--particles", "20", "--seed", "0", "--stride", "9"],
+                check=True, capture_output=True, text=True,
+                env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            )
+            body = "\n".join(
+                line for line in result.stdout.splitlines()
+                if line.startswith("| ") and "方案" not in line
+            )
+            outputs.append(body)
+
+        assert len(outputs) == 3
+        for other in outputs[1:]:
+            assert other == outputs[0], "不同进程跑出的指标不一致"
+
     def test_different_seed_still_lands_close(self, records):
         a, _ = evaluate(records, n_particles=400, seed=1, step_stride=4)
         b, _ = evaluate(records, n_particles=400, seed=2, step_stride=4)

@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import math
 import random
+from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from ddz.cards import FULL_DECK_COUNTS
+from ddz.cards import normalize
 from ddz.inference import opponents_of, sample
 from ddz.record.schema import MatchRecord
 from ddz.record.state import derive
@@ -64,23 +65,11 @@ def _truth_hands_at(record: MatchRecord, step: int) -> Mapping[str, frozenset[st
     for s in record.steps[:step]:
         if s.action.is_play and s.player in played:
             played[s.player].extend(s.action.cards)
-    return {p: frozenset(set(hand) - set(played[p])) for p, hand in truth.items()}
-
-
-def _score(probabilities: Mapping[tuple[str, str], float], truth_at_step) -> tuple[float, int, float, int]:
-    """用同一套算法给任意概率表打分。"""
-    top1_hits = top1_total = 0
-    ll_sum = 0.0
-    ll_n = 0
-
-    for (card, player), prob in probabilities.items():
-        actual = card in truth_at_step[player]
-        # 二元对数似然：真在就说 p，真不在就说 1-p
-        p_correct = min(max(prob if actual else 1.0 - prob, 1e-9), 1.0)
-        ll_sum += math.log(p_correct)
-        ll_n += 1
-
-    return top1_hits, top1_total, ll_sum / ll_n if ll_n else 0.0, ll_n
+    # 用 Counter 做差：真实手牌 = 开局手牌 − 已出的牌，重复牌要保留张数
+    return {
+        p: frozenset((Counter(hand) - Counter(played[p])).elements())
+        for p, hand in truth.items()
+    }
 
 
 def evaluate(
@@ -91,9 +80,6 @@ def evaluate(
 ) -> tuple[Metrics, Metrics]:
     """返回 (我们的推断, 独立抛硬币基线) 两组指标。"""
     rng = random.Random(seed)
-    ours_rows: list[tuple[float, int, float, int]] = []
-    base_rows: list[tuple[float, int, float, int]] = []
-
     top1_ours_hits = top1_base_hits = top1_total = 0
     ll_ours: list[float] = []
     ll_base: list[float] = []
@@ -108,7 +94,9 @@ def evaluate(
 
             # Top-1 只在「这张牌恰好由一家持有」时定义清晰；两家都有或都不有，
             # 归属不唯一，不计入 Top-1（仍计入对数似然）
-            for card in set(snapshot.pool):
+            # 先规范化排序再遍历：set 的迭代顺序随 PYTHONHASHSEED 变化，
+            # 会让抛硬币的随机流在不同进程里错位 —— 数字就不可复现了。
+            for card in normalize(set(snapshot.pool)):
                 holders = [
                     p for p, hand in truth_at.items()
                     if sum(1 for c in hand if c == card) == 1
@@ -127,7 +115,9 @@ def evaluate(
                 if card in truth_at[picked_base]:
                     top1_base_hits += 1
 
-            for card in set(snapshot.pool):
+            # 先规范化排序再遍历：set 的迭代顺序随 PYTHONHASHSEED 变化，
+            # 会让抛硬币的随机流在不同进程里错位 —— 数字就不可复现了。
+            for card in normalize(set(snapshot.pool)):
                 for player in distribution.opponents:
                     n_cards += 1
                     ours = min(max(distribution.probability(card, player), 1e-9), 1 - 1e-9)
