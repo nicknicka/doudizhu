@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from ddz.policy.features import build_features
-from ddz.policy.legality import legal_actions
+from ddz.rules import legal_actions
 from ddz.record.schema import Action, Advice, Candidate, MatchRecord
 from ddz.record.state import Snapshot, derive
 

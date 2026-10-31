@@ -90,6 +90,22 @@ class TestAppend:
         with pytest.raises(IllegalEntryError, match="压不过"):
             manual.append_step(record, "landlord_down", Action(kind="play", cards=("3",)))
 
+    def test_rejects_pass_when_leading(self, fresh):
+        """领出方不能不要 —— 上一手为空时 pass 不成立。"""
+        assert derive(fresh).last_move == ()
+        with pytest.raises(IllegalEntryError, match="不能不要"):
+            manual.append_step(fresh, "landlord", Action(kind="pass"))
+
+    def test_rejects_a_naive_timestamp(self):
+        """created_at 必须带时区，否则跨时区复盘没法还原。"""
+        with pytest.raises(IllegalEntryError, match="必须带时区"):
+            manual.start("landlord_up", HAND_17, LANDLORD_CARDS,
+                         created_at="2026-10-31T00:00:00")
+
+    def test_rejects_a_malformed_timestamp(self):
+        with pytest.raises(IllegalEntryError, match="ISO 8601"):
+            manual.start("landlord_up", HAND_17, LANDLORD_CARDS, created_at="昨天下午")
+
     def test_rejects_an_unknown_card_type(self, fresh):
         with pytest.raises(IllegalEntryError, match="不是合法牌型"):
             manual.append_step(fresh, "landlord", Action(kind="play", cards=("3", "4", "6")))

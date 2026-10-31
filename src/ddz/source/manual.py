@@ -15,7 +15,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from ddz.cards import FULL_DECK_COUNTS, normalize
-from ddz.policy.legality import beat_options, canonical_combo, legal_actions
+from ddz.rules import beat_options, canonical_combo, legal_actions
 from ddz.record.schema import (
     INITIAL_HAND_SIZE,
     TURN_ORDER,
@@ -35,6 +35,16 @@ class IllegalEntryError(ValueError):
 
 def now() -> str:
     return datetime.now(CN_TZ).isoformat(timespec="seconds")
+
+
+def _validate_timestamp(stamp: str) -> None:
+    """时间戳必须是带时区的 ISO 8601 —— 否则跨时区复盘时没法还原。"""
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError as exc:
+        raise IllegalEntryError(f"created_at 不是合法的 ISO 8601：{stamp!r}") from exc
+    if parsed.tzinfo is None:
+        raise IllegalEntryError(f"created_at 必须带时区：{stamp!r}")
 
 
 def start(
@@ -67,6 +77,7 @@ def start(
         raise IllegalEntryError(f"底牌超出全牌数量：{dict(over)}")
 
     stamp = created_at or now()
+    _validate_timestamp(stamp)
     return MatchRecord(
         record_id=record_id or f"real-{stamp}",
         source=source,
@@ -111,6 +122,9 @@ def append_step(record: MatchRecord, player: str, action: Action) -> MatchRecord
 
     if action.is_play:
         _validate_play(record, snapshot, player, action)
+    elif not snapshot.last_move:
+        # 上一手为空 = 由这一家自由领出，此时不能不要
+        raise IllegalEntryError(f"{player} 是领出方，不能不要")
 
     step = Step(index=len(record.steps), player=player, action=action)
     updated = MatchRecord(**{**record.__dict__, "steps": record.steps + (step,)})

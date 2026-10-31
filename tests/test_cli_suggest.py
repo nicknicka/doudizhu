@@ -12,7 +12,7 @@ import pytest
 
 from ddz.cli.main import main
 from ddz.policy.douzero import DEFAULT_MODEL_DIR
-from ddz.policy.legality import legal_actions
+from ddz.rules import legal_actions
 from ddz.record.io import load
 from ddz.record.schema import Action, Step
 from ddz.record.state import derive
