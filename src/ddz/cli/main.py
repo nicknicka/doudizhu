@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -145,8 +146,22 @@ def _cmd_infer(args: argparse.Namespace) -> int:
 
     diag = distribution.diagnostics
     print(f"采样 {diag['n_particles']} 个粒子，池子 {diag['pool_size']} 张，"
-          f"其中不同分法 {diag['n_distinct_partitions']} 种，"
-          f"被可靠约束拦下 {diag['n_rejected']} 个")
+          f"其中不同分法 {diag['n_distinct_partitions']} 种")
+    print(f"被可靠约束拦下 {diag['n_rejected']} 个 —— 洗牌切片必然满足张数约束，"
+          "这个计数是 0 属于设计使然，不是没做过滤")
+
+    if args.dump:
+        payload = {
+            "diagnostics": {k: list(v) if isinstance(v, tuple) else v
+                            for k, v in diag.items()},
+            "opponents": list(distribution.opponents),
+            "particles": [dict(p.hands) for p in distribution.particles],
+        }
+        args.dump.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"粒子集合已写入 {args.dump}")
 
     cards = [args.card] if args.card else sorted(set(derive(record).pool))
     for card in cards:
@@ -282,6 +297,8 @@ def build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--particles", type=int, default=200)
     infer.add_argument("--seed", type=int, default=0)
     infer.add_argument("--card", default=None, help="只看某一张牌")
+    infer.add_argument("--dump", type=Path, default=None,
+                       help="把完整粒子集合写成 JSON（默认只打印边际概率）")
     infer.set_defaults(func=_cmd_infer)
 
     who = sub.add_parser("who", help="某张牌可能在谁手上")

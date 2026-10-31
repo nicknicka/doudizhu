@@ -160,6 +160,19 @@ class TestCli:
         main([*args, "--seed", "4"])
         assert capsys.readouterr().out == first
 
+    def test_can_dump_the_full_particle_set(self, tmp_path, capsys):
+        """验收标准要的是「粒子集合」，不只是边际概率。"""
+        import json
+
+        out = tmp_path / "particles.json"
+        assert main(["infer", "--in", str(fixture_path("landlord_up")),
+                     "--particles", "12", "--seed", "0", "--dump", str(out)]) == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert len(payload["particles"]) == 12
+        assert set(payload["opponents"]) == {"landlord", "landlord_down"}
+        for particle in payload["particles"]:
+            assert set(particle) == {"landlord", "landlord_down"}
+
     def test_rejects_a_bad_particle_count(self, capsys):
         assert main(["infer", "--in", str(fixture_path("landlord_up")),
                      "--particles", "0"]) == 2
