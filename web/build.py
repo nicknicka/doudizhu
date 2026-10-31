@@ -65,7 +65,7 @@ def card_summary(dist, pool) -> list[dict]:
     return rows
 
 
-def spread(points: list, n: int) -> list:
+def pick_steps(points: list, n: int) -> list:
     """从决策点序列里均匀挑 n 个（含首尾），让翻看时跨度够大。"""
     if len(points) <= n:
         return list(points)
@@ -124,7 +124,7 @@ def build_data() -> dict:
         "record_id": record.record_id,
         "me": record.me,
         "total_steps": len(record.steps),
-        "points": spread(points, STEPS_WANTED),
+        "points": pick_steps(points, STEPS_WANTED),
         "metrics": {
             "top1": round(metrics_ours.top1_accuracy, 4),
             "top1_base": round(metrics_base.top1_accuracy, 4),

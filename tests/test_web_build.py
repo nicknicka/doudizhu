@@ -95,12 +95,12 @@ def test_card_summary_puts_the_least_decided_card_first():
     assert set(cards[:2]) == {"7", "8"}
 
 
-def test_spread_picks_evenly_and_keeps_the_ends():
-    picked = build.spread(list(range(10)), 4)
+def test_pick_steps_picks_evenly_and_keeps_the_ends():
+    picked = build.pick_steps(list(range(10)), 4)
     assert picked[0] == 0 and picked[-1] == 9
     assert picked == sorted(picked)
     assert len(picked) == 4
 
 
-def test_spread_passes_through_when_short():
-    assert build.spread([1, 2, 3], 6) == [1, 2, 3]
+def test_pick_steps_passes_through_when_short():
+    assert build.pick_steps([1, 2, 3], 6) == [1, 2, 3]

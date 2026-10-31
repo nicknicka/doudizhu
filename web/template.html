@@ -143,7 +143,7 @@ const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = id => document.getElementById(id);
 const RANK = '3456789TJQKA2BR';
 const ROWS = 200;
-let pts = DATA.points, cur = 0, grid = [], order = [], rate = [], tipEl = $('tip');
+let pts = DATA.points, cur = 0, grid = [], order = [], tipEl = $('tip');
 let cardIndex = {};
 
 /* 粒子云：每个粒子是一次完整分配。行按"归 A 的张数"排序，
@@ -170,7 +170,6 @@ function build(){
     const sx=x.reduce((s,v)=>s+(v===1),0), sy=y.reduce((s,v)=>s+(v===1),0);
     return sx-sy || x.join('').localeCompare(y.join(''));
   });
-  rate = order.map((_,c)=> grid.filter(r=>r[c]===1).length/grid.length);
 }
 
 function sizeCanvas(){

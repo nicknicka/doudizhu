@@ -5,7 +5,7 @@
   "description": "展示页的构建与验证工具链（仅开发用，不是运行时依赖）",
   "scripts": {
     "verify": "node web/verify.mjs",
-    "serve": "npx --yes serve web -l 4173"
+    "serve": "python3 -m http.server 4173 --directory web"
   },
   "devDependencies": {
     "playwright": "^1.49.0"
