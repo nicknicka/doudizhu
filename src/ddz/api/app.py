@@ -25,8 +25,8 @@ from ddz.evaluation import evaluate
 from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
-from ddz.record.schema import SCORE_DISCLAIMER, Action, MatchRecord
-from ddz.record.state import derive, my_turn_steps
+from ddz.record.schema import SCORE_DISCLAIMER, TURN_ORDER, Action, MatchRecord
+from ddz.record.state import derive, my_turn_steps, relative_seats
 from ddz.rules import legal_actions
 from ddz.source import manual, sim
 
@@ -59,6 +59,22 @@ def render_page() -> str:
     for key, value in design_tokens().items():
         tpl = tpl.replace(key, value)
     return tpl
+
+
+def seat_view(record: MatchRecord) -> dict[str, Any]:
+    """每个座位：以我方为参照的相对位置，以及身份。
+
+    相对位置是领域知识（出手顺序的循环），由服务端算好下发；
+    前端只负责把 ``me`` / ``up`` / ``down`` 换成人话 —— 它不该自己推。
+    """
+    rel = relative_seats(record.me)
+    return {
+        player: {
+            "relative": "me" if player == record.me else rel[player],
+            "identity": "landlord" if player == "landlord" else "peasant",
+        }
+        for player in TURN_ORDER
+    }
 
 
 def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
@@ -117,6 +133,7 @@ def analyze(
         "my_steps": list(mine),
         "current_step": end,
         "current_acting": derive(record).acting,
+        "seats": seat_view(record),
         "snapshot": _snapshot_view(shown, target),
         "point": None,
     }

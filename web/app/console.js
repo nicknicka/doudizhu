@@ -2,7 +2,7 @@
 // 它只负责"把用户点的牌收上来、拼成请求"，合法性由服务端判。
 
 import { S, SEL, PAD, NEED, $ } from './state.js';
-import { RANKS, NAME, card, countIn, label } from './labels.js';
+import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText } from './labels.js';
 import { setBanner } from './api.js';
 
 let deps = { refresh: async () => {}, mutate: async () => false };
@@ -58,7 +58,7 @@ function renderPlay(){
   const v = S.snap, m = S.meta;
   const latest = v.step === m.total_steps;
   const mine = v.acting === v.me;
-  $('play-who').textContent = `现在该 ${label(v.acting)} 出牌`;
+  $('play-who').textContent = turnText(v.acting);
   $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
   chips($('play-chips'), SEL.play, '点下面的牌组成这一手；不要的话直接按「不要」');
   // 历史局面下不能续录，牌盘直接停用 —— 否则上限算的是那个旧局面的牌池
@@ -84,7 +84,7 @@ function renderPlay(){
   } else if (mine && picks.length){
     $('play-hint').textContent = '这些是模型给所有合法动作排的序（Q 值，不是胜率）。点一下就把这一手记下来，也可以自己在下面点牌。';
   } else {
-    $('play-hint').textContent = `${label(v.acting)} 出的牌从下面点出来；他没有出就按「不要」。`;
+    $('play-hint').textContent = `${actorName(v.acting)}出的牌从下面点出来；他没有出就按「不要」。`;
   }
 }
 
@@ -124,7 +124,7 @@ export function init({ refresh, mutate }){
     const me = $('new-me').value;
     const ok = await deps.mutate('/api/game/new',
       {me, my_hand: SEL.hand.join(''), landlord_cards: SEL.cards.join('')},
-      `已开局：我方 ${label(me)}。`);
+      `已开局：我方是${identityLabel(me)}。`);
     if (ok){ hideNewPanel(); SEL.hand = []; SEL.cards = []; }
   });
 
@@ -150,12 +150,12 @@ export function init({ refresh, mutate }){
   $('play-go').addEventListener('click', async () => {
     const player = S.snap.acting, cards = SEL.play.join('');
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards},
-                          `已录：${label(player)} ${cards}。`)) SEL.play = [];
+                          `已录：${actorName(player)} ${cards}。`)) SEL.play = [];
   });
   $('play-pass').addEventListener('click', async () => {
     const player = S.snap.acting;
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards:''},
-                          `已录：${label(player)} 不要。`)) SEL.play = [];
+                          `已录：${actorName(player)} 不要。`)) SEL.play = [];
   });
   $('play-picks').addEventListener('click', async e => {
     const b = e.target.closest('button[data-pick]'); if (!b) return;
@@ -163,6 +163,6 @@ export function init({ refresh, mutate }){
     if (!a) return;
     const player = S.snap.acting;
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards:a.cards.join('')},
-                          `已录：${label(player)} ${a.cards.length ? a.cards.join('') : '不要'}。`)) SEL.play = [];
+                          `已录：${actorName(player)} ${a.cards.length ? a.cards.join('') : '不要'}。`)) SEL.play = [];
   });
 }

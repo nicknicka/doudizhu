@@ -37,13 +37,21 @@ class FakePolicy:
         )
 
 
+# 地主开局 20 张，且三张底牌就在自己手里（manual.start 要求如此）
+LANDLORD_HAND = MY_HAND + ("9", "T", "J")
+
+
+def hand_for(me):
+    return LANDLORD_HAND if me == "landlord" else MY_HAND
+
+
 def make_record(me="landlord_up", steps=STEPS):
     return MatchRecord(
         record_id="fixture-1",
         source="real",
         created_at="2026-01-01T00:00:00+08:00",
         me=me,
-        initial=Initial(my_hand=MY_HAND, three_landlord_cards=LANDLORD_CARDS),
+        initial=Initial(my_hand=hand_for(me), three_landlord_cards=LANDLORD_CARDS),
         steps=steps,
     )
 
@@ -288,3 +296,18 @@ def test_analyze_reports_pool_counts():
     assert counts["3"] == 1, "我手上有三张 3，牌池只剩一张"
     assert counts["A"] == 2, "我手上有两张 A"
     assert counts["T"] == 4, "一张 T 都没现身"
+
+
+@pytest.mark.parametrize("me,expect_up,expect_down", [
+    ("landlord",      "landlord_up",   "landlord_down"),
+    ("landlord_down", "landlord",      "landlord_up"),
+    ("landlord_up",   "landlord_down", "landlord"),
+])
+def test_seat_mapping_is_relative_to_me(me, expect_up, expect_down):
+    """上下家以**我方**为参照，与谁是地主无关 —— 两者经常是反的。"""
+    seats = analyze(make_record(me=me, steps=()), FakePolicy())["seats"]
+    assert seats[me]["relative"] == "me"
+    assert seats[expect_up]["relative"] == "up"
+    assert seats[expect_down]["relative"] == "down"
+    assert seats["landlord"]["identity"] == "landlord"
+    assert all(seats[p]["identity"] == "peasant" for p in seats if p != "landlord")

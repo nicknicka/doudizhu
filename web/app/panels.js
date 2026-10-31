@@ -89,7 +89,8 @@ function renderCloudAndList(){
   const p = S.point;
   $('cloud').classList.toggle('is-empty', !p);
   if (!p){ $('la').textContent = ''; $('lb').textContent = ''; $('plist').innerHTML = ''; return; }
-  $('la').textContent = p.opponents[0]; $('lb').textContent = p.opponents[1];
+  // 图例用 上家 / 下家，不再漏内部英文 id
+  $('la').textContent = label(p.opponents[0]); $('lb').textContent = label(p.opponents[1]);
   const head = '<li class="head"><span></span>'
     + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
   const rows = list => head + list.map(r =>

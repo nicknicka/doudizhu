@@ -68,8 +68,10 @@
   .seat.is-acting{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
   .seat-head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
   .seat-head b{font-weight:400;font-size:12px}
-  .seat-head em{font-style:normal;font-size:12px;color:var(--ground);background:var(--accent);
-                padding:0 4px}
+  /* 身份是徽章，不是座位名 —— 两者正交 */
+  .seat-head .badge{font-size:12px;padding:0 5px;color:var(--muted);
+                    border:1px solid color-mix(in srgb,var(--ink) 40%,transparent)}
+  .seat-head .badge.landlord{color:var(--ground);background:var(--accent);border-color:var(--accent)}
   .seat-head .cnt{margin-left:auto;font-size:12px}
   .seat-head .turn-flag{font-size:12px;color:var(--accent)}
   .seat-hand{display:flex;flex-wrap:wrap;gap:2px;min-height:30px;align-items:flex-start}

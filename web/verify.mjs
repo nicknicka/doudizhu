@@ -44,6 +44,25 @@ try {
   await page.waitForTimeout(900);
   await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
 
+  // 座位与人称：以我方为参照（我 / 上家 / 下家），身份是徽章不是座位名
+  const boardText = await text(page, '#board');
+  for (const word of ['我', '上家', '下家']) {
+    if (!boardText.includes(word)) problems.push(`牌桌上没出现「${word}」——座位名没有以我方为参照`);
+  }
+  if ((await page.locator('#board .seat-head .badge.landlord').count()) !== 1) {
+    problems.push('地主身份徽章不是恰好一个');
+  }
+  if (!boardText.includes('该你出') && !boardText.includes('轮到你出牌')) {
+    problems.push('没标出"该我出"');
+  }
+  // 决策点按"我的第几次出牌机会"编号，全局手数只作次要信息
+  const firstStep = ((await page.locator('#steps button').first().textContent()) ?? '').trim();
+  if (!/^第 \d+ 次$/.test(firstStep)) problems.push(`决策点编号不是「第 N 次」：${firstStep}`);
+  if (!(await page.locator('#steps button').first().getAttribute('title') || '').includes('全局第')) {
+    problems.push('决策点没把全局手数留作次要信息');
+  }
+  if (!(await text(page, '#who')).includes('我的第')) problems.push('抬头没给出"我的第几次出牌机会"');
+
   // 牌桌：三个座位、各自张数、我的一手是真牌面
   if ((await page.locator('#board .seat').count()) !== 3) problems.push('牌桌不是三个座位');
   if (!/\d+ 张/.test(await text(page, '#board'))) problems.push('牌桌没显示张数');
@@ -163,5 +182,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 均正常');
+  : '✔ 无 pageerror / console error；座位以我方为参照 + 牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 均正常');
 process.exit(problems.length ? 1 : 0);
