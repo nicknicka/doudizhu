@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from ddz.evaluation import MissingGroundTruthError, evaluate
+from ddz.evaluation.calibration import SCORE_CAVEAT, NotCalibratableError, calibrate
 from ddz.inference import bounds_for, sample, unseen_copies
 from ddz.policy.douzero import DEFAULT_MODEL_DIR, DouZeroPolicy, NotYourTurnError
 from ddz.record.io import load, save
@@ -132,6 +133,32 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
     if args.suggest:
         _print_advice(record, DouZeroPolicy(args.models), args.top_k)
+    return 0
+
+
+def _cmd_calibrate(args: argparse.Namespace) -> int:
+    """模型说 60%，实际真的 60% 吗？"""
+    paths = sorted(args.in_dir.glob("*.json"))
+    if not paths:
+        print(f"{args.in_dir} 里没有记录文件", file=sys.stderr)
+        return 2
+
+    try:
+        report = calibrate(
+            [load(p) for p in paths],
+            DouZeroPolicy(args.models),
+            n_buckets=args.buckets,
+            step_stride=args.stride,
+        )
+    except (NotCalibratableError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    print(SCORE_CAVEAT)
+    print()
+    print(report.as_table())
+    print()
+    print(f"样本 {report.n_samples} 个决策点 · seed 无关（模型推理本身确定）")
     return 0
 
 
@@ -322,6 +349,13 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--top-k", type=int, default=3)
     show.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
     show.set_defaults(func=_cmd_show)
+
+    calibrate_cmd = sub.add_parser("calibrate", help="模型估计值到底校准得怎么样")
+    calibrate_cmd.add_argument("--in-dir", type=Path, required=True)
+    calibrate_cmd.add_argument("--buckets", type=int, default=5)
+    calibrate_cmd.add_argument("--stride", type=int, default=3)
+    calibrate_cmd.add_argument("--models", type=Path, default=DEFAULT_MODEL_DIR)
+    calibrate_cmd.set_defaults(func=_cmd_calibrate)
 
     evaluate_cmd = sub.add_parser("evaluate", help="在批量仿真局上评测推断质量")
     evaluate_cmd.add_argument("--in-dir", type=Path, required=True,
