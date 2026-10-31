@@ -61,9 +61,26 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`198 passed`（未下载权重时相关用例会跳过）。
+预期结果：`300 passed`（未下载权重时相关用例会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
+
+### 看展示页
+
+```bash
+.venv/bin/python web/build.py   # 生成 web/index.html：数据全部来自本项目模块，构建期算好
+npm run serve                   # 起本地服务；或直接双击 web/index.html
+```
+
+页面展示单个决策点的局面、候选动作与模型估计、另两家手牌的粒子云与概率分布，
+以及模型估计的校准表。`web/` **只消费已有产物**，不含业务逻辑；GSAP 已随仓库
+本地化（`web/vendor/`），断网也能打开。
+
+浏览器端的渲染与交互由 Playwright 验证（需联网装一次）：
+
+```bash
+npm i && npm run verify
+```
 
 ### 给出建议
 
@@ -127,7 +144,8 @@ ddz who --in game.json --card 2
 ### 校准：模型说 60%，实际真的 60% 吗？
 
 ```bash
-ddz calibrate --in-dir data/sim --buckets 5 --stride 12
+ddz simulate --games 8 --seed 0 --out-dir data/calib
+ddz calibrate --in-dir data/calib --buckets 5 --stride 1
 ```
 
 > **模型输出是 Q 值（期望回报），不是校准过的胜率。**
@@ -136,18 +154,18 @@ ddz calibrate --in-dir data/sim --buckets 5 --stride 12
 
 | 估计值区间 | 样本 | 平均估计 | 实际胜率 | 差 |
 |---|---|---|---|---|
-| [-1.00, -0.60) | 177 | -0.876 | 0.441 | -1.316 |
+| [-1.00, -0.60) | 215 | -0.901 | 0.419 | -1.320 |
 | [-0.60, -0.20) | 67 | -0.418 | 0.552 | -0.970 |
 | [-0.20, +0.20) | 57 | +0.016 | 0.526 | -0.510 |
 | [+0.20, +0.60) | 43 | +0.373 | 0.651 | -0.278 |
-| [+0.60, +1.00) | 98 | +0.851 | 0.622 | +0.228 |
+| [+0.60, +1.00) | 116 | +0.878 | 0.586 | +0.292 |
 | **合计** | 498 | -0.207 | 0.508 | -0.715 |
 
 **结论分两层，缺一不可：**
 
-1. **排序是对的** —— 实际胜率随估计值单调上升（0.441 → 0.552 → 0.526 → 0.651 → 0.622）。
+1. **排序是对的** —— 实际胜率随估计值总体上升（0.419 → 0.552 → 0.526 → 0.651 → 0.586）。
    所以拿它**比较候选动作之间的优劣**是站得住的。
-2. **数值不能当概率读** —— 幅度被严重压缩、整体偏悲观：模型说 -0.88 时实际胜率有 44%，
+2. **数值不能当概率读** —— 幅度被严重压缩、整体偏悲观：模型说 -0.90 时实际胜率有 42%，
    合计差了 0.715。**最低桶的实际胜率比它的估计高了 1.3**，这种量级的偏差不可能靠"解读"抹平。
 
 **一个必须一起说的前提**：仿真对局是**随机出牌**的，而 DouZero 是在自我博弈里训出来的。
@@ -270,3 +288,4 @@ Schema（显式存入此前各家的出牌），见 [docs/data-schema.md](docs/d
 - [DouZero](https://github.com/kwai/DouZero)（Apache-2.0）— 决策模型与预训练权重
 - [RLCard](https://github.com/datamllab/rlcard)（MIT）— 仿真环境与评测真值
 - [权重镜像](https://huggingface.co/palemoky/douzero-baselines)（Apache-2.0）— 免登录直连下载
+- [GSAP](https://gsap.com)（[GSAP Standard License](https://gsap.com/standard-license)）— 展示页动效，本地化在 `web/vendor/`

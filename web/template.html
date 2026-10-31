@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>斗地主决策助手</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
 <style>
   /* 配色 / 字体 / 侧栏位置由外部随机串派生（web/design-seed.txt），
      构建时注入。随机串本身不在这个文件里。 */
@@ -53,9 +53,26 @@
   .keys{display:flex;gap:14px;font-family:var(--data);font-size:11px;color:var(--muted);
         margin-top:10px}
   .keys i{display:inline-block;width:6px;height:6px;margin-right:5px;vertical-align:1px}
-  .plist{list-style:none;margin:0;padding:0;font-family:var(--data);font-size:12px}
-  .plist li{display:flex;justify-content:space-between;padding:7px 0;color:var(--muted)}
-  .plist li b{font-weight:400;color:var(--ink)}
+  .side-h{font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;
+          color:var(--muted);margin:0 0 14px}
+  .plist{list-style:none;margin:0 0 36px;padding:0;font-family:var(--data);font-size:12px}
+  .plist li{display:grid;grid-template-columns:20px 1fr 1fr;gap:8px;align-items:baseline;
+            padding:6px 0;color:var(--muted)}
+  .plist li.head{padding:0 0 4px;font-size:10px}
+  .plist .c{color:var(--ink);font-size:13px}
+  .plist .p{text-align:right}
+  .plist .p b{font-weight:400;color:var(--ink)}
+  .plist .p small{display:block;margin-top:2px;font-size:10px}
+  .plist .p.a small{color:var(--side-a)}
+  .plist .p.b small{color:var(--side-b)}
+  .calib{width:100%;border-collapse:collapse;font-family:var(--data);font-size:11px;
+         color:var(--muted)}
+  .calib th{font-weight:500;text-align:right;padding:0 0 6px;font-size:10px}
+  .calib th:first-child{text-align:left}
+  .calib td{text-align:right;padding:5px 0;
+            border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
+  .calib td:first-child{text-align:left;color:var(--ink)}
+  .calib tr:last-child td{color:var(--ink)}
   .steps{display:flex;gap:6px;margin-bottom:36px;font-family:var(--data)}
   .steps button{background:none;border:0;padding:3px 0;margin-right:14px;cursor:pointer;
     font:inherit;font-size:12px;color:var(--muted);
@@ -108,7 +125,11 @@
           <span><i id="kb" style="background:var(--side-b)"></i><span id="lb"></span></span>
         </div>
       </div>
+      <h2 class="side-h">某张牌在谁手上</h2>
       <ul class="plist" id="plist"></ul>
+      <h2 class="side-h">校准 · 估计值 vs 实际胜率</h2>
+      <table class="calib" id="calib"></table>
+      <p class="caveat" id="calib-caveat"></p>
     </aside>
   </div>
 
@@ -123,6 +144,7 @@ const $ = id => document.getElementById(id);
 const RANK = '3456789TJQKA2BR';
 const ROWS = 200;
 let pts = DATA.points, cur = 0, grid = [], order = [], rate = [], tipEl = $('tip');
+let cardIndex = {};
 
 /* 粒子云：每个粒子是一次完整分配。行按"归 A 的张数"排序，
    相似的假设聚成块 —— 结构从排序里长出来，不是另外画的。 */
@@ -195,11 +217,34 @@ function render(){
 
   $('la').textContent = p.opponents[0]; $('lb').textContent = p.opponents[1];
 
-  const rows = order.map((c,i)=>[c, rate[i]])
-    .filter(([c,r]) => r>0 && r<1)
-    .sort((x,y)=>Math.abs(y[1]-.5)-Math.abs(x[1]-.5)).slice(0,6);
-  $('plist').innerHTML = rows.map(([c,r])=>
-    `<li><span>${c}</span><b>${(r*100).toFixed(0)}%</b></li>`).join('');
+  // 口径与 CLI `ddz infer` 对齐：一张牌一行，两个对手各自的
+  // P(至少一张) 与期望张数 —— 不再把"第 k 张副本的累积概率"当同一件事报。
+  const name = {landlord:'地主', landlord_down:'下家', landlord_up:'上家'};
+  const label = o => name[o] || o;
+  cardIndex = Object.fromEntries(p.cards.map(r=>[r.card, r]));
+  $('plist').innerHTML = [
+    '<li class="head"><span></span>'
+      + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('')
+      + '</li>',
+    ...p.cards.slice(0,6).map(r=>
+      `<li><span class="c">${r.card}</span>`
+      + p.opponents.map((o,i)=>{
+          const v = r.by[o];
+          return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
+               + `<small>${v.expected.toFixed(2)} 张</small></span>`;
+        }).join('') + '</li>')
+  ].join('');
+
+  const cal = DATA.calibration;
+  $('calib').innerHTML =
+    '<tr><th>估计区间</th><th>样本</th><th>平均估计</th><th>实际</th></tr>'
+    + cal.buckets.map(b=>
+        `<tr><td>${b.low.toFixed(2)}~${b.high.toFixed(2)}</td><td>${b.n}</td>`
+        + `<td>${b.mean_estimate.toFixed(3)}</td><td>${b.actual_rate.toFixed(3)}</td></tr>`
+      ).join('')
+    + `<tr><td>合计</td><td>${cal.n_samples}</td>`
+    + `<td>${cal.mean_estimate.toFixed(3)}</td><td>${cal.actual_rate.toFixed(3)}</td></tr>`;
+  $('calib-caveat').textContent = DATA.score_caveat;
 
   $('foot').innerHTML = [
     ['Top-1', (DATA.metrics.top1*100).toFixed(1)+'%', `基线 ${(DATA.metrics.top1_base*100).toFixed(1)}%`],
@@ -214,6 +259,8 @@ function render(){
 
 function go(i){
   if (i===cur) return; cur=i; render();
+  // 说明：每换一步都会用新种子重采粒子（seed=step），所以"同一个粒子移动"
+  // 没有意义。这里做的是**分层过渡**——云淡入 + 候选逐条入场，不是逐粒子 morph。
   if (reduce) return;
   gsap.fromTo(cv,{opacity:.15},{opacity:1,duration:.5,ease:'power2.out'});
   gsap.fromTo('#bets li',{y:10,opacity:0},{y:0,opacity:1,duration:.42,stagger:.06,ease:'power3.out'});
@@ -224,7 +271,10 @@ cv.addEventListener('mousemove', e=>{
   const c = Math.floor((e.clientX-r.left)/(r.width/order.length));
   if (!(c>=0 && c<order.length)) return;
   draw(c);
-  tipEl.textContent = `${order[c]} · ${(rate[c]*100).toFixed(0)}% ${pts[cur].opponents[0]}`;
+  const who = pts[cur].opponents[0], row = cardIndex[order[c]];
+  tipEl.textContent = row
+    ? `${order[c]} · ${(row.by[who].p*100).toFixed(0)}% ${who} · 期望 ${row.by[who].expected.toFixed(2)} 张`
+    : `${order[c]}`;
   tipEl.style.opacity=1;
   tipEl.style.left=(e.clientX+12)+'px'; tipEl.style.top=(e.clientY-28)+'px';
 });
