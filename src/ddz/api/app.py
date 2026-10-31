@@ -235,7 +235,6 @@ class StepRequest(BaseModel):
 
 class UndoRequest(BaseModel):
     record: dict[str, Any]
-    keep: int | None = None   # 给了就截断到第 keep 手，否则撤最后一手
 
 
 def create_app() -> FastAPI:
@@ -291,11 +290,7 @@ def create_app() -> FastAPI:
     def game_undo(req: UndoRequest) -> dict[str, Any]:
         try:
             record = MatchRecord.from_json(req.record)
-            updated = (
-                manual.truncate(record, req.keep)
-                if req.keep is not None
-                else manual.undo(record)
-            )
+            updated = manual.undo(record)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"record": updated.to_json()}

@@ -483,7 +483,7 @@ async function refresh(target, note){
 
 /* 会改记录的三个动作：新开一局 / 录一手 / 撤销。改完统一重算。 */
 async function mutate(path, body, note){
-  if (S.busy) return;
+  if (S.busy) return false;
   const previous = S.record;
   S.busy = true;
   setBanner('提交中…', '');
@@ -493,10 +493,12 @@ async function mutate(path, body, note){
   } catch (err){
     S.busy = false;
     setBanner(err.message, 'error');
-    return;
+    return false;
   }
   S.busy = false;
-  if (!(await refresh(null, note))) S.record = previous;
+  const ok = await refresh(null, note);
+  if (!ok) S.record = previous;
+  return ok;
 }
 
 async function loadRecord(record, note){
@@ -527,14 +529,14 @@ $('new-go').addEventListener('click', () => {
 
 function recordStep(cards, shown){
   const player = S.snap.acting;
-  mutate('/api/game/step', {record: S.record, player, cards},
-         `已录：${label(player)} ${shown}。`);
+  return mutate('/api/game/step', {record: S.record, player, cards},
+                `已录：${label(player)} ${shown}。`);
 }
-$('play-go').addEventListener('click', () => {
+$('play-go').addEventListener('click', async () => {
   const cards = $('play-cards').value.trim();
   if (!cards){ setBanner('要么填牌点「出牌」，要么点「不要」。', 'error'); return; }
-  recordStep(cards, cards);
-  $('play-cards').value = '';
+  // 只有录进去了才清空：被拒的话留着，让人直接改了再点，别逼着重打
+  if (await recordStep(cards, cards)) $('play-cards').value = '';
 });
 $('play-go').disabled = true;
 $('play-pass').addEventListener('click', () => recordStep('', '不要'));

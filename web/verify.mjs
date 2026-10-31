@@ -127,6 +127,7 @@ try {
   await page.waitForTimeout(900);
   expectingError = false;
   if (!(await text(page, '#banner')).includes('已经出过')) problems.push('非法出牌没被拦下');
+  if ((await page.inputValue('#play-cards')) !== '33') problems.push('出牌被拒后输入框被清空了');
 
   // 合法录两手 → 轮到我方，候选与步号都该出现
   await page.fill('#play-cards', '99');
