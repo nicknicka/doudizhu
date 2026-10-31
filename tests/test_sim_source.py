@@ -87,6 +87,32 @@ class TestCli:
                      "--out-dir", str(tmp_path)]) == 0
         assert len(list(tmp_path.glob("*.json"))) == 6
 
+    def test_same_seed_is_reproducible_across_processes(self, tmp_path):
+        """必须在**不同进程**之间也一致。
+
+        同一进程内重跑测不出这件事：RLCard 的合法动作来自内部 set，
+        列表顺序随 PYTHONHASHSEED 变化，直接 random.choice 会让同一个 seed
+        在不同进程里走出不同的对局。这里故意用不同的哈希种子各跑一次。
+        """
+        import os
+        import subprocess
+        import sys
+
+        runs = []
+        for i, hash_seed in enumerate(("0", "1")):
+            out_dir = tmp_path / f"run{i}"
+            subprocess.run(
+                [sys.executable, "-m", "ddz", "simulate", "--games", "2",
+                 "--seed", "123", "--out-dir", str(out_dir)],
+                check=True, capture_output=True,
+                env={**os.environ, "PYTHONHASHSEED": hash_seed},
+            )
+            runs.append({p.name: p.read_bytes() for p in sorted(out_dir.iterdir())})
+
+        assert runs[0].keys() == runs[1].keys()
+        for name in runs[0]:
+            assert runs[0][name] == runs[1][name], f"{name} 在两个进程里不一致"
+
     def test_output_is_reproducible(self, tmp_path):
         first, second = tmp_path / "a", tmp_path / "b"
         main(["simulate", "--games", "1", "--seed", "5", "--out-dir", str(first)])

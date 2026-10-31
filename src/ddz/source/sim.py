@@ -54,7 +54,10 @@ def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
     while not env.is_over():
         if len(steps) >= max_steps:
             raise SimulationError(f"seed={seed} 超过 {max_steps} 步仍未结束")
-        raw = random.choice(state["raw_legal_actions"])
+        # 必须先排序：RLCard 的合法动作来自内部的 set，列表顺序随
+        # PYTHONHASHSEED 变化，直接 random.choice 会让同一个 seed 在不同进程里
+        # 走出不同的对局。
+        raw = random.choice(sorted(state["raw_legal_actions"]))
         action = Action(kind="pass") if raw == "pass" else Action(kind="play", cards=tuple(raw))
         steps.append(
             Step(index=len(steps), player=PLAYER_ID_TO_POSITION[player_id], action=action)
