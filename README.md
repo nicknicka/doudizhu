@@ -301,3 +301,4 @@ Schema（显式存入此前各家的出牌），见 [docs/data-schema.md](docs/d
 - [RLCard](https://github.com/datamllab/rlcard)（MIT）— 仿真环境与评测真值
 - [权重镜像](https://huggingface.co/palemoky/douzero-baselines)（Apache-2.0）— 免登录直连下载
 - [GSAP](https://gsap.com)（[GSAP Standard License](https://gsap.com/standard-license)）— 展示页动效，本地化在 `web/vendor/`
+- [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)（SIL OFL 1.1）— 像素字体，本地化在 `web/vendor/`
