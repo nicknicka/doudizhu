@@ -50,11 +50,11 @@ def make_record(me="landlord_up", steps=STEPS):
 
 def test_analyze_describes_the_snapshot():
     got = analyze(make_record(), FakePolicy())
-    assert got["step"] == 2, "默认应走到第一个轮到我方的决策点"
-    assert got["acting"] == "landlord_up" == got["me"]
-    assert got["remaining"] == {"landlord": 18, "landlord_down": 17, "landlord_up": 17}
-    assert got["last_move"] == ["9", "9"]
-    assert got["opponents"] == ["landlord", "landlord_down"]
+    assert got["snapshot"]["step"] == 2, "默认应走到第一个轮到我方的决策点"
+    assert got["snapshot"]["acting"] == "landlord_up" == got["me"]
+    assert got["snapshot"]["remaining"] == {"landlord": 18, "landlord_down": 17, "landlord_up": 17}
+    assert got["snapshot"]["last_move"] == ["9", "9"]
+    assert got["point"]["opponents"] == ["landlord", "landlord_down"]
 
 
 def test_analyze_lists_all_my_turn_steps():
@@ -64,7 +64,7 @@ def test_analyze_lists_all_my_turn_steps():
 
 def test_analyze_offers_more_than_one_candidate():
     got = analyze(make_record(), FakePolicy())
-    labels = [c["label"] for c in got["candidates"]]
+    labels = [c["label"] for c in got["point"]["candidates"]]
     assert "不出" in labels
     assert "AA" in labels, f"我手上有一对 A 能压 9，候选里应有它：{labels}"
 
@@ -72,9 +72,9 @@ def test_analyze_offers_more_than_one_candidate():
 def test_analyze_card_probabilities_are_conserved():
     """全部牌的期望张数加总 == 牌池张数 —— 牌既不会凭空多，也不会凭空少。"""
     got = analyze(make_record(), FakePolicy(), particles=80)
-    total = sum(v["expected"] for row in got["cards"] for v in row["by"].values())
-    assert got["pool_size"] == 35
-    assert abs(total - got["pool_size"]) < 0.5, f"期望张数加总 {total} 对不上牌池"
+    total = sum(v["expected"] for row in got["point"]["cards"] for v in row["by"].values())
+    assert got["snapshot"]["pool_size"] == 35
+    assert abs(total - got["snapshot"]["pool_size"]) < 0.5, f"期望张数加总 {total} 对不上牌池"
 
 
 def test_analyze_refuses_a_step_where_it_is_not_my_turn():
@@ -89,8 +89,8 @@ def test_analyze_refuses_a_step_out_of_range():
 
 def test_analyze_particles_are_complete_two_hand_partitions():
     got = analyze(make_record(), FakePolicy(), particles=50)
-    assert len(got["particles"]) == 50
-    for hand_a, hand_b in got["particles"]:
+    assert len(got["point"]["particles"]) == 50
+    for hand_a, hand_b in got["point"]["particles"]:
         assert len(hand_a) == 18 and len(hand_b) == 17
 
 
@@ -130,3 +130,133 @@ def test_index_serves_the_page():
         assert "斗地主决策助手" in r.text
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------- 网页录入：与 CLI 的 new / play / undo 同一套校验 ----------
+
+MY_HAND_STR = "".join(MY_HAND)          # 333444555666778AA
+LANDLORD_STR = "".join(LANDLORD_CARDS)  # 9TJ
+
+
+def _new_game(client, **overrides):
+    payload = {
+        "me": "landlord_up",
+        "my_hand": MY_HAND_STR,
+        "landlord_cards": LANDLORD_STR,
+        "record_id": "web-1",
+        "created_at": "2026-01-01T00:00:00+08:00",
+    }
+    payload.update(overrides)
+    r = client.post("/api/game/new", json=payload)
+    assert r.status_code == 200, r.text
+    return r.json()["record"]
+
+
+def test_new_game_returns_a_record_the_cli_could_have_written():
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        assert record["record_id"] == "web-1"
+        assert record["source"] == "real"
+        assert record["me"] == "landlord_up"
+        assert record["steps"] == []
+        # 手牌按字符表规范化存放，和 CLI 录出来的完全一样
+        assert record["initial"]["my_hand"] == list(MY_HAND)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_new_game_reports_a_bad_hand_as_400():
+    client = _client_with_fake_policy()
+    try:
+        r = client.post("/api/game/new", json={
+            "me": "landlord_up", "my_hand": "345", "landlord_cards": LANDLORD_STR,
+        })
+        assert r.status_code == 400
+        assert "17 张" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_step_records_a_validated_hand():
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post("/api/game/step",
+                        json={"record": record, "player": "landlord", "cards": "99"})
+        assert r.status_code == 200, r.text
+        record = r.json()["record"]
+        assert [s["action"]["cards"] for s in record["steps"]] == [["9", "9"]]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_step_refuses_the_wrong_player():
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post("/api/game/step",
+                        json={"record": record, "player": "landlord_up", "cards": "99"})
+        assert r.status_code == 400
+        assert "现在该 landlord 出牌" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_step_refuses_cards_that_are_not_available():
+    """我手上有三张 3，牌池只剩一张 —— 地主不可能打出两张 3。"""
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post("/api/game/step",
+                        json={"record": record, "player": "landlord", "cards": "33"})
+        assert r.status_code == 400
+        assert "已经出过" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_step_and_undo_then_analyze_round_trips():
+    """录两手、撤一手，再让后端算这个局面 —— 网页录入与 CLI 是同一条数据通路。"""
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        record = client.post("/api/game/step",
+                             json={"record": record, "player": "landlord", "cards": "99"}
+                             ).json()["record"]
+        record = client.post("/api/game/step",
+                             json={"record": record, "player": "landlord_down", "cards": ""}
+                             ).json()["record"]
+        got = client.post("/api/analyze", json={"record": record, "particles": 40}).json()
+        assert got["point"]["step"] == 2 and got["snapshot"]["acting"] == "landlord_up"
+        assert [s["action"]["type"] for s in record["steps"]] == ["play", "pass"]
+
+        undone = client.post("/api/game/undo", json={"record": record}).json()["record"]
+        assert len(undone["steps"]) == 1
+        # 撤销之后不该再轮到我方：仍然给局面，但不再给候选/分布
+        after = client.post("/api/analyze", json={"record": undone}).json()
+        assert after["point"] is None
+        assert after["snapshot"]["acting"] == "landlord_down"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_undo_on_an_empty_record_is_refused():
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post("/api/game/undo", json={"record": record})
+        assert r.status_code == 400
+        assert "无法撤销" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_analyze_before_my_turn_gives_the_position_without_a_point():
+    """刚开完局就还轮不到我方 —— 页面照样得能显示局面。"""
+    got = analyze(make_record(steps=()), FakePolicy())
+    assert got["my_steps"] == []
+    assert got["point"] is None
+    assert got["current_acting"] == "landlord"
+    assert got["snapshot"]["step"] == 0
+    assert got["snapshot"]["remaining"] == {"landlord": 20, "landlord_down": 17, "landlord_up": 17}

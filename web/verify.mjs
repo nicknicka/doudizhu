@@ -12,6 +12,9 @@ const PORT = 8791;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 const problems = [];
+// 我们**故意**触发非法录入来看错误提示；浏览器会给那次 400 记一条 console error，
+// 那是预期内的，不该算问题。
+let expectingError = false;
 const server = spawn('.venv/bin/python', ['-m', 'ddz', 'serve', '--port', String(PORT)],
   { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
 const stopServer = () => { try { server.kill(); } catch { /* 已经退了 */ } };
@@ -34,7 +37,9 @@ try {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
   page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
-  page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+  page.on('console', m => {
+    if (m.type() === 'error' && !expectingError) problems.push(`console: ${m.text()}`);
+  });
 
   await page.goto(`${BASE}/`);
   await page.waitForSelector('#steps button', { timeout: 40000 });   // 首次 /api/demo 要算校准
@@ -105,6 +110,38 @@ try {
     problems.push('载入自己的记录后没有反馈');
   }
 
+  // 交互 7：在网页上直接开局 → 录牌 → 撤销，完全不碰命令行
+  await page.selectOption('#new-me', 'landlord_up');
+  await page.fill('#new-hand', '333444555666778AA');
+  await page.fill('#new-cards', '9TJ');
+  await page.click('#new-go');
+  await page.waitForTimeout(1500);
+  if (!(await text(page, '#banner')).includes('已开局')) problems.push('网页开局没有反馈');
+  if (!(await text(page, '#who')).includes('该 地主')) problems.push('开局后没显示该地主出牌');
+  if (await page.locator('#bets li').count()) problems.push('还没轮到我方却给了候选');
+
+  // 非法出牌必须被拦下（我手上有三张 3，地主打不出两张 3）
+  expectingError = true;
+  await page.fill('#play-cards', '33');
+  await page.click('#play-go');
+  await page.waitForTimeout(900);
+  expectingError = false;
+  if (!(await text(page, '#banner')).includes('已经出过')) problems.push('非法出牌没被拦下');
+
+  // 合法录两手 → 轮到我方，候选与步号都该出现
+  await page.fill('#play-cards', '99');
+  await page.click('#play-go');
+  await page.waitForTimeout(1000);
+  await page.click('#play-pass');
+  await page.waitForTimeout(1000);
+  if (!(await page.locator('#bets li').count())) problems.push('录到轮我方后没有候选');
+  if (!(await page.locator('#steps button').count())) problems.push('录到轮我方后没有步号');
+  await page.screenshot({ path: '/tmp/ddz-web-5.png', fullPage: true });
+
+  await page.click('#undo');
+  await page.waitForTimeout(1000);
+  if (!(await text(page, '#banner')).includes('已撤销')) problems.push('撤销没有反馈');
+
   // 窄屏
   await page.setViewportSize({ width: 420, height: 1200 });
   await page.waitForTimeout(600);
@@ -119,5 +156,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；渲染四处 + 步号(点/键) + 交叉高亮 + 钉住(鼠标/键盘) + 载入记录 均正常');
+  : '✔ 无 pageerror / console error；渲染四处 + 步号(点/键) + 交叉高亮 + 钉住(鼠标/键盘) + 载入记录 + 网页开局/录牌/撤销 均正常');
 process.exit(problems.length ? 1 : 0);

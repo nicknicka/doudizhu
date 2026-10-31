@@ -24,10 +24,10 @@ from ddz.evaluation import evaluate
 from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
-from ddz.record.schema import SCORE_DISCLAIMER, MatchRecord
+from ddz.record.schema import SCORE_DISCLAIMER, Action, MatchRecord
 from ddz.record.state import derive, my_turn_steps
 from ddz.rules import legal_actions
-from ddz.source import sim
+from ddz.source import manual, sim
 
 REPO = Path(__file__).resolve().parents[3]
 WEB = REPO / "web"
@@ -60,6 +60,19 @@ def render_page() -> str:
     return tpl
 
 
+def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
+    """页面「局面」那一栏要的东西。"""
+    return {
+        "step": step,
+        "acting": snapshot.acting,
+        "my_hand": list(snapshot.my_hand),
+        "remaining": dict(snapshot.num_cards_left),
+        "played": {p: list(c) for p, c in snapshot.played_cards.items()},
+        "last_move": list(snapshot.last_move),
+        "pool_size": len(snapshot.pool),
+    }
+
+
 def analyze(
     record: MatchRecord,
     policy: DouZeroPolicy,
@@ -69,8 +82,12 @@ def analyze(
 ) -> dict[str, Any]:
     """算出一个决策点要显示的全部东西。
 
-    ``step=None`` 表示「第一个轮到我方的决策点」—— 页面刚打开或刚载入一份
-    记录时并不知道该从哪儿看起，由这里决定。
+    返回分两层：``snapshot`` 是**当前显示的那个局面**（一定在），``point`` 是
+    决策点专属的东西（候选、粒子、逐张概率）—— 只有当这个局面确实轮到我方
+    时才存在。刚开完局还没轮到我方时，``point`` 就是 ``None``，页面照样显示局面。
+
+    ``step=None`` 表示"给我当前该看的那个点"：优先当前就该我动的那个点，
+    否则退回第一个轮到我方的决策点；一个都没有时 ``point`` 为 ``None``。
     """
     if particles < 1:
         raise ValueError("粒子数至少为 1")
@@ -78,36 +95,45 @@ def analyze(
         raise ValueError("top_k 必须为正")
 
     mine = my_turn_steps(record)
-    if not mine:
-        raise ValueError("这局记录里没有轮到我方的决策点")
+    end = len(record.steps)
 
-    target = mine[0] if step is None else step
-    if not 0 <= target <= len(record.steps):
-        raise ValueError(f"步号要在 0 到 {len(record.steps)} 之间，收到 {step}")
-    if target not in mine:
-        raise ValueError(f"第 {target} 手轮到 {derive(record, steps=record.steps[:target]).acting}，不是我方（{record.me}）")
+    if step is None:
+        target = end if end in mine else (mine[0] if mine else None)
+    else:
+        if not 0 <= step <= end:
+            raise ValueError(f"步号要在 0 到 {end} 之间，收到 {step}")
+        if step not in mine:
+            raise ValueError(
+                f"第 {step} 手轮到 {derive(record, steps=record.steps[:step]).acting}，"
+                f"不是我方（{record.me}）"
+            )
+        target = step
 
-    snapshot = derive(record, steps=record.steps[:target])
-    actions = legal_actions(snapshot)
-    if not actions:
-        raise ValueError("这个局面下我方没有合法动作")
+    shown_step = end if target is None else target
+    shown = derive(record, steps=record.steps[:shown_step])
 
-    candidates, diagnostics = policy.rank(snapshot, actions, top_k=top_k)
-    dist = sample(snapshot, n_particles=particles, seed=target)
-
-    return {
+    view: dict[str, Any] = {
         "record_id": record.record_id,
         "source": record.source,
         "me": record.me,
-        "total_steps": len(record.steps),
-        "step": target,
+        "total_steps": end,
         "my_steps": list(mine),
-        "acting": snapshot.acting,
-        "my_hand": list(snapshot.my_hand),
-        "remaining": dict(snapshot.num_cards_left),
-        "played": {p: list(c) for p, c in snapshot.played_cards.items()},
-        "last_move": list(snapshot.last_move),
-        "pool_size": len(snapshot.pool),
+        "current_step": end,
+        "current_acting": derive(record).acting,
+        "snapshot": _snapshot_view(shown, shown_step),
+        "point": None,
+    }
+    if target is None:
+        return view
+
+    actions = legal_actions(shown)
+    if not actions:
+        raise ValueError("这个局面下我方没有合法动作")
+    candidates, diagnostics = policy.rank(shown, actions, top_k=top_k)
+    dist = sample(shown, n_particles=particles, seed=target)
+
+    view["point"] = {
+        "step": target,
         "opponents": list(dist.opponents),
         "candidates": [
             {
@@ -116,13 +142,14 @@ def analyze(
             }
             for c in candidates
         ],
-        "cards": card_summary(dist, snapshot.pool),
+        "cards": card_summary(dist, shown.pool),
         "particles": [
             [list(p.hands[o]) for o in dist.opponents] for p in dist.particles
         ],
         "diagnostics": diagnostics,
         "disclaimer": SCORE_DISCLAIMER,
     }
+    return view
 
 
 @functools.lru_cache(maxsize=1)
@@ -185,6 +212,32 @@ class AnalyzeRequest(BaseModel):
     top_k: int = DEFAULT_TOP_K
 
 
+class NewGameRequest(BaseModel):
+    """和 CLI 的 ddz new 同一个入口（source.manual.start）。"""
+
+    me: str
+    my_hand: str          # 紧凑写法，如 34556789TTJJKK222
+    landlord_cards: str   # 三张底牌
+    record_id: str | None = None
+    created_at: str | None = None
+
+
+class StepRequest(BaseModel):
+    """和 CLI 的 ddz play 同一个入口（source.manual.append_step）。
+
+    ``cards`` 留空 = 这手不要；给了牌就是出牌。校验完全走 CLI 那一套。
+    """
+
+    record: dict[str, Any]
+    player: str
+    cards: str | None = None
+
+
+class UndoRequest(BaseModel):
+    record: dict[str, Any]
+    keep: int | None = None   # 给了就截断到第 keep 手，否则撤最后一手
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="斗地主决策助手", docs_url=None, redoc_url=None)
     # 页面只带一个本地依赖（GSAP），挂在 /vendor 下 —— 断网也要能开
@@ -204,6 +257,48 @@ def create_app() -> FastAPI:
             return demo_payload(policy)
         except MissingWeightsError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/game/new")
+    def game_new(req: NewGameRequest) -> dict[str, Any]:
+        try:
+            record = manual.start(
+                req.me,
+                manual.parse_cards(req.my_hand),
+                manual.parse_cards(req.landlord_cards),
+                record_id=req.record_id,
+                created_at=req.created_at,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"record": record.to_json()}
+
+    @app.post("/api/game/step")
+    def game_step(req: StepRequest) -> dict[str, Any]:
+        try:
+            record = MatchRecord.from_json(req.record)
+            cards = (req.cards or "").strip()
+            action = (
+                Action(kind="pass")
+                if not cards
+                else Action(kind="play", cards=manual.parse_cards(cards))
+            )
+            return {"record": manual.append_step(record, req.player, action).to_json()}
+        except ValueError as exc:
+            # IllegalEntryError 也是 ValueError：轮次不对、牌型不认、牌已经出过……
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/game/undo")
+    def game_undo(req: UndoRequest) -> dict[str, Any]:
+        try:
+            record = MatchRecord.from_json(req.record)
+            updated = (
+                manual.truncate(record, req.keep)
+                if req.keep is not None
+                else manual.undo(record)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"record": updated.to_json()}
 
     @app.post("/api/analyze")
     def analyze_endpoint(

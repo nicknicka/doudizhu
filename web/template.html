@@ -103,6 +103,25 @@
   .calib td:first-child{text-align:left;color:var(--ink)}
   .calib tr:last-child td{color:var(--ink)}
 
+  .entry{margin:0 0 40px;padding:14px 18px;font-family:var(--data);font-size:12px;
+         border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:8px}
+  .entry .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:6px 0}
+  .entry .row + .row{margin-top:6px;padding-top:12px;
+                     border-top:1px solid color-mix(in srgb,var(--ink) 8%,transparent)}
+  .entry .k{width:44px;color:var(--muted)}
+  .entry .who-inline{color:var(--muted)}
+  .entry input,.entry select{font:inherit;font-family:var(--data);color:var(--ink);
+    background:none;padding:5px 9px;border-radius:5px;
+    border:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
+  .entry input:focus,.entry select:focus{outline:none;border-color:var(--accent)}
+  .entry button{font:inherit;cursor:pointer;padding:5px 12px;border-radius:5px;
+    background:none;color:var(--ink);
+    border:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
+  .entry button:hover:enabled{border-color:var(--accent);color:var(--accent)}
+  .entry button:disabled{opacity:.4;cursor:default}
+  .entry .go{background:var(--accent);border-color:var(--accent);color:var(--ground)}
+  .entry .go:hover:enabled{color:var(--ground);opacity:.88}
+
   footer{margin-top:72px;display:flex;gap:56px;font-family:var(--data);
          border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:28px}
   footer .k{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
@@ -135,6 +154,29 @@
   </header>
 
   <div class="banner" id="banner">正在向后端取数…</div>
+
+  <section class="entry" id="entry">
+    <div class="row">
+      <span class="k">开局</span>
+      <select id="new-me">
+        <option value="landlord">地主</option>
+        <option value="landlord_down">下家</option>
+        <option value="landlord_up" selected>上家</option>
+      </select>
+      <input id="new-hand" size="26" placeholder="我方手牌，如 34556789TTJJKK222">
+      <input id="new-cards" size="8" placeholder="三张底牌，如 792">
+      <button class="go" id="new-go" type="button">开局</button>
+    </div>
+    <div class="row">
+      <span class="k">录一手</span>
+      <span class="who-inline" id="play-who"></span>
+      <input id="play-cards" size="16" placeholder="出的牌，如 33">
+      <button class="go" id="play-go" type="button">出牌</button>
+      <button id="play-pass" type="button">不要</button>
+      <button id="undo" type="button">撤销</button>
+      <button id="export" type="button">导出 JSON</button>
+    </div>
+  </section>
 
   <div class="cols" id="cols">
     <main>
@@ -174,9 +216,9 @@ const $ = id => document.getElementById(id);
 const short = {landlord:'地主', landlord_down:'下家', landlord_up:'上家'};
 const label = o => short[o] || o;
 
-/* 后端取来的当前状态。页面自己不算任何业务数字。 */
-const S = {record: null, point: null, metrics: null, calibration: null,
-           caveat: '', disclaimer: '', pinned: null, busy: false};
+/* 后端取来的状态。页面自己不算任何业务数字。 */
+const S = {record: null, meta: null, snap: null, point: null,
+           metrics: null, calibration: null, caveat: '', pinned: null, busy: false};
 
 const cv = $('cloud'), cx = cv.getContext('2d');
 let order = [], grid = [], hoverCard = null;
@@ -185,6 +227,7 @@ const countIn = (a, c) => a.filter(x => x === c).length;
 /* ---------- 粒子云：每个粒子是一次完整分配 ---------- */
 function buildCloud(){
   const p = S.point;
+  if (!p){ order = []; grid = []; return; }
   order = [];
   for (const r of RANK){
     const n = Math.max(0, ...p.particles.map(([a,b]) => countIn(a,r) + countIn(b,r)));
@@ -228,26 +271,36 @@ function draw(focus){
 
 /* ---------- 渲染 ---------- */
 function renderState(){
-  const p = S.point;
-  $('who').textContent =
-    `${p.record_id} · ${p.source} · 第 ${p.step} 手 · 我方 ${label(p.me)} · 现在该 ${label(p.acting)} 行动`;
-  const played = Object.values(p.played).map(v=>v.join('')).filter(Boolean).join(' ');
-  const rest = Object.entries(p.remaining).map(([k,v])=>`${label(k)} ${v}`).join(' · ');
+  const v = S.snap;
+  const played = Object.values(v.played).map(x=>x.join('')).filter(Boolean).join(' ');
+  const rest = Object.entries(v.remaining).map(([k,n])=>`${label(k)} ${n}`).join(' · ');
   $('state').innerHTML = [
     ['剩余', rest, 'sm hi'],
     ['已出', played || '—', ''],
-    ['上一手', p.last_move.length ? p.last_move.join('') : '—', ''],
-  ].map(([k,v,cls])=>`<div><div class="n ${cls}">${v}</div><div class="k">${k}</div></div>`).join('');
+    ['上一手', v.last_move.length ? v.last_move.join('') : '—', ''],
+  ].map(([k,val,cls])=>`<div><div class="n ${cls}">${val}</div><div class="k">${k}</div></div>`).join('');
+}
+
+function renderWho(){
+  const m = S.meta, v = S.snap;
+  const where = v.step === m.total_steps ? `第 ${v.step} 手（最新）` : `第 ${v.step} 手`;
+  $('who').textContent =
+    `${m.record_id} · ${m.source} · ${where} · 我方 ${label(m.me)} · 现在该 ${label(v.acting)} 行动`;
 }
 
 function renderSteps(){
-  const cur = S.point ? S.point.step : null;
-  $('steps').innerHTML = (S.point ? S.point.my_steps : [])
-    .map(s => `<button type="button" data-step="${s}" aria-current="${s===cur}">第 ${s} 手</button>`)
+  const m = S.meta;
+  $('steps').innerHTML = m.my_steps
+    .map(s => `<button type="button" data-step="${s}" aria-current="${s===S.snap.step}">第 ${s} 手</button>`)
     .join('');
 }
 
 function renderBets(){
+  if (!S.point){
+    $('bets').innerHTML = '';
+    $('disclaimer').textContent = '现在不是你出牌，先把对手这一手录进去。';
+    return;
+  }
   const p = S.point;
   $('bets').innerHTML = p.candidates.map((c,i)=>
     `<li${i===0?' aria-current="true"':''}>
@@ -259,11 +312,17 @@ function renderBets(){
 
 function renderPlist(){
   const p = S.point;
+  if (!p){
+    $('plist').innerHTML = '';
+    $('la').textContent = ''; $('lb').textContent = '';
+    return;
+  }
   $('la').textContent = p.opponents[0]; $('lb').textContent = p.opponents[1];
   const head = '<li class="head"><span></span>'
     + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
   $('plist').innerHTML = head + p.cards.map(r =>
-    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${r.card} 在谁手上"><span class="c">${r.card}</span>`
+    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${r.card} 在谁手上">`
+    + `<span class="c">${r.card}</span>`
     + p.opponents.map((o,i)=>{
         const v = r.by[o];
         return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
@@ -289,7 +348,6 @@ function renderCalib(){
 function renderFoot(){
   const m = S.metrics;
   if (!m){ $('foot').innerHTML = ''; return; }
-  // 页脚同样是数据集级指标，不是当前这份记录的成绩
   $('foot').innerHTML = [
     ['Top-1', (m.top1*100).toFixed(1)+'%', `基线 ${(m.top1_base*100).toFixed(1)}%`],
     ['对数似然', m.ll, `基线 ${m.ll_base}`],
@@ -299,9 +357,19 @@ function renderFoot(){
     '<div class="k" style="align-self:center">演示数据集<br>（10 局仿真）</div>');
 }
 
+function renderEntry(){
+  const acting = S.snap ? S.snap.acting : null;
+  $('play-who').textContent = acting ? `现在该 ${label(acting)} 出牌` : '';
+  const ready = !!S.record;
+  for (const id of ['play-cards','play-go','play-pass']) $(id).disabled = !ready;
+  $('undo').disabled = !ready || S.record.steps.length === 0;
+  $('export').disabled = !ready;
+}
+
 function renderAll(){
   $('cols').dataset.side = '__SIDE__';
-  renderState(); renderSteps(); renderBets(); renderPlist(); renderCalib(); renderFoot();
+  renderWho(); renderState(); renderSteps(); renderBets(); renderPlist();
+  renderCalib(); renderFoot(); renderEntry();
   buildCloud(); sizeCanvas();
   S.pinned = null; focus(null);
 }
@@ -314,26 +382,26 @@ function focus(card){
     li.classList.toggle('is-focus', li.dataset.card === active));
 }
 
+function togglePin(card){
+  if (!card) return;
+  S.pinned = (S.pinned === card) ? null : card;
+  focus(null);
+}
+
 $('plist').addEventListener('mouseover', e => {
   const li = e.target.closest('li[data-card]'); if (li) focus(li.dataset.card);
 });
 $('plist').addEventListener('mouseleave', () => focus(null));
 $('plist').addEventListener('click', e => {
-  const li = e.target.closest('li[data-card]'); if (!li) return;
-  S.pinned = (S.pinned === li.dataset.card) ? null : li.dataset.card;
-  focus(null);
+  const li = e.target.closest('li[data-card]'); if (li) togglePin(li.dataset.card);
 });
 $('plist').addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const li = e.target.closest('li[data-card]'); if (!li) return;
-  e.preventDefault();
-  S.pinned = (S.pinned === li.dataset.card) ? null : li.dataset.card;
-  focus(null);
+  e.preventDefault(); togglePin(li.dataset.card);
 });
 
-cv.addEventListener('click', () => {
-  if (hoverCard) { S.pinned = (S.pinned === hoverCard) ? null : hoverCard; focus(null); }
-});
+cv.addEventListener('click', () => togglePin(hoverCard));
 cv.addEventListener('mousemove', e => {
   if (!order.length) return;
   const r = cv.getBoundingClientRect();
@@ -344,19 +412,21 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mouseleave', () => { hoverCard = null; focus(null); });
 
 function step(delta){
-  if (S.busy || !S.point) return;
-  const list = S.point.my_steps, i = list.indexOf(S.point.step);
+  if (S.busy || !S.meta) return;
+  const list = S.meta.my_steps, i = list.indexOf(S.snap.step);
   const next = list[i + delta];
-  if (next !== undefined) showStep(next);
+  if (next !== undefined) refresh(next);
 }
 addEventListener('keydown', e => {
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (typing) return;
   if (e.key === 'ArrowLeft') step(-1);
   else if (e.key === 'ArrowRight') step(1);
 });
 
 $('steps').addEventListener('click', e => {
   const b = e.target.closest('button[data-step]');
-  if (b) showStep(Number(b.dataset.step));
+  if (b) refresh(Number(b.dataset.step));
 });
 
 /* ---------- 取数 ---------- */
@@ -381,15 +451,22 @@ async function api(path, body){
   return data;
 }
 
-async function showStep(target){
-  if (S.busy || !S.record) return;
+function idleNote(){
+  if (!S.snap) return '';
+  return S.point ? '' : `现在该 ${label(S.snap.acting)} 出牌 —— 还没轮到你，把这一手录进去。`;
+}
+
+/* 拉一次分析并渲染。返回是否成功，好让「载入失败就退回上一份」有依据。 */
+async function refresh(target, note){
+  if (S.busy || !S.record) return false;
   S.busy = true;
   setBanner('分析中…', '');
   let ok = false;
   try {
-    S.point = await api('/api/analyze', {record: S.record, step: target});
-    setBanner('');
+    const view = await api('/api/analyze', {record: S.record, step: target ?? null});
+    S.meta = view; S.snap = view.snapshot; S.point = view.point;
     renderAll();
+    setBanner(note || idleNote(), '');
     ok = true;
   } catch (err){
     setBanner(err.message, 'error');
@@ -398,35 +475,84 @@ async function showStep(target){
   }
   // 动效刻意留在 try 之外：gsap 一旦加载不到，要作为 pageerror 冒出来，
   // 而不是被当成"分析失败"吞进错误横幅里。
-  if (ok && !reduce) {
+  if (ok && !reduce && $('bets').children.length){
     gsap.fromTo('#bets li', {y:10,opacity:0}, {y:0,opacity:1,duration:.42,stagger:.06,ease:'power3.out'});
   }
+  return ok;
+}
+
+/* 会改记录的三个动作：新开一局 / 录一手 / 撤销。改完统一重算。 */
+async function mutate(path, body, note){
+  if (S.busy) return;
+  const previous = S.record;
+  S.busy = true;
+  setBanner('提交中…', '');
+  try {
+    const res = await api(path, body);
+    S.record = res.record;
+  } catch (err){
+    S.busy = false;
+    setBanner(err.message, 'error');
+    return;
+  }
+  S.busy = false;
+  if (!(await refresh(null, note))) S.record = previous;
 }
 
 async function loadRecord(record, note){
+  const previous = S.record;
   S.record = record;
-  S.point = null;
-  await showStep(null);
-  if (S.point) setBanner(note || '');
+  if (!(await refresh(null, note))) S.record = previous;
 }
 
 async function boot(){
   try {
     const d = await api('/api/demo');
     S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-    S.disclaimer = '';
-    await loadRecord(d.record, '演示局：随机自对弈的一局仿真数据。也可以打开自己的记录。');
+    await loadRecord(d.record, '演示局：随机自对弈的一局仿真数据。也可以自己开局或打开记录。');
   } catch (err){
     setBanner(err.message, 'error');
   }
 }
 
+/* ---------- 录入 ---------- */
+$('new-go').addEventListener('click', () => {
+  const me = $('new-me').value;
+  const hand = $('new-hand').value.trim();
+  const cards = $('new-cards').value.trim();
+  if (!hand || !cards){ setBanner('手牌和三张底牌都要填。', 'error'); return; }
+  mutate('/api/game/new', {me, my_hand: hand, landlord_cards: cards},
+         `已开局：我方 ${label(me)}，手牌 ${hand.length} 张，底牌 ${cards}。`);
+});
+
+function recordStep(cards, shown){
+  const player = S.snap.acting;
+  mutate('/api/game/step', {record: S.record, player, cards},
+         `已录：${label(player)} ${shown}。`);
+}
+$('play-go').addEventListener('click', () => {
+  const cards = $('play-cards').value.trim();
+  if (!cards){ setBanner('要么填牌点「出牌」，要么点「不要」。', 'error'); return; }
+  recordStep(cards, cards);
+  $('play-cards').value = '';
+});
+$('play-go').disabled = true;
+$('play-pass').addEventListener('click', () => recordStep('', '不要'));
+$('undo').addEventListener('click', () => mutate('/api/game/undo', {record: S.record}, '已撤销最后一手。'));
+$('export').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(S.record, null, 2) + '\n'], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${S.record.record_id || 'record'}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
 /* ---------- 打开自己的记录 ---------- */
 async function readFile(file){
   if (!file) return;
   try {
-    const text = await file.text();
-    const record = JSON.parse(text);
+    const record = JSON.parse(await file.text());
     await loadRecord(record, `已载入 ${file.name}（侧栏校准表与页脚指标仍来自演示数据集）`);
   } catch (err){
     setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
