@@ -10,7 +10,10 @@
      全场只有一个 accent（锈红），所有色彩都从这几个变量来。 */
   :root{
     --ground:#131110; --panel:#1b1816; --line:#2e2823;
-    --ink:#e9e3db; --muted:#8d8177; --accent:#c8553d; --accent-2:#5b8c6e;
+    --ink:#e9e3db; --muted:#8d8177;
+    --side-a:#e0a458;   /* 地主 */
+    --side-b:#6b8cae;   /* 下家 */
+    --accent:#e0a458; --accent-2:#6b8cae;
     --mono: ui-monospace,"SF Mono",Menlo,monospace;
   }
   *{box-sizing:border-box}
@@ -87,7 +90,7 @@
           <span><i class="dot" style="background:var(--accent-2)"></i><span id="lg-b"></span></span>
           <span id="lg-n"></span>
         </div>
-        <p class="note">每一行是一条假设：这些牌分给了谁。200 行叠起来的浓淡，就是某张牌在某人手上的概率。</p>
+        <p class="note">每一行是一种完整的分法。<b>把鼠标放到任意一列</b>，能看到这张牌归谁的概率。<br>行是按"归琥珀色的张数"排过序的 —— 所以会连成块，而不是一团噪点。</p>
       </section>
 
       <section id="z3">
@@ -127,40 +130,82 @@ let pts = DATA.points, cur = 0;
    浓的地方自然变亮 —— 这就是"概率"的来源，不是另外算出来的。 */
 const cv = $('cloud'), cx = cv.getContext('2d');
 const ROWS = 200;
+let tip = null;
 
 function layout(){
   const r = devicePixelRatio || 1;
   cv.width = cv.clientWidth * r; cv.height = cv.clientHeight * r;
   cx.setTransform(r,0,0,r,0,0);
+  order0 = buildGrid();
   draw(1);
 }
+const RANK = '3456789TJQKA2BR';
 function poolOrder(){
-  // 牌池排序只做一次，保证同一张牌在每一行都落在同一列
+  // 按张数展开：牌池里有 3 张 K 就占 3 列。
+  // 原先用 Set 去重，导致列数（20 多）和牌池张数（34）对不上，多张牌还会丢信息。
   const p = pts[cur];
-  const all = [];
-  for (const [a,b] of p.particles) all.push(...a, ...b);
-  return [...new Set(all)].sort((x,y)=>'3456789TJQKA2BR'.indexOf(x)-'3456789TJQKA2BR'.indexOf(y));
+  const counts = {};
+  for (const [a] of p.particles) for (const c of a) counts[c] = Math.max(counts[c]||0, 1);
+  for (const [,b] of p.particles) for (const c of b) counts[c] = Math.max(counts[c]||0, 1);
+  // 张数以我方手上没有的那部分为准：牌池里每张牌出现几次就用几次
+  const pool = [...p.particles[0][0], ...p.particles[0][1]];
+  const need = {};
+  for (const c of pool) need[c] = (need[c]||0) + 1;
+  const out = [];
+  for (const r of RANK) for (let i=0;i<(need[r]||0);i++) out.push(r);
+  return out;
 }
-function draw(alpha){
+let grid = [];          // grid[行][列] = 1(A) / 2(B)，画一次存下来给 hover 用
+let colRate = [];       // 每列归 A 的比例，就是这张牌的概率
+
+function buildGrid(){
   const p = pts[cur], order = poolOrder();
+  // 每一行展开成"每张牌一张票"：a 有几张就投几张 A 票
+  const rows = p.particles.map(([a,b]) => {
+    const seen = {};
+    return order.map(card => {
+      seen[card] = (seen[card]||0) + 1;
+      if (seen[card] <= countIn(a, card)) return 1;
+      if (seen[card] <= countIn(a,card) + countIn(b, card)) return 2;
+      return 0;
+    });
+  });
+  // 关键一步：把相似的行排到一起。随机顺序看是噪点，排序后才看得出结构。
+  rows.sort((x,y) => {
+    const sx = x.reduce((s,v)=>s+(v===1?1:0),0);
+    const sy = y.reduce((s,v)=>s+(v===1?1:0),0);
+    return sx - sy || x.join('').localeCompare(y.join(''));
+  });
+
+  grid = rows;
+  colRate = order.map((_,c) => rows.filter(r=>r[c]===1).length / rows.length);
+  return order;
+}
+
+function draw(alpha, hoverCol = -1){
+  const p = pts[cur], order = grid.length ? order0 : buildGrid();
   const w = cv.clientWidth / order.length, h = cv.clientHeight / ROWS;
   cx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
   cx.globalAlpha = alpha;
-  for (let r=0; r<Math.min(ROWS, p.particles.length); r++){
-    const [a,b] = p.particles[r];
-    const ca = new Set(a), cb = new Set(b);
-    const aDup = {}, bDup = {};
+  for (let r=0; r<Math.min(ROWS, grid.length); r++){
     for (let c=0;c<order.length;c++){
-      const card = order[c];
-      let owner = 0;
-      if (ca.has(card) && (aDup[card]=(aDup[card]||0)+1) <= countIn(a,card)) owner = 1;
-      else if (bDup[card]=(bDup[card]||0)+1 <= countIn(b,card)) owner = 2;
-      cx.fillStyle = owner===1 ? '#c8553d' : owner===2 ? '#5b8c6e' : '#2e2823';
+      cx.fillStyle = grid[r][c]===1 ? '#e0a458' : grid[r][c]===2 ? '#6b8cae' : '#241f1c';
       cx.fillRect(c*w, r*h, Math.max(w-0.6,0.4), Math.max(h-0.4,0.6));
+    }
+  }
+  if (hoverCol >= 0){                       // 悬停列高亮：整列压暗，只留这一列
+    cx.globalAlpha = .82; cx.fillStyle = '#131110';
+    cx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+    cx.fillRect(hoverCol*w,0,w,cv.clientHeight);
+    cx.globalAlpha = 1;
+    for (let r=0;r<Math.min(ROWS,grid.length);r++){
+      cx.fillStyle = grid[r][hoverCol]===1 ? '#e0a458' : '#6b8cae';
+      cx.fillRect(hoverCol*w, r*h, Math.max(w-0.6,0.4), Math.max(h-0.4,0.6));
     }
   }
   cx.globalAlpha = 1;
 }
+let order0 = [];
 const countIn = (arr, card) => arr.filter(c=>c===card).length;
 
 /* ── 面板填充 ───────────────────────────────────────────── */
@@ -239,6 +284,26 @@ function boot(){
     .from('aside section', {opacity:0, x:12, duration:.45, stagger:.1}, '-=.4')
     .from('#foot > div', {opacity:0, y:8, duration:.4, stagger:.07}, '-=.35');
 }
+/* ── 悬停：把某张牌单独提出来看 ───────────────────────── */
+cv.addEventListener('mousemove', e=>{
+  const rect = cv.getBoundingClientRect();
+  const col = Math.floor((e.clientX-rect.left) / (rect.width/order0.length));
+  if (!(col>=0 && col<order0.length)) return;
+  if (!tip){
+    tip = document.createElement('div');
+    tip.style.cssText='position:fixed;pointer-events:none;background:#1b1816;border:1px solid #2e2823;'
+      +'padding:6px 10px;font:12px ui-monospace,monospace;color:#e9e3db;z-index:9';
+    document.body.appendChild(tip);
+  }
+  const rate = colRate[col];
+  tip.innerHTML = `<b style="color:#e0a458">${order0[col]}</b> · `
+    + `${DATA.points[cur].opponents[0]} ${(rate*100).toFixed(0)}% / `
+    + `${DATA.points[cur].opponents[1]} ${((1-rate)*100).toFixed(0)}%`;
+  tip.style.left = (e.clientX+14)+'px'; tip.style.top = (e.clientY-10)+'px';
+  draw(1, col);
+});
+cv.addEventListener('mouseleave', ()=>{ tip && tip.remove(); tip=null; draw(1); });
+
 addEventListener('resize', layout);
 boot();
 </script>

@@ -89,6 +89,19 @@ def main() -> int:
     (Path(__file__).parent / "index.html").write_text(out, encoding="utf-8")
     print(f"  index.html 已生成：{len(data['points'])} 个决策点，"
           f"{len(data['points'][0]['particles'])} 个粒子/点")
+
+    # 生成后立刻做一次 JS 语法检查。嵌进 HTML 的脚本没有任何工具看着，
+    # 一个拼错的 token 会让整页静默变白 —— 这里挡一道。
+    import subprocess, tempfile
+
+    script = "const DATA" + out.split("<script>\nconst DATA", 1)[1].split("</script>")[0]
+    with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8") as fh:
+        fh.write(script)
+        tmp = fh.name
+    result = subprocess.run(["node", "--check", tmp], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit("生成的脚本有语法错误：\n" + result.stderr[-800:])
+    print("  JS 语法检查通过")
     return 0
 
 
