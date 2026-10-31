@@ -1,62 +1,113 @@
-// 展示页的浏览器验证：截图 + 关键交互 + pageerror。
+// 展示页的浏览器验证：自己起后端，跑真实交互，抓 pageerror。
 // 交付前的硬检查点 —— AI 写的代码经常有 interaction bug。
 import { chromium } from 'playwright';
-import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const file = pathToFileURL(path.resolve('web/index.html')).href;
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = 8791;
+const BASE = `http://127.0.0.1:${PORT}`;
 
 const problems = [];
-page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
-page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+const server = spawn('.venv/bin/python', ['-m', 'ddz', 'serve', '--port', String(PORT)],
+  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
+const stopServer = () => { try { server.kill(); } catch { /* 已经退了 */ } };
+process.on('exit', stopServer);
 
-const text = async sel => ((await page.locator(sel).textContent()) ?? '').trim();
-
-await page.goto(file);
-await page.waitForTimeout(2200);
-await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
-
-// 四处渲染出来的东西真的存在吗（旧的 #f-hand 全项目都不存在，脚本一跑就崩）
-if ((await text('#state')).length < 5) problems.push('局面区是空的');
-if ((await page.locator('#bets li').count()) < 1) problems.push('候选区是空的');
-// 概率列表：至少一个表头 + 一行牌
-if ((await page.locator('#plist li').count()) < 2) problems.push('概率列表是空的');
-if ((await page.locator('#calib tr').count()) < 2) problems.push('校准表是空的');
-
-const canvasBlank = await page.evaluate(() => {
-  const c = document.getElementById('cloud');
-  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return false;
-  return true;
-});
-if (canvasBlank) problems.push('粒子云是空白的');
-
-// 交互：切到第二个决策点，头部应当随之变化
-const buttons = page.locator('#steps button');
-const n = await buttons.count();
-if (n < 2) {
-  problems.push(`步号按钮只有 ${n} 个，切不动`);
-} else {
-  const before = await text('#who');
-  await buttons.nth(1).click();
-  await page.waitForTimeout(900);
-  await page.screenshot({ path: '/tmp/ddz-web-2.png', fullPage: true });
-  if ((await text('#who')) === before) problems.push('切步号后头部没有变化');
-  await buttons.nth(0).click();
-  await page.waitForTimeout(600);
+async function waitForHealth(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try { if ((await fetch(`${BASE}/api/health`)).ok) return; } catch { /* 还没起来 */ }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  throw new Error('后端没能在 30 秒内起来');
 }
 
-// 窄屏
-await page.setViewportSize({ width: 420, height: 1200 });
-await page.waitForTimeout(600);
-await page.screenshot({ path: '/tmp/ddz-web-3.png', fullPage: true });
+const text = async (page, sel) => ((await page.locator(sel).textContent()) ?? '').trim();
 
-await browser.close();
-console.log(
-  problems.length
-    ? '发现问题:\n- ' + problems.join('\n- ')
-    : '✔ 无 pageerror / console error；局面、候选、概率、校准四处渲染与切步号交互均正常'
-);
+try {
+  await waitForHealth();
+
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
+  page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
+  page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+
+  await page.goto(`${BASE}/`);
+  await page.waitForSelector('#steps button', { timeout: 40000 });   // 首次 /api/demo 要算校准
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
+
+  // 四处真的渲染出来了吗
+  if ((await text(page, '#state')).length < 5) problems.push('局面区是空的');
+  if ((await page.locator('#bets li').count()) < 1) problems.push('候选区是空的');
+  if ((await page.locator('#plist li[data-card]').count()) < 2) problems.push('概率列表是空的');
+  if ((await page.locator('#calib tr').count()) < 2) problems.push('校准表是空的');
+  if ((await page.locator('#steps button').count()) < 2) problems.push('步号按钮少于 2 个');
+
+  const canvasBlank = await page.evaluate(() => {
+    const c = document.getElementById('cloud');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return false;
+    return true;
+  });
+  if (canvasBlank) problems.push('粒子云是空白的');
+
+  // 交互 1：点步号
+  const before = await text(page, '#who');
+  await page.locator('#steps button').nth(1).click();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: '/tmp/ddz-web-2.png', fullPage: true });
+  if ((await text(page, '#who')) === before) problems.push('点步号后局面没变');
+
+  // 交互 2：键盘 → 切下一步
+  const beforeKey = await text(page, '#who');
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(800);
+  if ((await text(page, '#who')) === beforeKey) problems.push('按 → 之后局面没变');
+
+  // 交互 3：悬停概率列表的一行 → 那一行高亮
+  const row = page.locator('#plist li[data-card]').first();
+  await row.hover();
+  await page.waitForTimeout(200);
+  if (!(await row.evaluate(el => el.classList.contains('is-focus')))) {
+    problems.push('悬停概率列表没有高亮');
+  }
+  // 交互 4：点一下 → 钉住，移开鼠标仍然亮着
+  await row.click();
+  await page.mouse.move(10, 10);
+  await page.waitForTimeout(200);
+  if (!(await row.evaluate(el => el.classList.contains('is-focus')))) {
+    problems.push('点击概率列表没有钉住该牌');
+  }
+
+  // 交互 5：打开自己的记录
+  const demo = await (await fetch(`${BASE}/api/demo`)).json();
+  const file = path.join(tmpdir(), 'my-game.json');
+  writeFileSync(file, JSON.stringify(demo.record));
+  await page.locator('#file').setInputFiles(file);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: '/tmp/ddz-web-3.png', fullPage: true });
+  if (!(await text(page, '#banner')).includes('my-game.json')) {
+    problems.push('载入自己的记录后没有反馈');
+  }
+
+  // 窄屏
+  await page.setViewportSize({ width: 420, height: 1200 });
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: '/tmp/ddz-web-4.png', fullPage: true });
+
+  await browser.close();
+} catch (err) {
+  problems.push(`验证本身出错：${err.message}`);
+} finally {
+  stopServer();
+}
+
+console.log(problems.length
+  ? '发现问题:\n- ' + problems.join('\n- ')
+  : '✔ 无 pageerror / console error；渲染四处 + 步号(点/键) + 交叉高亮 + 钉住 + 载入记录 均正常');
 process.exit(problems.length ? 1 : 0);

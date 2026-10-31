@@ -47,7 +47,7 @@ flowchart LR
 | 仿真与真值 | RLCard | 环境内部持有全部玩家真实手牌，可作评测真值 |
 | 决策模型 | DouZero-WP（预训练） | 按胜负目标训练，语义比 ADP 版本更贴近"胜率" |
 | 推断 | 约束过滤 + 粒子采样 | 零训练，每条结论可解释 |
-| 后端 | FastAPI | — |
+| 后端 | FastAPI + uvicorn | 只服务展示页：现算局面、分布、候选与校准，页面自己不含业务逻辑 |
 
 **不训练任何模型**：DouZero 由自我博弈训练而成，人类对局数据非必需。
 
@@ -61,25 +61,33 @@ python3.11 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-预期结果：`300 passed`（未下载权重时相关用例会跳过）。
+预期结果：`308 passed`（未下载权重时相关用例会跳过）。
 
 依赖是从 `requirements.lock.txt` 装的，含间接依赖的完整锁定；有一条测试专门比对已装版本与清单，浮动就会失败。
 
 ### 看展示页
 
 ```bash
-.venv/bin/python web/build.py   # 生成 web/index.html：数据全部来自本项目模块，构建期算好
-npm run serve                   # 起本地服务；或直接双击 web/index.html
+ddz serve            # 起本机后端，默认 127.0.0.1:8000（--host / --port 可改）
 ```
 
-页面展示单个决策点的局面、候选动作与模型估计、另两家手牌的粒子云与概率分布，
-以及模型估计的校准表。`web/` **只消费已有产物**，不含业务逻辑；GSAP 已随仓库
-本地化（`web/vendor/`），断网也能打开。
+打开 <http://127.0.0.1:8000/> 即可。页面上能看到：某个决策点的局面、候选动作与
+模型估计、另两家手牌的**粒子云**与逐张概率、以及模型的校准表。
+
+- **打开自己的记录**：点「打开我的记录」选一份 `ddz new` / `ddz play` 产出的 JSON
+  （也可以直接把它拖到页面上），页面会就着它重算。
+- **翻看决策点**：点步号，或用 ← / → 键。
+- **看某张牌**：把鼠标移到粒子云上，或移到侧栏的概率列表上 —— 两边互相高亮；
+  点一下可以"钉住"那张牌。
+
+页面**不含业务逻辑**：所有数字都由后端现算（`derive` / `sample` / `DouZeroPolicy` /
+`calibrate`），`web/` 只负责显示。GSAP 已随仓库本地化（`web/vendor/`），断网也能用；
+但**页面需要后端**，直接双击 HTML 是打不开数据的。
 
 浏览器端的渲染与交互由 Playwright 验证（需联网装一次）：
 
 ```bash
-npm i && npm run verify
+npm i && npm run verify     # 自己起后端、跑真实交互、抓 pageerror
 ```
 
 ### 给出建议
@@ -256,10 +264,11 @@ Schema（显式存入此前各家的出牌），见 [docs/data-schema.md](docs/d
 │   ├── policy/               决策模型封装（ONNX）
 │   ├── inference/            手牌推断
 │   ├── evaluation/           评测：命中率、基线对照
+│   ├── api/                  展示页后端（FastAPI）
 │   └── cli/                  命令行入口
 ├── tests/                    测试
 ├── scripts/                  工具脚本（如下载权重）
-├── web/                      前端展示
+├── web/                      前端展示（模板 + Playwright 验证 + 本地 GSAP）
 ├── models/                   模型权重（本地，不入库）
 └── data/                     运行期数据（本地，不入库）
 ```

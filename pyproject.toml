@@ -20,6 +20,8 @@ dependencies = [
     "numpy==1.26.4",
     "rlcard==1.2.0",
     "onnxruntime==1.31.1",
+    "fastapi==0.162.0",
+    "uvicorn==0.54.0",
 ]
 
 [project.scripts]

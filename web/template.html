@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>斗地主决策助手</title>
+<link rel="icon" href="data:,">
 <script src="vendor/gsap.min.js"></script>
 <style>
   /* 配色 / 字体 / 侧栏位置由外部随机串派生（web/design-seed.txt），
-     构建时注入。随机串本身不在这个文件里。 */
+     后端渲染时注入。随机串本身不在这个文件里。 */
   :root{
     --ground:__GROUND__; --ink:__INK__; --muted:__MUTED__;
     --accent:__ACCENT__; --side-a:__SIDE_A__; --side-b:__SIDE_B__;
@@ -17,29 +18,50 @@
   body{margin:0;background:var(--ground);color:var(--ink);
        font-family:var(--display);-webkit-font-smoothing:antialiased;
        font-size:15px;line-height:1.5}
-  /* 留白先给多：外层 96px、区块间距 72px。宁可空，不填满。 */
   .page{max-width:1040px;margin:0 auto;padding:96px 40px 120px}
   .cols{display:grid;grid-template-columns:1fr 268px;gap:72px;align-items:start}
   .cols[data-side="left"]{grid-template-columns:268px 1fr}
   .cols[data-side="left"] > aside{order:-1}
 
-  header{margin-bottom:72px}
+  header{margin-bottom:56px}
   h1{margin:0;font-size:15px;font-weight:500;letter-spacing:.02em;color:var(--muted)}
   .who{font-family:var(--data);font-size:13px;color:var(--muted);margin-top:6px}
+  .tools{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:22px;
+         font-family:var(--data);font-size:12px;color:var(--muted)}
+  .tools .file{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+    padding:7px 13px;border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);
+    border-radius:999px;color:var(--ink);transition:border-color .2s,background .2s}
+  .tools .file:hover{border-color:var(--accent);color:var(--accent)}
+  .tools .file input{display:none}
+  .tools code{font-size:11px}
+  body.dragging .page{outline:2px dashed var(--accent);outline-offset:-24px}
 
-  .state{display:flex;gap:56px;margin-bottom:72px;font-family:var(--data)}
+  .banner{margin:0 0 40px;padding:12px 16px;font-family:var(--data);font-size:12px;
+          border-left:3px solid var(--muted);color:var(--muted);
+          background:color-mix(in srgb,var(--ink) 5%,transparent)}
+  .banner[data-kind="error"]{border-left-color:var(--accent);color:var(--accent)}
+
+  .state{display:flex;gap:56px;margin-bottom:64px;font-family:var(--data)}
   .state div{line-height:1}
   .state .n{font-size:38px;font-weight:300;letter-spacing:-.02em}
   .state .k{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:10px}
   .state .n.hi{color:var(--accent)}
+  .state .n.sm{font-size:26px}
 
   h2{font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;
      color:var(--muted);margin:0 0 28px}
+  .steps{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:56px;font-family:var(--data)}
+  .steps button{background:none;cursor:pointer;font:inherit;font-size:11px;
+    padding:5px 10px;border-radius:999px;color:var(--muted);
+    border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
+    transition:color .2s,border-color .2s}
+  .steps button:hover{color:var(--ink);border-color:var(--ink)}
+  .steps button[aria-current="true"]{color:var(--accent);border-color:var(--accent)}
+
   ul.bets{list-style:none;margin:0;padding:0;font-family:var(--data)}
   ul.bets li{display:grid;grid-template-columns:1fr auto;align-items:baseline;
              padding:18px 0;border-bottom:1px solid color-mix(in srgb,var(--ink) 12%,transparent)}
   ul.bets li:last-child{border-bottom:0}
-  /* 排版的大胆处：候选用大字，分数反而小 —— 让人先看见"出什么"，再看见"多少分" */
   ul.bets .play{font-family:var(--display);font-size:32px;font-weight:300;letter-spacing:-.01em}
   ul.bets .play.pass{color:var(--muted)}
   ul.bets .sc{font-size:13px;color:var(--muted);
@@ -49,22 +71,29 @@
 
   aside{position:sticky;top:96px}
   .cloud{margin-bottom:36px}
-  canvas{display:block;width:100%;height:176px}   /* 放侧栏，小 */
+  canvas{display:block;width:100%;height:176px;cursor:crosshair}
   .keys{display:flex;gap:14px;font-family:var(--data);font-size:11px;color:var(--muted);
         margin-top:10px}
   .keys i{display:inline-block;width:6px;height:6px;margin-right:5px;vertical-align:1px}
   .side-h{font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;
           color:var(--muted);margin:0 0 14px}
-  .plist{list-style:none;margin:0 0 36px;padding:0;font-family:var(--data);font-size:12px}
+  .plist{list-style:none;margin:0 0 36px;padding:0;font-family:var(--data);font-size:12px;
+         max-height:300px;overflow-y:auto}
   .plist li{display:grid;grid-template-columns:20px 1fr 1fr;gap:8px;align-items:baseline;
-            padding:6px 0;color:var(--muted)}
-  .plist li.head{padding:0 0 4px;font-size:10px}
+            padding:6px 8px;margin:0 -8px;border-radius:5px;color:var(--muted);
+            transition:background .15s}
+  .plist li.head{padding:0 8px 4px;font-size:10px;position:sticky;top:0;
+                 background:var(--ground)}
+  .plist li[data-card]{cursor:pointer}
+  .plist li[data-card]:hover{background:color-mix(in srgb,var(--ink) 7%,transparent)}
+  .plist li.is-focus{background:color-mix(in srgb,var(--accent) 13%,transparent)}
   .plist .c{color:var(--ink);font-size:13px}
   .plist .p{text-align:right}
   .plist .p b{font-weight:400;color:var(--ink)}
   .plist .p small{display:block;margin-top:2px;font-size:10px}
   .plist .p.a small{color:var(--side-a)}
   .plist .p.b small{color:var(--side-b)}
+
   .calib{width:100%;border-collapse:collapse;font-family:var(--data);font-size:11px;
          color:var(--muted)}
   .calib th{font-weight:500;text-align:right;padding:0 0 6px;font-size:10px}
@@ -73,12 +102,6 @@
             border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
   .calib td:first-child{text-align:left;color:var(--ink)}
   .calib tr:last-child td{color:var(--ink)}
-  .steps{display:flex;gap:6px;margin-bottom:36px;font-family:var(--data)}
-  .steps button{background:none;border:0;padding:3px 0;margin-right:14px;cursor:pointer;
-    font:inherit;font-size:12px;color:var(--muted);
-    border-bottom:1px solid transparent;transition:color .2s,border-color .2s}
-  .steps button:hover{color:var(--ink)}
-  .steps button[aria-current="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 
   footer{margin-top:72px;display:flex;gap:56px;font-family:var(--data);
          border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:28px}
@@ -87,8 +110,6 @@
   footer .v small{display:block;font-size:11px;color:var(--muted);letter-spacing:0;margin-top:4px}
 
   .caveat{margin:26px 0 0;font-family:var(--data);font-size:11px;color:var(--muted)}
-  #tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--ground);
-       padding:5px 9px;font-family:var(--data);font-size:11px;z-index:9;opacity:0}
   @media (max-width:820px){
     .page{padding:56px 22px 72px}
     .cols,.cols[data-side="left"]{grid-template-columns:1fr;gap:48px}
@@ -105,7 +126,15 @@
   <header>
     <h1>斗地主决策助手</h1>
     <div class="who" id="who"></div>
+    <div class="tools">
+      <label class="file" for="file">打开我的记录
+        <input type="file" id="file" accept="application/json,.json">
+      </label>
+      <span>用 <code>ddz new</code> / <code>ddz play</code> 录一局，把 JSON 选进来（也可以直接拖到页面上）</span>
+    </div>
   </header>
+
+  <div class="banner" id="banner">正在向后端取数…</div>
 
   <div class="cols" id="cols">
     <main>
@@ -114,7 +143,7 @@
 
       <h2>候选</h2>
       <ul class="bets" id="bets"></ul>
-      <p class="caveat">模型给出的估计，不是胜率</p>
+      <p class="caveat" id="disclaimer"></p>
     </main>
 
     <aside>
@@ -135,163 +164,267 @@
 
   <footer id="foot"></footer>
 </div>
-<div id="tip"></div>
 
 <script>
-const DATA = /*__DATA__*/null;
-const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const $ = id => document.getElementById(id);
 const RANK = '3456789TJQKA2BR';
 const ROWS = 200;
-let pts = DATA.points, cur = 0, grid = [], order = [], tipEl = $('tip');
-let cardIndex = {};
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+const short = {landlord:'地主', landlord_down:'下家', landlord_up:'上家'};
+const label = o => short[o] || o;
 
-/* 粒子云：每个粒子是一次完整分配。行按"归 A 的张数"排序，
-   相似的假设聚成块 —— 结构从排序里长出来，不是另外画的。 */
+/* 后端取来的当前状态。页面自己不算任何业务数字。 */
+const S = {record: null, point: null, metrics: null, calibration: null,
+           caveat: '', disclaimer: '', pinned: null, busy: false};
+
 const cv = $('cloud'), cx = cv.getContext('2d');
-const countIn = (a,c) => a.filter(x=>x===c).length;
+let order = [], grid = [];
+const countIn = (a, c) => a.filter(x => x === c).length;
 
-function build(){
-  const p = pts[cur];
+/* ---------- 粒子云：每个粒子是一次完整分配 ---------- */
+function buildCloud(){
+  const p = S.point;
   order = [];
   for (const r of RANK){
-    const n = Math.max(...p.particles.map(([a,b]) => countIn(a,r)+countIn(b,r)));
+    const n = Math.max(0, ...p.particles.map(([a,b]) => countIn(a,r) + countIn(b,r)));
     for (let i=0;i<n;i++) order.push(r);
   }
   grid = p.particles.map(([a,b]) => {
     const seen = {};
     return order.map(c=>{
-      seen[c] = (seen[c]||0)+1;
+      seen[c] = (seen[c]||0) + 1;
       if (seen[c] <= countIn(a,c)) return 1;
-      return seen[c] <= countIn(a,c)+countIn(b,c) ? 2 : 0;
+      return seen[c] <= countIn(a,c) + countIn(b,c) ? 2 : 0;
     });
   });
   grid.sort((x,y)=>{
-    const sx=x.reduce((s,v)=>s+(v===1),0), sy=y.reduce((s,v)=>s+(v===1),0);
-    return sx-sy || x.join('').localeCompare(y.join(''));
+    const sx = x.reduce((s,v)=>s+(v===1),0), sy = y.reduce((s,v)=>s+(v===1),0);
+    return sx - sy || x.join('').localeCompare(y.join(''));
   });
 }
 
 function sizeCanvas(){
-  const r = devicePixelRatio||1;
-  cv.width = cv.clientWidth*r; cv.height = cv.clientHeight*r;
+  const r = devicePixelRatio || 1;
+  cv.width = cv.clientWidth * r; cv.height = cv.clientHeight * r;
   cx.setTransform(r,0,0,r,0,0);
 }
-function draw(hover=-1){
-  const w = cv.clientWidth/order.length, h = cv.clientHeight/ROWS;
+
+/* focus = 牌面字符；非空时只让这张牌的列全亮，其余压暗 */
+function draw(focus){
+  if (!order.length) return;
+  const w = cv.clientWidth / order.length, h = cv.clientHeight / ROWS;
   cx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
   const A = getComputedStyle(document.documentElement).getPropertyValue('--side-a').trim();
   const B = getComputedStyle(document.documentElement).getPropertyValue('--side-b').trim();
   for (let r=0;r<Math.min(ROWS,grid.length);r++)
     for (let c=0;c<order.length;c++){
-      if (hover>=0 && c!==hover){ cx.globalAlpha=.13; }
-      else cx.globalAlpha=1;
+      cx.globalAlpha = (focus && order[c] !== focus) ? .12 : 1;
       cx.fillStyle = grid[r][c]===1 ? A : grid[r][c]===2 ? B : 'transparent';
       if (grid[r][c]) cx.fillRect(c*w, r*h, Math.max(w-.7,.5), Math.max(h-.5,.5));
     }
-  cx.globalAlpha=1;
+  cx.globalAlpha = 1;
 }
-function layout(){ sizeCanvas(); build(); draw(); }
 
-function render(){
-  const p = pts[cur];
-  $('who').textContent = `${DATA.record_id} · 第 ${p.step} 手 · 我方 ${DATA.me}`
-    + ` · 现在该 ${p.acting} 行动`;
-  $('cols').dataset.side = '__SIDE__';
-
-  const played = Object.entries(p.played).map(([k,v])=>v.join('')).join(' ');
+/* ---------- 渲染 ---------- */
+function renderState(){
+  const p = S.point;
+  $('who').textContent =
+    `${p.record_id} · ${p.source} · 第 ${p.step} 手 · 我方 ${label(p.me)} · 现在该 ${label(p.acting)} 行动`;
+  const played = Object.values(p.played).map(v=>v.join('')).filter(Boolean).join(' ');
+  const rest = Object.entries(p.remaining).map(([k,v])=>`${label(k)} ${v}`).join(' · ');
   $('state').innerHTML = [
-    ['剩余', Object.values(p.remaining).join(' · '), true],
-    ['已出', played || '—', false],
-    ['上一手', p.last_move.length ? p.last_move.join('') : '—', false],
-  ].map(([k,v,hi])=>
-    `<div><div class="n${hi?' hi':''}">${v}</div><div class="k">${k}</div></div>`).join('');
+    ['剩余', rest, 'sm hi'],
+    ['已出', played || '—', ''],
+    ['上一手', p.last_move.length ? p.last_move.join('') : '—', ''],
+  ].map(([k,v,cls])=>`<div><div class="n ${cls}">${v}</div><div class="k">${k}</div></div>`).join('');
+}
 
-  const best = Math.max(...p.candidates.map(c=>c.score));
+function renderSteps(){
+  const cur = S.point ? S.point.step : null;
+  $('steps').innerHTML = (S.point ? S.point.my_steps : [])
+    .map(s => `<button type="button" data-step="${s}" aria-current="${s===cur}">第 ${s} 手</button>`)
+    .join('');
+}
+
+function renderBets(){
+  const p = S.point;
   $('bets').innerHTML = p.candidates.map((c,i)=>
     `<li${i===0?' aria-current="true"':''}>
        <span class="play${c.label==='不出'?' pass':''}">${c.label}</span>
        <span class="sc">${c.score>0?'+':''}${c.score.toFixed(3)}</span>
      </li>`).join('');
+  $('disclaimer').textContent = p.disclaimer;
+}
 
+function renderPlist(){
+  const p = S.point;
   $('la').textContent = p.opponents[0]; $('lb').textContent = p.opponents[1];
+  const head = '<li class="head"><span></span>'
+    + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
+  $('plist').innerHTML = head + p.cards.map(r =>
+    `<li data-card="${r.card}"><span class="c">${r.card}</span>`
+    + p.opponents.map((o,i)=>{
+        const v = r.by[o];
+        return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
+             + `<small>${v.expected.toFixed(2)} 张</small></span>`;
+      }).join('') + '</li>').join('');
+}
 
-  // 口径与 CLI `ddz infer` 对齐：一张牌一行，两个对手各自的
-  // P(至少一张) 与期望张数 —— 不再把"第 k 张副本的累积概率"当同一件事报。
-  const name = {landlord:'地主', landlord_down:'下家', landlord_up:'上家'};
-  const label = o => name[o] || o;
-  cardIndex = Object.fromEntries(p.cards.map(r=>[r.card, r]));
-  $('plist').innerHTML = [
-    '<li class="head"><span></span>'
-      + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('')
-      + '</li>',
-    ...p.cards.slice(0,6).map(r=>
-      `<li><span class="c">${r.card}</span>`
-      + p.opponents.map((o,i)=>{
-          const v = r.by[o];
-          return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
-               + `<small>${v.expected.toFixed(2)} 张</small></span>`;
-        }).join('') + '</li>')
-  ].join('');
-
-  const cal = DATA.calibration;
+function renderCalib(){
+  const c = S.calibration;
+  if (!c){ $('calib').innerHTML = ''; $('calib-caveat').textContent = ''; return; }
   $('calib').innerHTML =
     '<tr><th>估计区间</th><th>样本</th><th>平均估计</th><th>实际</th></tr>'
-    + cal.buckets.map(b=>
+    + c.buckets.map(b=>
         `<tr><td>${b.low.toFixed(2)}~${b.high.toFixed(2)}</td><td>${b.n}</td>`
         + `<td>${b.mean_estimate.toFixed(3)}</td><td>${b.actual_rate.toFixed(3)}</td></tr>`
       ).join('')
-    + `<tr><td>合计</td><td>${cal.n_samples}</td>`
-    + `<td>${cal.mean_estimate.toFixed(3)}</td><td>${cal.actual_rate.toFixed(3)}</td></tr>`;
-  $('calib-caveat').textContent = DATA.score_caveat;
+    + `<tr><td>合计</td><td>${c.n_samples}</td>`
+    + `<td>${c.mean_estimate.toFixed(3)}</td><td>${c.actual_rate.toFixed(3)}</td></tr>`;
+  $('calib-caveat').textContent = S.caveat;
+}
 
+function renderFoot(){
+  const m = S.metrics;
+  if (!m){ $('foot').innerHTML = ''; return; }
   $('foot').innerHTML = [
-    ['Top-1', (DATA.metrics.top1*100).toFixed(1)+'%', `基线 ${(DATA.metrics.top1_base*100).toFixed(1)}%`],
-    ['对数似然', DATA.metrics.ll, `基线 ${DATA.metrics.ll_base}`],
-    ['决策点', DATA.metrics.n_positions, `${DATA.metrics.n_cards} 计分项`],
+    ['Top-1', (m.top1*100).toFixed(1)+'%', `基线 ${(m.top1_base*100).toFixed(1)}%`],
+    ['对数似然', m.ll, `基线 ${m.ll_base}`],
+    ['决策点', m.n_positions, `${m.n_cards} 计分项`],
   ].map(([k,v,s])=>`<div><div class="k">${k}</div><div class="v">${v}<small>${s}</small></div></div>`).join('');
-
-  layout();
-  $('steps').querySelectorAll('button').forEach((b,i)=>
-    b.setAttribute('aria-current', String(i===cur)));
 }
 
-function go(i){
-  if (i===cur) return; cur=i; render();
-  // 说明：每换一步都会用新种子重采粒子（seed=step），所以"同一个粒子移动"
-  // 没有意义。这里做的是**分层过渡**——云淡入 + 候选逐条入场，不是逐粒子 morph。
-  if (reduce) return;
-  gsap.fromTo(cv,{opacity:.15},{opacity:1,duration:.5,ease:'power2.out'});
-  gsap.fromTo('#bets li',{y:10,opacity:0},{y:0,opacity:1,duration:.42,stagger:.06,ease:'power3.out'});
+function renderAll(){
+  $('cols').dataset.side = '__SIDE__';
+  renderState(); renderSteps(); renderBets(); renderPlist(); renderCalib(); renderFoot();
+  buildCloud(); sizeCanvas();
+  S.pinned = null; focus(null);
 }
 
-cv.addEventListener('mousemove', e=>{
+/* ---------- 交互 ---------- */
+function focus(card){
+  const active = card || S.pinned;
+  draw(active);
+  document.querySelectorAll('#plist li[data-card]').forEach(li =>
+    li.classList.toggle('is-focus', li.dataset.card === active));
+}
+
+$('plist').addEventListener('mouseover', e => {
+  const li = e.target.closest('li[data-card]'); if (li) focus(li.dataset.card);
+});
+$('plist').addEventListener('mouseleave', () => focus(null));
+$('plist').addEventListener('click', e => {
+  const li = e.target.closest('li[data-card]'); if (!li) return;
+  S.pinned = (S.pinned === li.dataset.card) ? null : li.dataset.card;
+  focus(null);
+});
+
+cv.addEventListener('mousemove', e => {
+  if (!order.length) return;
   const r = cv.getBoundingClientRect();
-  const c = Math.floor((e.clientX-r.left)/(r.width/order.length));
-  if (!(c>=0 && c<order.length)) return;
-  draw(c);
-  const who = pts[cur].opponents[0], row = cardIndex[order[c]];
-  tipEl.textContent = row
-    ? `${order[c]} · ${(row.by[who].p*100).toFixed(0)}% ${who} · 期望 ${row.by[who].expected.toFixed(2)} 张`
-    : `${order[c]}`;
-  tipEl.style.opacity=1;
-  tipEl.style.left=(e.clientX+12)+'px'; tipEl.style.top=(e.clientY-28)+'px';
+  const c = Math.floor((e.clientX - r.left) / (r.width / order.length));
+  if (c >= 0 && c < order.length) focus(order[c]);
 });
-cv.addEventListener('mouseleave', ()=>{ draw(); tipEl.style.opacity=0; });
-addEventListener('resize', layout);
+cv.addEventListener('mouseleave', () => focus(null));
 
-$('steps').innerHTML = pts.map((p,i)=>`<button type="button" data-i="${i}">第 ${p.step} 手</button>`).join('');
-$('steps').addEventListener('click', e=>{
-  const b = e.target.closest('button'); if (b) go(+b.dataset.i);
+function step(delta){
+  if (S.busy || !S.point) return;
+  const list = S.point.my_steps, i = list.indexOf(S.point.step);
+  const next = list[i + delta];
+  if (next !== undefined) showStep(next);
+}
+addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') step(-1);
+  else if (e.key === 'ArrowRight') step(1);
 });
-render();
 
-if (!reduce) gsap.timeline({defaults:{ease:'power3.out'}})
-  .from('header',{opacity:0,y:-8,duration:.5})
-  .from('#state > div',{opacity:0,y:12,duration:.5,stagger:.08},'-=.3')
-  .from('#bets li',{opacity:0,y:10,duration:.45,stagger:.06},'-=.3')
-  .from('aside > *',{opacity:0,x:10,duration:.45,stagger:.08},'-=.4')
-  .from('footer > div',{opacity:0,y:8,duration:.4,stagger:.06},'-=.35');
+$('steps').addEventListener('click', e => {
+  const b = e.target.closest('button[data-step]');
+  if (b) showStep(Number(b.dataset.step));
+});
+
+/* ---------- 取数 ---------- */
+function setBanner(text, kind){
+  const b = $('banner');
+  b.hidden = !text; b.textContent = text || ''; b.dataset.kind = kind || '';
+}
+
+async function api(path, body){
+  let res;
+  try {
+    res = await fetch(path, body === undefined ? undefined : {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('连不上后端 —— 先在本机运行 ddz serve，再打开这个页面。');
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* 不是 JSON，用状态码兜底 */ }
+  if (!res.ok) throw new Error((data && data.detail) || `后端返回 ${res.status}`);
+  return data;
+}
+
+async function showStep(target){
+  if (S.busy || !S.record) return;
+  S.busy = true;
+  setBanner('分析中…', '');
+  let ok = false;
+  try {
+    S.point = await api('/api/analyze', {record: S.record, step: target});
+    setBanner('');
+    renderAll();
+    ok = true;
+  } catch (err){
+    setBanner(err.message, 'error');
+  } finally {
+    S.busy = false;
+  }
+  // 动效刻意留在 try 之外：gsap 一旦加载不到，要作为 pageerror 冒出来，
+  // 而不是被当成"分析失败"吞进错误横幅里。
+  if (ok && !reduce) {
+    gsap.fromTo('#bets li', {y:10,opacity:0}, {y:0,opacity:1,duration:.42,stagger:.06,ease:'power3.out'});
+  }
+}
+
+async function loadRecord(record, note){
+  S.record = record;
+  S.point = null;
+  await showStep(null);
+  if (S.point) setBanner(note || '');
+}
+
+async function boot(){
+  try {
+    const d = await api('/api/demo');
+    S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
+    S.disclaimer = '';
+    await loadRecord(d.record, '演示局：随机自对弈的一局仿真数据。也可以打开自己的记录。');
+  } catch (err){
+    setBanner(err.message, 'error');
+  }
+}
+
+/* ---------- 打开自己的记录 ---------- */
+async function readFile(file){
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const record = JSON.parse(text);
+    await loadRecord(record, `已载入 ${file.name}（侧栏校准表与页脚指标仍来自演示数据集）`);
+  } catch (err){
+    setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
+  }
+}
+$('file').addEventListener('change', e => readFile(e.target.files[0]));
+document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
+document.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
+document.addEventListener('drop', e => {
+  e.preventDefault(); document.body.classList.remove('dragging');
+  readFile(e.dataTransfer.files[0]);
+});
+
+boot();
 </script>
 </body>
 </html>

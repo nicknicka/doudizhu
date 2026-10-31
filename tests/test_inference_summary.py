@@ -1,26 +1,12 @@
-"""web/build.py 的数据装配。
+"""手牌分布的逐牌摘要。
 
-页面本身是静态生成物，浏览器行为由 web/verify.mjs 盯着；这里只盯「喂给页面
-的数字对不对」。最要紧的一条：概率口径必须和 CLI 的 ``ddz infer`` 一致 ——
-报 P(至少一张) 与期望张数，而不是「第 k 张副本的累积概率」。
+最要紧的一条：概率口径必须和 CLI 的 ``ddz infer`` 一致 —— 报 P(至少一张)
+与期望张数，而不是「第 k 张副本的累积概率」。
 """
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
-REPO = Path(__file__).resolve().parents[1]
-
-
-def _load_build():
-    spec = importlib.util.spec_from_file_location("web_build", REPO / "web" / "build.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-build = _load_build()
+from ddz.inference import card_summary
 
 
 class FakeDistribution:
@@ -61,7 +47,7 @@ def _dist():
 
 
 def _rows():
-    return {r["card"]: r for r in build.card_summary(_dist(), pool=POOL)}
+    return {r["card"]: r for r in card_summary(_dist(), pool=POOL)}
 
 
 def test_card_summary_reports_probability_and_expected_count():
@@ -76,31 +62,20 @@ def test_card_summary_reports_probability_and_expected_count():
 
 def test_card_summary_never_lists_a_card_twice():
     """旧实现把同一张点数拆成多行（3→97% 和 3→5%），这里锁死「一张牌一行」。"""
-    cards = [r["card"] for r in build.card_summary(_dist(), pool=POOL)]
+    cards = [r["card"] for r in card_summary(_dist(), pool=POOL)]
     assert len(cards) == len(set(cards))
     assert set(cards) == set(POOL)
 
 
 def test_card_summary_expected_counts_are_conserved():
     """两个对手的期望张数之和 == 牌池里这张牌的张数 —— 牌不会凭空多出来。"""
-    for row in build.card_summary(_dist(), pool=POOL):
+    for row in card_summary(_dist(), pool=POOL):
         total = sum(v["expected"] for v in row["by"].values())
         assert abs(total - POOL.count(row["card"])) < 1e-9
 
 
 def test_card_summary_puts_the_least_decided_card_first():
     """最贴近 50/50 的牌排前面：7 / 8 有摇摆，比板上钉钉的 9 更靠前。"""
-    cards = [r["card"] for r in build.card_summary(_dist(), pool=POOL)]
+    cards = [r["card"] for r in card_summary(_dist(), pool=POOL)]
     assert cards[-1] == "9"
     assert set(cards[:2]) == {"7", "8"}
-
-
-def test_pick_steps_picks_evenly_and_keeps_the_ends():
-    picked = build.pick_steps(list(range(10)), 4)
-    assert picked[0] == 0 and picked[-1] == 9
-    assert picked == sorted(picked)
-    assert len(picked) == 4
-
-
-def test_pick_steps_passes_through_when_short():
-    assert build.pick_steps([1, 2, 3], 6) == [1, 2, 3]

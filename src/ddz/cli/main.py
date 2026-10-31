@@ -266,6 +266,17 @@ def _cmd_who(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """起本机后端。展示页要它才能取到数据。"""
+    import uvicorn
+
+    from ddz.api.app import app
+
+    print(f"展示页： http://{args.host}:{args.port}/  （Ctrl-C 停）")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def _cmd_simulate(args: argparse.Namespace) -> int:
     """批量产出带真值的仿真记录，供评测使用。"""
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -381,6 +392,11 @@ def build_parser() -> argparse.ArgumentParser:
     who.add_argument("--card", required=True, help="一张牌，如 K")
     who.add_argument("--step", type=int, default=None, help="在第 N 个决策点判断")
     who.set_defaults(func=_cmd_who)
+
+    serve = sub.add_parser("serve", help="起本机后端，供展示页取数")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.set_defaults(func=_cmd_serve)
 
     simulate = sub.add_parser("simulate", help="批量产出带真值的仿真记录")
     simulate.add_argument("--games", type=int, required=True, help="产出多少局")

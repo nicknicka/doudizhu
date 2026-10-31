@@ -14,7 +14,7 @@ import random
 from dataclasses import dataclass
 from typing import Mapping
 
-from ddz.cards import normalize
+from ddz.cards import CARD_ORDER, normalize
 from ddz.inference.feasibility import opponents_of
 from ddz.record.state import Snapshot
 
@@ -89,3 +89,33 @@ def sample(snapshot: Snapshot, n_particles: int = 200, seed: int = 0) -> Distrib
     return Distribution(
         particles=tuple(particles), opponents=opponents, diagnostics=diagnostics
     )
+
+
+def card_summary(dist: Distribution, pool) -> list[dict]:
+    """每张未现身牌：两个对手各自「至少一张」的概率与期望张数。
+
+    口径与 CLI ``ddz infer`` 一致 —— 报 P(至少一张) 和期望张数。旧版页面报的是
+    「第 k 张副本的累积概率」，于是同一个点数会拆成多行、每行含义还不同
+    （3→97% 是 P(≥1 张)，3→5% 是 P(≥4 张)），读者没法把两行对上。
+
+    排序把**最没把握**的牌放前面（P 最贴近 50/50）：这一版后验是「在合法分法上
+    均匀」，张数多的牌 P(至少一张) 天然接近 1，排前面会看着"很有把握"，
+    其实只是张数多，不含任何推断信息。平局按牌序，保证输出稳定。
+    """
+    rows = []
+    for card in sorted(set(pool), key=lambda c: CARD_ORDER[c]):
+        by = {
+            player: {
+                "p": round(dist.probability(card, player), 3),
+                "expected": round(dist.expected_count(card, player), 2),
+            }
+            for player in dist.opponents
+        }
+        rows.append({"card": card, "by": by})
+    rows.sort(
+        key=lambda r: (
+            max(abs(v["p"] - 0.5) for v in r["by"].values()),
+            CARD_ORDER[r["card"]],
+        )
+    )
+    return rows
