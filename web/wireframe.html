@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>斗地主决策助手 · 线框（Junior pass）</title>
+<style>
+  /* 占位骨架：不写视觉细节，只定结构。
+     huashu-design 的 Junior pass 要求先拿结构给用户看，
+     确认后再填组件与 GSAP —— 方向错了晚改比早改贵 100 倍。 */
+  :root {
+    --ink: #1a1a1a; --muted: #8a8a8a; --line: #d8d8d8;
+    --placeholder: #efefef; --placeholder-ink: #9a9a9a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    font: 14px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--ink); background: #fbfbfa;
+  }
+  .assumptions {
+    border-left: 3px solid var(--muted); padding: 8px 14px; margin-bottom: 28px;
+    color: var(--muted); font-size: 12px;
+  }
+  .assumptions b { color: var(--ink); }
+  .grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+  .zone { border: 1px solid var(--line); padding: 16px; }
+  .zone > h2 {
+    margin: 0 0 12px; font-size: 12px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .ph {
+    background: var(--placeholder); color: var(--placeholder-ink);
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 12px; font-size: 12px;
+  }
+  .stage   { height: 300px; }   /* 粒子云：主视觉 */
+  .hand    { height: 84px; }
+  .cands   { height: 180px; }
+  .calib   { height: 160px; }
+  .row { display: grid; gap: 14px; margin-top: 20px; grid-template-columns: 1fr 1fr; }
+  .tag { color: var(--muted); font-size: 11px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="assumptions">
+  <b>假设（等你确认）</b>　
+  ① 观众是 1 米外的笔记本，面试官看录屏或自己点 ·　
+  ② 一屏三区：局面 → 候选 → 分布，纵向读下来是一条推理链 ·　
+  ③ 主视觉是<b>粒子云</b>：每个粒子 = 一次完整分配 ·　
+  ④ 视觉温度：冷静、可信、有锐度 ·　
+  ⑤ 切换步号是<b>morph</b>不是重绘 ·　
+  ⑥ 数据全部来自 <code>ddz show / infer / calibrate</code> 的真实输出，不编造。
+</div>
+
+<div class="grid">
+  <div>
+    <div class="zone">
+      <h2>① 局面 · 现在是谁、还剩什么</h2>
+      <div class="ph hand">［占位］三家剩余张数 + 各家已出的牌 + 上一手 + 该谁出</div>
+      <div class="tag">数据源：<code>ddz show --in r.json --step N</code></div>
+    </div>
+
+    <div class="zone" style="margin-top:20px">
+      <h2>② 分布 · 粒子云（主视觉）</h2>
+      <div class="ph stage">［占位］200 个粒子叠加成概率云<br>换步号时粒子重排（morph）</div>
+      <div class="row">
+        <div class="ph cands">［占位］候选动作 + 模型估计<br><span class="tag">标注「模型给出的估计，不是胜率」</span></div>
+        <div class="ph calib">［占位］校准表<br><span class="tag">模型估计 vs 实际胜率</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="zone">
+    <h2>③ 证据 · 凭什么这么说</h2>
+    <div class="ph" style="height:260px">［占位］某张牌在某人手上的概率<br>+ 期望张数 + 判定理由</div>
+    <div class="ph" style="height:120px;margin-top:14px">［占位］全局指标<br>Top-1 63.2% / 基线 50.6%</div>
+    <div class="tag">
+      热力图已被粒子云替代。<br>
+      原本的「哪张牌在谁手上」在这里以数值形式保留。
+    </div>
+  </div>
+</div>
+
+<!-- 以下是 Full pass 才做，现在不写：
+     · 真实数据接入（读 ddz 的 JSON 输出）
+     · 粒子云的绘制与 GSAP timeline 编排
+     · 步号切换的 morph
+     · prefers-reduced-motion 分支
+-->
+
+</body>
+</html>
