@@ -58,18 +58,19 @@ function renderPlay(){
   const v = S.snap, m = S.meta;
   const latest = v.step === m.total_steps;
   const mine = v.acting === v.me;
-  $('play-who').textContent = turnText(v.acting);
+  const over = Boolean(v.finished);
+  $('play-who').textContent = over ? overText(v.winner) : turnText(v.acting);
   $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
   chips($('play-chips'), SEL.play, '点下面的牌组成这一手；不要的话直接按「不要」');
   // 历史局面下不能续录，牌盘直接停用 —— 否则上限算的是那个旧局面的牌池
   const pool = poolCounts();
-  keypad($('play-keys'), SEL.play, r => pool[r] || 0, !latest);
-  $('play-go').disabled = !latest || !SEL.play.length;
-  $('play-pass').disabled = !latest;
+  keypad($('play-keys'), SEL.play, r => pool[r] || 0, !latest || over);
+  $('play-go').disabled = over || !latest || !SEL.play.length;
+  $('play-pass').disabled = over || !latest;
   $('play-clear').disabled = !latest || !SEL.play.length;
 
   // 轮到我方、且看的是最新局面时，把模型排好序的合法动作变成"点一下就录"
-  const picks = (mine && latest && S.point) ? S.point.actions.slice(0, 8) : [];
+  const picks = (mine && latest && !over && S.point) ? S.point.actions.slice(0, 8) : [];
   $('play-picks').innerHTML = picks.map((a,i)=>
     `<button type="button" data-pick="${i}"><span>${a.label}</span>` +
     `<span class="sc">${a.score>0?'+':''}${a.score.toFixed(3)}</span></button>`).join('');
@@ -80,6 +81,9 @@ function renderPlay(){
   $('play-hint').className = 'hint';
   if (!latest){
     $('play-hint').textContent = '你在看历史局面 —— 回到最新那一手才能继续录。';
+    $('play-hint').className = 'hint warn';
+  } else if (over){
+    $('play-hint').textContent = '这局已经打完了 —— 局面还能看，录不了新的一手（要改就按「撤销」）。';
     $('play-hint').className = 'hint warn';
   } else if (mine && picks.length){
     $('play-hint').textContent = '这些是模型给所有合法动作排的序（Q 值，不是胜率）。点一下就把这一手记下来，也可以自己在下面点牌。';

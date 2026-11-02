@@ -87,6 +87,11 @@ def legal_actions(snapshot: Snapshot) -> list[Action]:
     """
     hand = "".join(snapshot.my_hand)
 
+    # 牌局已经结束就没有"合法动作"这回事了 —— RLCard 判完胜负之后同样返回空。
+    # 这是给调用方兜底：正常情况下他们该先看 ``snapshot.finished``。
+    if snapshot.finished:
+        return []
+
     if not snapshot.last_move:
         combos = sorted(DoudizhuJudger.playable_cards_from_hand(hand))
         return [Action(kind="play", cards=tuple(c)) for c in combos]

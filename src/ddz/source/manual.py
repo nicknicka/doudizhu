@@ -134,6 +134,10 @@ def append_step(record: MatchRecord, player: str, action: Action) -> MatchRecord
         raise IllegalEntryError(f"位置只能是 {TURN_ORDER}，收到 {player!r}")
 
     snapshot = derive(record)
+    if snapshot.finished:
+        raise IllegalEntryError(
+            f"牌局已经结束（{snapshot.winner} 先出完牌），不能再录了"
+        )
     if player != snapshot.acting:
         raise IllegalEntryError(f"现在该 {snapshot.acting} 出牌，不是 {player}")
 

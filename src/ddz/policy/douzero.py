@@ -30,7 +30,7 @@ OUTPUT_NAME = "values"
 
 
 class NotYourTurnError(RuntimeError):
-    """当前不该我方行动，因此不给建议。"""
+    """当前不该给建议 —— 要么轮不到我方，要么牌局已经结束。"""
 
 
 class MissingWeightsError(FileNotFoundError):
@@ -120,6 +120,10 @@ class DouZeroPolicy:
     def advise(self, record: MatchRecord, top_k: int = 3) -> Advice:
         """给一个局面产出建议。轮不到我方时抛 ``NotYourTurnError``。"""
         snapshot = derive(record)
+        if snapshot.finished:
+            raise NotYourTurnError(
+                f"牌局已经结束（{snapshot.winner} 先出完牌），没有可建议的一手。"
+            )
         if snapshot.acting != record.me:
             raise NotYourTurnError(
                 f"当前该 {snapshot.acting} 行动，而记录里的我方是 {record.me}；"

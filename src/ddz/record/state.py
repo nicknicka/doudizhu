@@ -41,6 +41,28 @@ class Snapshot:
     card_play_action_seq: tuple[tuple[str, ...], ...]
     bomb_num: int
 
+    @property
+    def winner(self) -> str | None:
+        """先出完牌的那一家（手牌 0 张）；牌局还没结束就是 ``None``。
+
+        记录里不存胜负（它能推出来），所以终局在这里推。注意它给的是**座位**：
+        地主出完是地主赢，农民任一家出完是农民赢。拿到座位后要判断阵营，
+        用 ``player == "landlord"``，别拿它跟 ``landlord_up`` 那类座位名混着比。
+        """
+        for player in TURN_ORDER:
+            if self.num_cards_left[player] == 0:
+                return player
+        return None
+
+    @property
+    def finished(self) -> bool:
+        """牌局是否已经结束。
+
+        结束之后 ``acting`` 只是轮转算法的副产物，没有「该谁出牌」这回事了 ——
+        要判断能不能继续录，看这个，别看 ``acting``。
+        """
+        return self.winner is not None
+
 
 def _acting_player(steps: tuple[Step, ...]) -> str:
     """下一步该谁动。
@@ -111,11 +133,13 @@ def my_turn_steps(record: MatchRecord) -> tuple[int, ...]:
 
     CLI 的校准与展示页后端都要这份序列，所以放记录层，别各算一遍。
     """
-    return tuple(
-        step
-        for step in range(len(record.steps) + 1)
-        if derive(record, steps=record.steps[:step]).acting == record.me
-    )
+    mine = []
+    for step in range(len(record.steps) + 1):
+        snapshot = derive(record, steps=record.steps[:step])
+        # 已经结束的局面不是决策点：轮次恰好转到我方也不算，此时没有可选择的一手
+        if not snapshot.finished and snapshot.acting == record.me:
+            mine.append(step)
+    return tuple(mine)
 
 
 def derive(record: MatchRecord, steps: tuple[Step, ...] | None = None) -> Snapshot:

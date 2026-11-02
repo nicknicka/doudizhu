@@ -2,7 +2,7 @@
 // 今天用 HTML 画；3D 场景会在这一层里换掉它。
 
 import { S, $ } from './state.js';
-import { NAME, label, identityLabel, isMe, turnText, card, back } from './labels.js';
+import { NAME, label, identityLabel, isMe, turnText, overText, actorName, card, back } from './labels.js';
 
 function seat(player){
   const v = S.snap;
@@ -10,7 +10,7 @@ function seat(player){
   const seat = S.meta.seats[player];
   const remaining = v.remaining[player];
   const played = v.played[player] || [];
-  const acting = v.acting === player;
+  const acting = !v.finished && v.acting === player;
 
   let hand;
   if (mine){
@@ -38,7 +38,8 @@ function renderWho(){
   const k = m.my_steps.indexOf(v.step);
   $('who').textContent = `${m.record_id} · ${m.source} · 全局第 ${v.step}/${m.total_steps} 手`
     + (k >= 0 ? ` · 我的第 ${k + 1} 次出牌机会` : '')
-    + ` · 我方是${identityLabel(m.me)}`;
+    + ` · 我方是${identityLabel(m.me)}`
+    + (v.finished ? ` · 牌局已结束：${actorName(v.winner)}先出完牌` : '');
   $('tool-note').textContent = latest ? '' : '· 看历史局面时不能续录';
 }
 
@@ -59,7 +60,7 @@ export function render(){
     `<div class="seat-row">${others.map(seat).join('')}</div>`
     + `<div class="board-mid">
          <div class="trick"><span class="lbl">上一手</span>${trick}</div>
-         <div class="turn${mine?'':' none'}">${turnText(v.acting)}</div>
+         <div class="turn${mine?'':' none'}">${v.finished ? overText(v.winner) : turnText(v.acting)}</div>
        </div>`
     + seat(me)
     + `<div class="replay"><span class="lbl">我的出牌机会</span>`

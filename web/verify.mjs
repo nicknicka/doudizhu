@@ -105,6 +105,19 @@ try {
   await page.mouse.move(10, 10); await page.waitForTimeout(150);
   if (!(await row2.evaluate(el => el.classList.contains('is-focus')))) problems.push('概率列表无法用键盘钉住');
 
+  // 交互 2b：终局 —— 跳到最后那一手，操作台必须收手，不再提示"该谁出牌"
+  await page.click('#play-latest');
+  await page.waitForTimeout(1200);
+  if (!(await text(page, '#play-who')).includes('牌局已结束')) {
+    problems.push('终局时操作台没报「牌局已结束」');
+  }
+  if (!(await page.locator('#play-go').isDisabled())
+      || !(await page.locator('#play-pass').isDisabled())) {
+    problems.push('终局时「出牌 / 不要」还能点');
+  }
+  if (!(await text(page, '#banner')).includes('牌局已结束')) problems.push('终局横幅没说明牌局已结束');
+  if (!(await text(page, '#board')).includes('牌局已结束')) problems.push('牌桌没说明牌局已结束');
+
   // 交互 3：开新局 —— 全部用牌盘点出来，不输任何牌面字符串
   await page.click('#new-toggle');
   await page.selectOption('#new-me', 'landlord_up');
@@ -182,5 +195,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；座位以我方为参照 + 牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 均正常');
+  : '✔ 无 pageerror / console error；座位以我方为参照 + 牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 + 终局收手 均正常');
 process.exit(problems.length ? 1 : 0);
