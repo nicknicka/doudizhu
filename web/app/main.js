@@ -117,7 +117,8 @@ addEventListener('keydown', e => {
 async function boot(){
   consolePanel.init({ refresh, mutate });
   try {
-    const d = await api('/api/demo');
+    const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
+    S.config = config;
     S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
     await loadRecord(d.record, '演示局：随机自对弈的一局。点「开新局」录自己的牌局，或「打开记录」。');
   } catch (err){

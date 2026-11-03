@@ -82,7 +82,7 @@ def bounds_for(snapshot: Snapshot, card: str) -> dict[str, Bounds]:
             reasons.append(f"未现身 {remaining} 张，他还有 {hand_size[player]} 张手牌")
             if low > 0:
                 reasons.append(
-                    f"必然至少有 {low} 张：另外两家最多只能容纳 {others_capacity} 张"
+                    f"必然至少有 {low} 张：另一家最多只能容纳 {others_capacity} 张"
                 )
 
         result[player] = Bounds(low=low, high=capacity, reasons=tuple(reasons))

@@ -105,15 +105,38 @@ try {
   await page.mouse.move(10, 10); await page.waitForTimeout(150);
   if (!(await row2.evaluate(el => el.classList.contains('is-focus')))) problems.push('概率列表无法用键盘钉住');
 
-  // 交互 3：开新局 —— 全部用牌盘点出来，不输任何牌面字符串
+  // 交互 2b：终局 —— 跳到最后那一手，操作台必须收手，不再提示"该谁出牌"
+  await page.click('#play-latest');
+  await page.waitForTimeout(1200);
+  if (!(await text(page, '#play-who')).includes('牌局已结束')) {
+    problems.push('终局时操作台没报「牌局已结束」');
+  }
+  if (!(await page.locator('#play-go').isDisabled())
+      || !(await page.locator('#play-pass').isDisabled())) {
+    problems.push('终局时「出牌 / 不要」还能点');
+  }
+  if (!(await text(page, '#banner')).includes('牌局已结束')) problems.push('终局横幅没说明牌局已结束');
+  if (!(await text(page, '#board')).includes('牌局已结束')) problems.push('牌桌没说明牌局已结束');
+
+  // 交互 3：开新局 —— 三种位置的开局张数都来自服务端配置
   await page.click('#new-toggle');
-  await page.selectOption('#new-me', 'landlord_up');
+  for (const [me, size] of [['landlord', 20], ['landlord_down', 17], ['landlord_up', 17]]) {
+    await page.selectOption('#new-me', me);
+    if (!(await text(page, '#new-count')).includes(`0/${size}`)) {
+      problems.push(`${me} 的手牌进度没有使用服务端张数 ${size}`);
+    }
+  }
   // 开局用「开局面板」的牌盘，录一手用「录一手」的牌盘 —— 是两套，别点错
   const tapNew = async keys => { for (const k of keys) await page.click(`#new-keys button[data-key="${k}"]`); };
   const tapPlay = async keys => { for (const k of keys) await page.click(`#play-keys button[data-key="${k}"]`); };
+  await page.selectOption('#new-me', 'landlord_up');
   await tapNew(['3','3','3','4','4','4','5','5','5','6','6','6','7','7','8','A','A']); // 17 张手牌
-  await tapNew(['9','T','J']);                                                          // 3 张底牌
+  // 手牌满后自动切到底牌，所以这 3 张无需先点「底牌」
+  await tapNew(['9','T','J']);
   if (!(await text(page, '#new-count')).includes('17/17')) problems.push('牌盘没数对手牌张数');
+  if ((await page.locator('#tgt-cards.is-on').count()) !== 1) {
+    problems.push('手牌满后没有自动切到底牌');
+  }
   await page.click('#new-go');
   await page.waitForTimeout(1500);
   if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
@@ -153,7 +176,19 @@ try {
   if (!(await text(page, '#banner')).includes('只剩')) problems.push('挡住选牌时没有说明原因');
   await page.click('#play-clear');
 
-  // 交互 7：点候选 = 直接录这一手。
+  // 交互 7：粘贴超量由服务端下发的开局张数拦住
+  await page.click('#new-toggle');
+  await page.selectOption('#new-me', 'landlord_up');
+  await page.click('#tgt-hand');
+  await page.fill('#new-paste', '333444555666777888'); // 18 张，超过农民开局 17 张
+  await page.click('#new-paste-go');
+  await page.waitForTimeout(150);
+  if (!(await text(page, '#new-hint')).includes('只需要 17 张')) {
+    problems.push('粘贴超量没有使用服务端下发的手牌张数');
+  }
+  await page.click('#new-toggle');
+
+  // 交互 8：点候选 = 直接录这一手。
   // 注意：录完不一定就轮到我方，所以不能拿"步号变多"当判据 —— 看反馈与已出手数。
   const picks = await page.locator('#play-picks button').count();
   const boardBefore = await text(page, '#board');
@@ -163,7 +198,7 @@ try {
   // 比整块牌桌：点「不出」时"已出"不会变，但该谁出、上一手一定变
   if ((await text(page, '#board')) === boardBefore) problems.push('点候选后牌桌没有跟着走');
 
-  // 交互 8：撤销
+  // 交互 9：撤销
   await page.click('#undo');
   await page.waitForTimeout(1000);
   if (!(await text(page, '#banner')).includes('已撤销')) problems.push('撤销没有反馈');
@@ -182,5 +217,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；座位以我方为参照 + 牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 均正常');
+  : '✔ 无 pageerror / console error；座位以我方为参照 + 牌桌三席 + 分布四处 + 步号(点/键) + 交叉高亮 + 牌盘开局/录牌(含牌池上限) + 候选一键录 + 撤销 + 终局收手 均正常');
 process.exit(problems.length ? 1 : 0);

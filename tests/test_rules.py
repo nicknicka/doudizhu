@@ -161,3 +161,32 @@ def test_opponent_hand_pool_is_publicly_derivable():
         truth_hands = env.get_perfect_information()["hand_cards"]
         others_truth = "".join(truth_hands[i] for i in range(3) if i != me)
         assert Counter(raw["others_hand"]) == Counter(others_truth)
+
+
+class TestGameOverRule:
+    """规则 5：一家出完牌，牌局就结束了 —— 谁都没有合法动作。
+
+    引擎（RLCard）在 ``is_over()`` 之后不再给动作；我们的 ``legal_actions``
+    必须一致，否则会给一个已经打完的牌局发候选。
+    """
+
+    def test_the_engine_hands_out_no_action_once_the_game_is_over(self):
+        import rlcard
+
+        env = rlcard.make("doudizhu")
+        env.seed(0)
+        random.seed(0)
+        state, _ = env.reset()
+        while not env.is_over():
+            state, _ = env.step(random.choice(state["raw_legal_actions"]), raw_action=True)
+        assert state["raw_legal_actions"] == []
+
+    def test_we_hand_out_no_action_once_the_game_is_over(self):
+        from ddz.record.state import derive
+        from ddz.rules import legal_actions
+        from tests.test_record import finished_record
+
+        # 地主出完牌，轮次正好转到他下家 —— 但牌局已经结束，谁也不该再有动作
+        snapshot = derive(finished_record(me="landlord_down"))
+        assert snapshot.finished
+        assert legal_actions(snapshot) == []

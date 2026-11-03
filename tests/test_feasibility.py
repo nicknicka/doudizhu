@@ -100,6 +100,21 @@ class TestPigeonhole:
         assert verdicts["landlord"].high == 1
         assert verdicts["landlord_down"].high == 2
 
+        # 下限只扣掉了另一个对手的容量，理由不能说成「另外两家」
+        assert any(
+            "另一家最多只能容纳 2 张" in reason
+            for reason in verdicts["landlord"].reasons
+        )
+        assert any(
+            "另一家最多只能容纳 1 张" in reason
+            for reason in verdicts["landlord_down"].reasons
+        )
+        assert all(
+            "另外两家" not in reason
+            for bound in verdicts.values()
+            for reason in bound.reasons
+        )
+
     def test_no_lower_bound_when_others_have_room(self, snapshot):
         for bound in bounds_for(snapshot, "2").values():
             assert bound.low == 0

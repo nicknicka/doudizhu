@@ -25,7 +25,13 @@ from ddz.evaluation import evaluate
 from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
-from ddz.record.schema import SCORE_DISCLAIMER, TURN_ORDER, Action, MatchRecord
+from ddz.record.schema import (
+    INITIAL_HAND_SIZE,
+    SCORE_DISCLAIMER,
+    TURN_ORDER,
+    Action,
+    MatchRecord,
+)
 from ddz.record.state import derive, my_turn_steps, relative_seats
 from ddz.rules import legal_actions
 from ddz.source import manual, sim
@@ -83,6 +89,10 @@ def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
         "step": step,
         "me": snapshot.me,
         "acting": snapshot.acting,
+        # 终局由记录层推（谁先出完谁赢）。结束之后 acting 没有意义，
+        # 页面要按 finished 收手，别再提示"现在该谁出牌"。
+        "finished": snapshot.finished,
+        "winner": snapshot.winner,
         "my_hand": list(snapshot.my_hand),
         "remaining": dict(snapshot.num_cards_left),
         "played": {p: list(c) for p, c in snapshot.played_cards.items()},
@@ -270,6 +280,11 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, bool]:
         return {"ok": True}
+
+    @app.get("/api/config")
+    def config() -> dict[str, Any]:
+        """开局面板要的业务常量，由服务端唯一持有。"""
+        return {"opening_hand_sizes": dict(INITIAL_HAND_SIZE)}
 
     @app.get("/api/demo")
     def demo(policy: DouZeroPolicy = Depends(get_policy)) -> dict[str, Any]:

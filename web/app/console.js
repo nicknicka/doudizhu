@@ -1,8 +1,8 @@
 // 操作台：开局的牌盘、录一手的牌盘与动作按钮。
 // 它只负责"把用户点的牌收上来、拼成请求"，合法性由服务端判。
 
-import { S, SEL, PAD, NEED, $ } from './state.js';
-import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText } from './labels.js';
+import { S, SEL, PAD, $ } from './state.js';
+import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText, overText } from './labels.js';
 import { setBanner } from './api.js';
 
 let deps = { refresh: async () => {}, mutate: async () => false };
@@ -31,9 +31,37 @@ function chips(host, sel, emptyText){
     : `<span class="empty">${emptyText}</span>`;
 }
 
+/* ---------- 粘贴牌串：只识别牌面，不判牌型 ---------- */
+const ALIAS_2 = {'小王': 'B', '大王': 'R', '10': 'T'};
+function parseCards(str){
+  const out = [];
+  const seq = (str || '').replace(/[\s,，、|·]/g, '');
+  for (let i = 0; i < seq.length;){
+    const two = seq.slice(i, i + 2);
+    if (ALIAS_2[two]){ out.push(ALIAS_2[two]); i += 2; continue; }
+    const ch = seq[i];
+    if ('3456789'.includes(ch) || ch === '2'){ out.push(ch); i += 1; continue; }
+    const up = ch.toUpperCase();
+    if ('TJQKA'.includes(up)){ out.push(up); i += 1; continue; }
+    if (up === 'B' || ch === '小'){ out.push('B'); i += 1; continue; }
+    if (up === 'R' || ch === '大'){ out.push('R'); i += 1; continue; }
+    return {error: `看不懂这个字：${ch}`};
+  }
+  const over = Object.entries(out.reduce((m, r) => (m[r] = (m[r] || 0) + 1, m), {}))
+    .find(([, n]) => n > 4);
+  if (over) return {error: `${NAME[over[0]]} 一副牌只有 4 张。`};
+  return {cards: out};
+}
+
+/** 开局面板要的张数来自后端；配置未到时不许开局。 */
+const openingHandSizes = () => (S.config && S.config.opening_hand_sizes) || {};
+const needFor = me => openingHandSizes()[me];
+
 function renderNew(){
-  const need = NEED[$('new-me').value];
-  $('new-count').textContent = `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
+  const need = needFor($('new-me').value);
+  $('new-count').textContent = need === undefined
+    ? '手牌 ? · 底牌 ?/3'
+    : `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
   // 手牌与底牌放在同一行，靠 zone 区分归属；点一张拿掉一张
   $('new-chips').innerHTML =
     (SEL.hand.length
@@ -46,7 +74,7 @@ function renderNew(){
   keypad($('new-keys'), SEL.hand.concat(SEL.cards), () => 4);
   $('tgt-hand').classList.toggle('is-on', PAD.target === 'hand');
   $('tgt-cards').classList.toggle('is-on', PAD.target === 'cards');
-  const ok = SEL.hand.length === need && SEL.cards.length === 3;
+  const ok = need !== undefined && SEL.hand.length === need && SEL.cards.length === 3;
   $('new-go').disabled = !ok;
   $('new-hint').className = 'hint' + (ok ? '' : ' warn');
   $('new-hint').textContent = ok
@@ -58,18 +86,19 @@ function renderPlay(){
   const v = S.snap, m = S.meta;
   const latest = v.step === m.total_steps;
   const mine = v.acting === v.me;
-  $('play-who').textContent = turnText(v.acting);
+  const over = Boolean(v.finished);
+  $('play-who').textContent = over ? overText(v.winner) : turnText(v.acting);
   $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
   chips($('play-chips'), SEL.play, '点下面的牌组成这一手；不要的话直接按「不要」');
   // 历史局面下不能续录，牌盘直接停用 —— 否则上限算的是那个旧局面的牌池
   const pool = poolCounts();
-  keypad($('play-keys'), SEL.play, r => pool[r] || 0, !latest);
-  $('play-go').disabled = !latest || !SEL.play.length;
-  $('play-pass').disabled = !latest;
+  keypad($('play-keys'), SEL.play, r => pool[r] || 0, !latest || over);
+  $('play-go').disabled = over || !latest || !SEL.play.length;
+  $('play-pass').disabled = over || !latest;
   $('play-clear').disabled = !latest || !SEL.play.length;
 
   // 轮到我方、且看的是最新局面时，把模型排好序的合法动作变成"点一下就录"
-  const picks = (mine && latest && S.point) ? S.point.actions.slice(0, 8) : [];
+  const picks = (mine && latest && !over && S.point) ? S.point.actions.slice(0, 8) : [];
   $('play-picks').innerHTML = picks.map((a,i)=>
     `<button type="button" data-pick="${i}"><span>${a.label}</span>` +
     `<span class="sc">${a.score>0?'+':''}${a.score.toFixed(3)}</span></button>`).join('');
@@ -80,6 +109,9 @@ function renderPlay(){
   $('play-hint').className = 'hint';
   if (!latest){
     $('play-hint').textContent = '你在看历史局面 —— 回到最新那一手才能继续录。';
+    $('play-hint').className = 'hint warn';
+  } else if (over){
+    $('play-hint').textContent = '这局已经打完了 —— 局面还能看，录不了新的一手（要改就按「撤销」）。';
     $('play-hint').className = 'hint warn';
   } else if (mine && picks.length){
     $('play-hint').textContent = '这些是模型给所有合法动作排的序（Q 值，不是胜率）。点一下就把这一手记下来，也可以自己在下面点牌。';
@@ -112,13 +144,38 @@ export function init({ refresh, mutate }){
     }
     SEL[PAD.target].push(r);
     // 手牌满了就自动把落点切到底牌，省一次点击
-    if (PAD.target === 'hand' && SEL.hand.length >= NEED[$('new-me').value]) PAD.target = 'cards';
+    const need = needFor($('new-me').value);
+    if (PAD.target === 'hand' && need !== undefined && SEL.hand.length >= need) PAD.target = 'cards';
     renderNew();
   });
   $('new-chips').addEventListener('click', e => {
     const s = e.target.closest('[data-drop]'); if (!s) return;
     SEL[s.dataset.zone].splice(Number(s.dataset.drop), 1);
     renderNew();
+  });
+  $('new-paste-go').addEventListener('click', () => {
+    const res = parseCards($('new-paste').value);
+    if (res.error){
+      setBanner(res.error, 'error');
+      $('new-hint').className = 'hint warn';
+      $('new-hint').textContent = res.error;
+      return;
+    }
+    const need = PAD.target === 'hand' ? needFor($('new-me').value) : 3;
+    if (res.cards.length > need){
+      const msg = `${PAD.target === 'hand' ? '手牌' : '底牌'}只需要 ${need} 张，你粘了 ${res.cards.length} 张。`;
+      setBanner(msg, 'error');
+      $('new-hint').className = 'hint warn';
+      $('new-hint').textContent = msg;
+      return;
+    }
+    SEL[PAD.target] = res.cards.slice();
+    if (PAD.target === 'hand' && SEL.hand.length >= need) PAD.target = 'cards';
+    $('new-paste').value = '';
+    renderNew();
+  });
+  $('new-paste').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('new-paste-go').click();
   });
   $('new-go').addEventListener('click', async () => {
     const me = $('new-me').value;

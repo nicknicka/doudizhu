@@ -10,7 +10,10 @@ import pytest
 
 from ddz.cli.main import main
 from ddz.evaluation import MissingGroundTruthError, evaluate
+from ddz.evaluation.metrics import _truth_hands_at
 from ddz.record.io import load, save
+from ddz.record.schema import Initial, MatchRecord
+from ddz.record.state import derive
 from ddz.source import manual, sim
 
 
@@ -98,6 +101,67 @@ class TestMetrics:
             assert m.log_likelihood <= 0.0
             assert m.n_positions > 0 and m.n_cards_scored > 0
 
+    def test_top1_only_scores_a_rank_held_by_exactly_one_opponent(self):
+        """某点数被两家拆分时归属不唯一，不能因一家只有一张就计入 Top-1。"""
+        landlord = tuple("33444477778888KKKKBR")
+        landlord_up = tuple("355559999TTTTAAAA")
+        me = tuple("36666JJJJQQQQ2222")
+        record = MatchRecord(
+            record_id="split-rank",
+            source="sim",
+            created_at="2026-01-01T00:00:00+08:00",
+            me="landlord_down",
+            initial=Initial(
+                my_hand=me,
+                three_landlord_cards=("K", "K", "B"),
+                opponents={"landlord": landlord, "landlord_up": landlord_up},
+            ),
+        )
+
+        truth = _truth_hands_at(record, 0)
+        assert truth["landlord"]["3"] == 2
+        assert truth["landlord_up"]["3"] == 1
+
+        ours, _ = evaluate([record], n_particles=20, seed=0)
+        # 两个对手手上、归属唯一的不同点数：4/5/7/8/9/T/K/A/B/R，共 10 个。
+        # 3 被两家拆分，6/J/Q/2 只在我方，都不该计入。
+        assert ours.top1_n == 10
+
+    def test_documented_dataset_excludes_its_three_terminal_samples(self):
+        """README/展示页的 10 局口径：633 个采样点里 3 个终局，只计 630 个。"""
+        records = list(sim.generate(10, seed=0))
+        sampled = [
+            (record, step)
+            for record in records
+            for step in range(0, len(record.steps) + 1, 3)
+        ]
+        terminal = [
+            (record, step) for record, step in sampled
+            if derive(record, steps=record.steps[:step]).finished
+        ]
+        assert len(sampled) == 633
+        assert len(terminal) == 3
+
+        ours, baseline = evaluate(records, n_particles=200, seed=0, step_stride=3)
+        assert ours.n_positions == 630
+        assert ours.n_cards_scored == baseline.n_cards_scored == 11716
+        assert ours.top1_n == baseline.top1_n == 3780
+
+    def test_final_terminal_sample_is_not_a_decision_position(self):
+        """最后一个采样点恰好是终局时，整个终局不能贡献任何指标。"""
+        record = next(
+            r for r in sim.generate(1, seed=6) if r.me == "landlord_down"
+        )
+        final_step = len(record.steps)
+        assert final_step % 3 == 0
+        assert derive(record).finished
+
+        full, _ = evaluate([record], n_particles=20, seed=0, step_stride=3)
+        before_terminal, _ = evaluate(
+            [record.upto(final_step - 1)], n_particles=20, seed=0, step_stride=3
+        )
+        assert full == before_terminal
+
     def test_both_sides_are_scored_on_the_same_items(self, records):
         """两行必须覆盖同样的题量，否则没法并列比较。"""
         ours, baseline = evaluate(records, n_particles=20, seed=0, step_stride=5)
@@ -117,6 +181,8 @@ class TestCli:
         assert "| 方案 | Top-1 命中率 | 对数似然 | 计分项 |" in out
         assert "我们的推断" in out and "独立抛硬币基线" in out
         assert "参数：" in out and "20 个粒子" in out
+        assert "覆盖 " in out and "个决策点（终局不计）" in out
+        assert "633" not in out
 
     def test_rejects_a_directory_without_records(self, tmp_path, capsys):
         assert main(["evaluate", "--in-dir", str(tmp_path)]) == 2

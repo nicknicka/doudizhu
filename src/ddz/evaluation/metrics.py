@@ -49,16 +49,16 @@ class Metrics:
         )
 
 
-def _truth_hands(record: MatchRecord) -> Mapping[str, frozenset[str]]:
+def _truth_hands(record: MatchRecord) -> Mapping[str, Counter[str]]:
     if record.initial.opponents is None:
         raise MissingGroundTruthError(
             f"{record.record_id} 不含真值（initial.opponents 缺失），无法评测。"
             "评测数据集必须用 ddz simulate 生成。"
         )
-    return {p: frozenset(hand) for p, hand in record.initial.opponents.items()}
+    return {p: Counter(hand) for p, hand in record.initial.opponents.items()}
 
 
-def _truth_hands_at(record: MatchRecord, step: int) -> Mapping[str, frozenset[str]]:
+def _truth_hands_at(record: MatchRecord, step: int) -> Mapping[str, Counter[str]]:
     """某个决策点上，两个对手的真实手牌 = 开局手牌 − 他们已出的牌。"""
     truth = _truth_hands(record)
     played: dict[str, list[str]] = {p: [] for p in truth}
@@ -66,10 +66,7 @@ def _truth_hands_at(record: MatchRecord, step: int) -> Mapping[str, frozenset[st
         if s.action.is_play and s.player in played:
             played[s.player].extend(s.action.cards)
     # 用 Counter 做差：真实手牌 = 开局手牌 − 已出的牌，重复牌要保留张数
-    return {
-        p: frozenset((Counter(hand) - Counter(played[p])).elements())
-        for p, hand in truth.items()
-    }
+    return {p: hand - Counter(played[p]) for p, hand in truth.items()}
 
 
 def evaluate(
@@ -89,18 +86,18 @@ def evaluate(
         truth = _truth_hands(record)  # 缺真值在这里就炸
         for step in range(0, len(record.steps) + 1, step_stride):
             snapshot = derive(record, steps=record.steps[:step])
+            # 终局不是决策点：没有「该谁出牌」，也不该进入位置数或任何计分项。
+            if snapshot.finished:
+                continue
             truth_at = _truth_hands_at(record, step)
             distribution = sample(snapshot, n_particles=n_particles, seed=seed + step)
 
-            # Top-1 只在「这张牌恰好由一家持有」时定义清晰；两家都有或都不有，
+            # Top-1 只在「这个点数恰好由一家持有」时定义清晰；两家都有或都不有，
             # 归属不唯一，不计入 Top-1（仍计入对数似然）
             # 先规范化排序再遍历：set 的迭代顺序随 PYTHONHASHSEED 变化，
             # 会让抛硬币的随机流在不同进程里错位 —— 数字就不可复现了。
             for card in normalize(set(snapshot.pool)):
-                holders = [
-                    p for p, hand in truth_at.items()
-                    if sum(1 for c in hand if c == card) == 1
-                ]
+                holders = [p for p, hand in truth_at.items() if hand[card] > 0]
                 if len(holders) != 1:
                     continue
 

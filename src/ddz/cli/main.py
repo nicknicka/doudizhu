@@ -24,6 +24,9 @@ def _record_at_step(record, step: int | None):
 
 def _print_advice(record, policy, top_k: int) -> None:
     snapshot = derive(record)
+    if snapshot.finished:
+        print(f"牌局已结束（{snapshot.winner} 先出完牌），不再给建议。")
+        return
     if snapshot.acting != record.me:
         print(f"当前该 {snapshot.acting} 行动，不是我方，暂不给建议。")
         return
@@ -125,7 +128,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print("各家剩余：" + "  ".join(f"{p}={n}" for p, n in snapshot.num_cards_left.items()))
     print("各家已出：" + "  ".join(
         f"{p}={''.join(cards) or '—'}" for p, cards in snapshot.played_cards.items()))
-    print(f"现在该 {snapshot.acting} 行动")
+    if snapshot.finished:
+        print(f"牌局已结束：{snapshot.winner} 先出完牌")
+    else:
+        print(f"现在该 {snapshot.acting} 行动")
     if snapshot.last_move:
         print(f"上一手：{''.join(snapshot.last_move)}")
     else:
@@ -180,7 +186,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 
     # CLI 不推算"每局几条视角"这种业务规则，只报事实
     print(f"参数：{len(records)} 条记录 · {args.particles} 个粒子 · "
-          f"seed={args.seed} · 每 {args.stride} 步采一次 · 无模型参与（纯推断评测）")
+          f"seed={args.seed} · 每 {args.stride} 步采一次 · "
+          f"覆盖 {ours.n_positions} 个决策点（终局不计）· 无模型参与（纯推断评测）")
     print()
     print("| 方案 | Top-1 命中率 | 对数似然 | 计分项 |")
     print("|---|---|---|---|")

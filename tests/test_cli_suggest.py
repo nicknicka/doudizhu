@@ -125,6 +125,19 @@ class TestSuggest:
         assert run_suggest(source, tmp_path / "out.json") == 2
 
 
+    def test_refuses_to_suggest_after_the_game_ended(self, tmp_path):
+        """牌局已经打完 —— 哪怕轮次转到我方，也不该再给建议。"""
+        from ddz.record.io import save
+        from tests.test_record import finished_record
+
+        record = finished_record(me="landlord_down")
+        assert derive(record).finished and derive(record).acting == record.me
+
+        source = tmp_path / "over.json"
+        save(record, source)
+        assert run_suggest(source, tmp_path / "out.json") == 2
+
+
 class TestDeterminism:
     def test_same_input_gives_byte_identical_output(self, fixture, tmp_path):
         """同一局面重跑，输出逐字节相同。
