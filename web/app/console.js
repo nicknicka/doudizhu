@@ -12,6 +12,32 @@ let hintIndex = -1;   // 推荐键在候选里循环
 
 /** 牌池里每个点数还剩几张。数据来自后端，页面不自己数。 */
 const poolCounts = () => (S.snap && S.snap.pool_counts) || {};
+
+function chips(host, sel, emptyText){
+  host.innerHTML = sel.length
+    ? sel.map((c,i) => `<span data-drop="${i}">${card(c)}</span>`).join('')
+    : `<span class="empty">${emptyText}</span>`;
+}
+
+/* ---------- 粘贴牌串：只识别牌面，不判牌型 ---------- */
+const ALIAS_2 = {'小王': 'B', '大王': 'R', '10': 'T'};
+function parseCards(str){
+  const out = [];
+  const seq = (str || '').replace(/[\s,，、|·]/g, '');
+  for (let i = 0; i < seq.length;){
+    const two = seq.slice(i, i + 2);
+    if (ALIAS_2[two]){ out.push(ALIAS_2[two]); i += 2; continue; }
+    const ch = seq[i];
+    if ('3456789'.includes(ch) || ch === '2'){ out.push(ch); i += 1; continue; }
+    const up = ch.toUpperCase();
+    if ('TJQKA'.includes(up)){ out.push(up); i += 1; continue; }
+    if (up === 'B' || ch === '小'){ out.push('B'); i += 1; continue; }
+    if (up === 'R' || ch === '大'){ out.push('R'); i += 1; continue; }
+    return {error: `看不懂这个字：${ch}`};
+  }
+  // 整副牌张数、手牌张数与合法性由服务端裁定；这里只把输入转成牌面字符。
+  return {cards: out};
+}
 const latestView = () => S.snap.step === S.meta.total_steps;
 
 /** 开局面板要的张数来自后端；配置未到时不许开局。 */
@@ -53,12 +79,6 @@ export function toggleCard(index){
 
 const cardSuitOrder = r => RANKS.indexOf(r);
 const sortPicked = () => SEL.play.slice().sort((a, b) => cardSuitOrder(a) - cardSuitOrder(b));
-
-function chips(host, sel, emptyText){
-  host.innerHTML = sel.length
-    ? sel.map((c, i) => `<span data-drop="${i}">${card(c)}</span>`).join('')
-    : `<span class="empty">${emptyText}</span>`;
-}
 
 /* ---------- 开局面板（保留原来的牌盘） ---------- */
 function renderNew(){
@@ -153,28 +173,6 @@ export function showNewPanel(){ $('newgame').classList.add('is-open'); renderNew
 export function hideNewPanel(){ $('newgame').classList.remove('is-open'); }
 export function isNewPanelOpen(){ return $('newgame').classList.contains('is-open'); }
 
-/* ---------- 粘贴牌串：直接把手牌/底牌录进来 ---------- */
-const ALIAS_2 = { '小王': 'B', '大王': 'R', '10': 'T' };
-function parseCards(str){
-  const out = [];
-  const seq = (str || '').replace(/[\s,，、|·]/g, '');
-  for (let i = 0; i < seq.length; ){
-    const two = seq.slice(i, i + 2);
-    if (ALIAS_2[two]){ out.push(ALIAS_2[two]); i += 2; continue; }
-    const ch = seq[i];
-    if ('3456789'.includes(ch)){ out.push(ch); i += 1; continue; }
-    if (ch === '2'){ out.push('2'); i += 1; continue; }
-    const up = ch.toUpperCase();
-    if ('TJQKA'.includes(up)){ out.push(up); i += 1; continue; }
-    if (up === 'B' || ch === '小'){ out.push('B'); i += 1; continue; }
-    if (up === 'R' || ch === '大'){ out.push('R'); i += 1; continue; }
-    return { error: `看不懂这个字：${ch}` };
-  }
-  const over = Object.entries(out.reduce((m, r) => (m[r] = (m[r] || 0) + 1, m), {}))
-    .find(([, n]) => n > 4);
-  if (over) return { error: `${NAME[over[0]]} 一副牌只有 4 张。` };
-  return { cards: out };
-}
 
 export function init(dependencies){
   deps = Object.assign({}, deps, dependencies);

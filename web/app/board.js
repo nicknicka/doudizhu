@@ -2,7 +2,7 @@
 // 三维形状和真屏在 machine.js 里；要读的数字留在这一层。
 
 import { S, $ } from './state.js';
-import { RANKS, NAME, label, identityLabel, isMe, actorName } from './labels.js';
+import { RANKS, NAME, label, identityLabel, isMe, overText } from './labels.js';
 import * as machine from './machine.js';
 
 let labels = {};
@@ -16,7 +16,7 @@ function renderWho(){
   $('who').innerHTML = `${m.record_id} · ${m.source} · 全局第 ${v.step}/${m.total_steps} 手`
     + (k >= 0 ? ` · <b>我的第 ${k + 1} 次出牌机会</b>` : '')
     + ` · 我方是${identityLabel(m.me)}`
-    + (v.finished ? ` · <b>牌局已结束：${actorName(v.winner)}先出完牌</b>` : '');
+    + (v.finished ? ` · <b>${overText(v.winner)}</b>` : '');
   $('tool-note').textContent = latest ? '' : '· 看历史局面时不能续录';
 }
 

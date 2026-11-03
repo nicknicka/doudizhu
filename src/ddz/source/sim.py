@@ -34,7 +34,11 @@ class SimulatedGame:
 
 
 def _positions_by_player_id(landlord_id: int) -> dict[int, str]:
-    """按当局实际地主编号映射三个 player_id 到相对位置。"""
+    """按当局实际地主编号映射 player_id 到地主参照的内部座位名。
+
+    这些 ``landlord_up`` / ``landlord_down`` 是记录格式的内部位置，不是以我方
+    为参照的「上家 / 下家」；后者由记录层的 ``relative_seats`` 推导。
+    """
     if landlord_id not in range(3):
         raise SimulationError(f"地主编号必须是 0、1、2，收到 {landlord_id}")
     return {
