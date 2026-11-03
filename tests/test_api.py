@@ -219,6 +219,21 @@ def test_step_records_a_validated_hand():
         app.dependency_overrides.clear()
 
 
+def test_step_returns_play_cards_in_canonical_order():
+    """接口和 CLI/JSON 共用同一个动作边界：8884 返回 4888。"""
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post(
+            "/api/game/step",
+            json={"record": record, "player": "landlord", "cards": "8884"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["record"]["steps"][0]["action"]["cards"] == ["4", "8", "8", "8"]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_step_refuses_the_wrong_player():
     client = _client_with_fake_policy()
     try:

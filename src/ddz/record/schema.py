@@ -47,6 +47,8 @@ class Action:
             raise ValueError("pass 不应带牌")
         if self.kind == "play" and not self.cards:
             raise ValueError("play 必须带牌")
+        if self.kind == "play":
+            object.__setattr__(self, "cards", normalize(self.cards))
 
     @property
     def is_play(self) -> bool:

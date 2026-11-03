@@ -26,6 +26,28 @@ def record(request):
 
 
 class TestRoundTrip:
+    def test_handwritten_play_cards_are_canonicalized_on_load(self):
+        """手写 JSON 的出牌也按字符表顺序保存，重复张数不变。"""
+        import json
+        from collections import Counter
+
+        data = loads(fixture_path("landlord").read_text(encoding="utf-8")).to_json()
+        data["steps"] = [
+            {
+                "index": 0,
+                "player": "landlord",
+                "action": {"type": "play", "cards": ["8", "8", "8", "4"]},
+            }
+        ]
+        loaded = loads(json.dumps(data, ensure_ascii=False))
+
+        assert loaded.steps[0].action.cards == ("4", "8", "8", "8")
+        assert Counter(loaded.steps[0].action.cards) == Counter(["8", "8", "8", "4"])
+        assert loaded.to_json()["steps"][0]["action"]["cards"] == ["4", "8", "8", "8"]
+
+        exported = dumps(loaded)
+        assert dumps(loads(exported)) == exported
+
     def test_text_round_trip_is_exact(self, record):
         """load(dumps(x)) == x —— 这是硬要求。"""
         assert loads(dumps(record)) == record
