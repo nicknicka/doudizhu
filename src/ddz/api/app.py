@@ -142,7 +142,8 @@ def analyze(
         "total_steps": end,
         "my_steps": list(mine),
         "current_step": end,
-        "current_acting": derive(record).acting,
+        # 终局没有下一步；保留 null 让调用方无需先看 finished 再判断。
+        "current_acting": None if derive(record).finished else derive(record).acting,
         "seats": seat_view(record),
         "snapshot": _snapshot_view(shown, target),
         "point": None,

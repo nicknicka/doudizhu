@@ -2,7 +2,7 @@
 // 今天用 HTML 画；3D 场景会在这一层里换掉它。
 
 import { S, $ } from './state.js';
-import { NAME, label, identityLabel, isMe, turnText, overText, actorName, card, back } from './labels.js';
+import { NAME, label, identityLabel, isMe, turnText, overText, card, back } from './labels.js';
 
 function seat(player){
   const v = S.snap;
@@ -39,7 +39,7 @@ function renderWho(){
   $('who').textContent = `${m.record_id} · ${m.source} · 全局第 ${v.step}/${m.total_steps} 手`
     + (k >= 0 ? ` · 我的第 ${k + 1} 次出牌机会` : '')
     + ` · 我方是${identityLabel(m.me)}`
-    + (v.finished ? ` · 牌局已结束：${actorName(v.winner)}先出完牌` : '');
+    + (v.finished ? ` · ${overText(v.winner)}` : '');
   $('tool-note').textContent = latest ? '' : '· 看历史局面时不能续录';
 }
 

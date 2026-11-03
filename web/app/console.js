@@ -47,9 +47,7 @@ function parseCards(str){
     if (up === 'R' || ch === '大'){ out.push('R'); i += 1; continue; }
     return {error: `看不懂这个字：${ch}`};
   }
-  const over = Object.entries(out.reduce((m, r) => (m[r] = (m[r] || 0) + 1, m), {}))
-    .find(([, n]) => n > 4);
-  if (over) return {error: `${NAME[over[0]]} 一副牌只有 4 张。`};
+  // 整副牌张数、手牌张数与合法性由服务端裁定；这里只把输入转成牌面字符。
   return {cards: out};
 }
 
