@@ -195,7 +195,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     print(baseline.as_row("独立抛硬币基线"))
     print()
     print(f"覆盖 {ours.n_positions} 个决策点。对数似然上限是 0，越接近 0 越好。")
-    print("基线是每张未现身牌独立抛硬币 —— 无视剩余张数，会产出「某人 20 张」"
+    print("基线是每个未现身的点数独立抛硬币 —— 无视剩余张数，会产出「某人 20 张」"
           "这种不可能的分法。")
     return 0
 

@@ -107,6 +107,7 @@ def test_analyze_has_no_decision_point_once_the_game_is_over():
     assert got["snapshot"]["finished"] is True
     assert got["snapshot"]["winner"] == "landlord"
     assert got["point"] is None
+    assert got["current_acting"] is None
     assert len(finished.steps) not in got["my_steps"]
 
 
