@@ -149,6 +149,21 @@ def test_analyze_endpoint_reports_a_bad_record_as_400():
         app.dependency_overrides.clear()
 
 
+def test_config_exposes_opening_hand_sizes_for_every_position():
+    """开局面板只能显示服务端下发的张数，不能自己复制 20/17/17。"""
+    client = _client_with_fake_policy()
+    try:
+        r = client.get("/api/config")
+        assert r.status_code == 200, r.text
+        assert r.json()["opening_hand_sizes"] == {
+            "landlord": 20,
+            "landlord_down": 17,
+            "landlord_up": 17,
+        }
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_index_serves_the_page():
     client = _client_with_fake_policy()
     try:
@@ -190,6 +205,20 @@ def test_new_game_returns_a_record_the_cli_could_have_written():
         assert record["steps"] == []
         # 手牌按字符表规范化存放，和 CLI 录出来的完全一样
         assert record["initial"]["my_hand"] == list(MY_HAND)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_new_game_reports_expected_size_for_every_position():
+    """页面显示张数不等于服务端放行；三种位置都仍由 manual.start 独立校验。"""
+    client = _client_with_fake_policy()
+    try:
+        for me, expected in (("landlord", 20), ("landlord_down", 17), ("landlord_up", 17)):
+            r = client.post("/api/game/new", json={
+                "me": me, "my_hand": "3", "landlord_cards": LANDLORD_STR,
+            })
+            assert r.status_code == 400
+            assert f"{me} 开局应有 {expected} 张手牌" in r.json()["detail"]
     finally:
         app.dependency_overrides.clear()
 

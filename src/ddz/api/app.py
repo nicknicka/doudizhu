@@ -25,7 +25,13 @@ from ddz.evaluation import evaluate
 from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
-from ddz.record.schema import SCORE_DISCLAIMER, TURN_ORDER, Action, MatchRecord
+from ddz.record.schema import (
+    INITIAL_HAND_SIZE,
+    SCORE_DISCLAIMER,
+    TURN_ORDER,
+    Action,
+    MatchRecord,
+)
 from ddz.record.state import derive, my_turn_steps, relative_seats
 from ddz.rules import legal_actions
 from ddz.source import manual, sim
@@ -274,6 +280,11 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, bool]:
         return {"ok": True}
+
+    @app.get("/api/config")
+    def config() -> dict[str, Any]:
+        """开局面板要的业务常量，由服务端唯一持有。"""
+        return {"opening_hand_sizes": dict(INITIAL_HAND_SIZE)}
 
     @app.get("/api/demo")
     def demo(policy: DouZeroPolicy = Depends(get_policy)) -> dict[str, Any]:
