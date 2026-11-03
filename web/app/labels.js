@@ -20,8 +20,6 @@ export const countIn = (cards, c) => cards.filter(x => x === c).length;
 
 export function card(c){ return `<i class="c">${SHORT[c] || NAME[c] || c}</i>`; }
 
-export function back(){ return '<i class="bk"></i>'; }
-
 const seatOf = player => (S.meta && S.meta.seats && S.meta.seats[player]) || null;
 
 /** 这个座位在人话里叫什么（我 / 上家 / 下家）。 */
@@ -46,3 +44,7 @@ export const actorName = player => (isMe(player) ? '你' : label(player));
 
 /** "现在该谁出牌" —— 轮到我时说得直白一点。 */
 export const turnText = acting => (isMe(acting) ? '轮到你出牌' : `现在该 ${label(acting)} 出牌`);
+
+/** 牌局结束之后没有"该谁出牌"这回事 —— 一律用这句，别再报行动方。 */
+export const overText = winner =>
+  `牌局已结束${winner ? `：${actorName(winner)}先出完牌` : ''}`;

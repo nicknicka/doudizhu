@@ -50,7 +50,8 @@ function draw(focus){
   for (let i=0;i<limit;i++){
     const row = grid[i * rowStride], y = i * h;
     for (let c=0;c<order.length;c++){
-      cx.globalAlpha = (focus && order[c] !== focus) ? .12 : 1;
+      // 压一点饱和度：粒子云是配角，不该比牌桌更呛眼
+      cx.globalAlpha = (focus && order[c] !== focus) ? .10 : .72;
       cx.fillStyle = row[c]===1 ? A : row[c]===2 ? B : 'transparent';
       // 留 1px 缝：格子分得开，才像像素而不是色块
       if (row[c]) cx.fillRect(c*w, y, Math.max(w-1,1), Math.max(h-1,1));
@@ -61,11 +62,8 @@ function draw(focus){
 
 /** 高亮某张牌：云里那一列亮起来，概率列表对应那行也亮起来。 */
 export function focus(cardName){
-  const active = cardName || S.pinned;
-  currentFocus = active;
-  draw(active);
-  document.querySelectorAll('#plist li[data-card]').forEach(li =>
-    li.classList.toggle('is-focus', li.dataset.card === active));
+  currentFocus = cardName || S.pinned;
+  draw(currentFocus);
 }
 
 function togglePin(cardName){
@@ -76,6 +74,9 @@ function togglePin(cardName){
 
 export function beginReveal(){ if (!reduce) FX.reveal = 0; }
 
+/** 面板是点开才显示的：展开后要重新按尺寸画一次，否则画布是 0×0 */
+export function resize(){ sizeCanvas(); draw(currentFocus); }
+
 export function animateIn(){
   if (!reduce){
     // 粒子云从下往上"扫"出来；步进缓动（steps）把像素感守住
@@ -85,27 +86,16 @@ export function animateIn(){
   }
 }
 
-function renderCloudAndList(){
+function renderCloud(){
   const p = S.point;
   $('cloud').classList.toggle('is-empty', !p);
-  if (!p){ $('la').textContent = ''; $('lb').textContent = ''; $('plist').innerHTML = ''; return; }
-  // 图例用 上家 / 下家，不再漏内部英文 id
+  if (!p){
+    $('la').textContent = ''; $('lb').textContent = '';
+    $('la2').textContent = ''; $('lb2').textContent = '';
+    return;
+  }
   $('la').textContent = label(p.opponents[0]); $('lb').textContent = label(p.opponents[1]);
-  const head = '<li class="head"><span></span>'
-    + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
-  const rows = list => head + list.map(r =>
-    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${NAME[r.card]} 在谁手上">`
-    + `<span class="c">${NAME[r.card]}</span>`
-    + p.opponents.map((o,i)=>{
-        const v = r.by[o];
-        return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
-             + `<small>${v.expected.toFixed(2)} 张</small></span>`;
-      }).join('') + '</li>').join('');
-  // 分两栏，每栏各带一次表头 —— 否则读者不知道哪一列是哪一家
-  const half = Math.ceil(p.cards.length / 2);
-  $('plist').innerHTML =
-    `<ul class="plist">${rows(p.cards.slice(0, half))}</ul>`
-    + `<ul class="plist">${rows(p.cards.slice(half))}</ul>`;
+  $('la2').textContent = label(p.opponents[0]); $('lb2').textContent = label(p.opponents[1]);
 }
 
 function renderCalib(){
@@ -137,22 +127,10 @@ function renderFoot(){
 
 export function render(){
   S.pinned = null;
-  renderCloudAndList(); renderCalib(); renderFoot();
-  build(); sizeCanvas(); focus(null);
+  renderCloud(); renderCalib(); renderFoot();
+  build(); sizeCanvas();
 }
 
-$('plist').addEventListener('mouseover', e => {
-  const li = e.target.closest('li[data-card]'); if (li) focus(li.dataset.card);
-});
-$('plist').addEventListener('mouseleave', () => focus(null));
-$('plist').addEventListener('click', e => {
-  const li = e.target.closest('li[data-card]'); if (li) togglePin(li.dataset.card);
-});
-$('plist').addEventListener('keydown', e => {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  const li = e.target.closest('li[data-card]'); if (!li) return;
-  e.preventDefault(); togglePin(li.dataset.card);
-});
 cv.addEventListener('click', () => togglePin(hoverCard));
 cv.addEventListener('mousemove', e => {
   if (!order.length) return;

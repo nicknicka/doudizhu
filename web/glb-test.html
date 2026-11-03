@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>机身 GLB —— 单看模型</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e9e6e0}
+  canvas{display:block;width:100%;height:100%}
+  .tip{position:fixed;left:12px;bottom:10px;font-family:ui-monospace,monospace;
+       font-size:12px;line-height:1.6;color:#6b665e;pointer-events:none}
+</style>
+<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<p class="tip">console-b.glb · 拖拽转 / 滚轮缩放 · 场景里只有模型 + 三盏灯，没有别的渲染处理</p>
+<script type="module">
+import * as THREE from '/vendor/three.module.min.js';
+import { GLTFLoader } from '/vendor/three/examples/jsm/loaders/GLTFLoader.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#e9e6e0');
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
+
+/* 模型自带的 PBR 材质要有光才看得见；就这三盏，不加环境贴图、不加色调映射 */
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-4, 6, 8);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5); fill.position.set(6, 2, 6);
+scene.add(fill);
+
+const rig = new THREE.Group();
+scene.add(rig);
+let ready = false, spin = 0, tilt = -0.06, dist = 14;
+
+new GLTFLoader().load('/assets/console-b.glb', (gltf) => {
+  const body = gltf.scene;
+  body.scale.setScalar(1 / 20);            // 建模单位是 mm，缩到"整机宽 10 个单位"
+  body.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(body);
+  body.position.sub(box.getCenter(new THREE.Vector3()));   // 摆正到原点
+  rig.add(body);
+  dist = Math.max(box.getSize(new THREE.Vector3()).x, 4) * 1.42;
+  ready = true;
+}, undefined, (err) => {
+  document.querySelector('.tip').textContent = 'GLB 没加载上：' + err;
+});
+
+/* 拖拽转机 / 滚轮缩放 —— 自己写，少拉一个 addon */
+let dragging = false, lastX = 0, lastY = 0;
+canvas.addEventListener('pointerdown', (e) => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY; canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointerup', (e) => {
+  dragging = false; canvas.releasePointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  spin += (e.clientX - lastX) * 0.006;
+  tilt = Math.max(-1.1, Math.min(1.1, tilt + (e.clientY - lastY) * 0.006));
+  lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  dist = Math.max(6, Math.min(30, dist * (1 + Math.sign(e.deltaY) * 0.08)));
+}, { passive: false });
+
+function resize(){
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+renderer.setAnimationLoop(() => {
+  rig.rotation.set(tilt, spin, 0);
+  camera.position.set(0, 0, dist);
+  camera.lookAt(0, 0, 0);
+  renderer.render(scene, camera);
+});
+
+window.__glbPage = () => ready;   // 给验证脚本问"模型到位了没"
+window.__glbStatus = () => ({ ready, environment: Boolean(scene.environment),
+  toneMapping: renderer.toneMapping, toneMappingExposure: renderer.toneMappingExposure });
+</script>
+</body>
+</html>

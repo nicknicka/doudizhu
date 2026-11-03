@@ -1,7 +1,7 @@
 // 取数：所有网络往返都从这里走，页面别处不直接 fetch。
 
 import { S, reduce, $ } from './state.js';
-import { label } from './labels.js';
+import { actorName, label } from './labels.js';
 
 export function setBanner(text, kind){
   const b = $('banner');
@@ -33,6 +33,7 @@ export async function api(path, body){
 
 /** 轮不到我方时给横幅的默认话术。 */
 export function idleNote(){
-  if (!S.snap) return '';
-  return S.point ? '' : `现在该 ${label(S.snap.acting)} 出牌 —— 还没轮到你，把这一手录进去。`;
+  if (!S.snap || S.point) return '';
+  if (S.snap.finished) return `牌局已结束 —— ${actorName(S.snap.winner)}先出完牌。`;
+  return `现在该 ${label(S.snap.acting)} 出牌 —— 还没轮到你，把这一手录进去。`;
 }
