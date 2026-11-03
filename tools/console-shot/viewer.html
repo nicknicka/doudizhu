@@ -1,0 +1,115 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>console compare</title>
+<style>
+  html,body{margin:0;height:100%;background:#f2ecdd;overflow:hidden}
+  canvas{display:block}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "/web/vendor/three.module.min.js",
+  "three/addons/": "/web/vendor/three/examples/jsm/"
+} }
+</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const q = new URLSearchParams(location.search);
+const glbUrl = q.get('glb') || '/web/assets/console-a.glb';
+const view = q.get('view') || 'iso';
+const flip = q.get('flip') === '1';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.86;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#f2ecdd');
+
+// 同一套环境光：RoomEnvironment 预过滤
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.42;
+
+// 同一套三点光
+const key = new THREE.DirectionalLight(0xfff4e0, 0.92);
+key.position.set(-6, 9, 12);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -12; key.shadow.camera.right = 12;
+key.shadow.camera.top = 12; key.shadow.camera.bottom = -12;
+key.shadow.bias = -0.0005;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.35); fill.position.set(8, 3, 9); scene.add(fill);
+const rim  = new THREE.DirectionalLight(0xffffff, 0.35); rim.position.set(0, -6, -8); scene.add(rim);
+
+const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 400);
+
+// 接影子的地面
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 50),
+  new THREE.MeshStandardMaterial({ color: '#ece4d2', roughness: 0.95, metalness: 0 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const root = new THREE.Group();
+scene.add(root);
+
+new GLTFLoader().load(glbUrl, (gltf) => {
+  const model = gltf.scene;
+  root.add(model);
+  root.updateMatrixWorld(true);
+
+  // —— 自动摆正：把最薄的轴转到 Z，最长的轴转到 X ——
+  let box = new THREE.Box3().setFromObject(model);
+  let size = box.getSize(new THREE.Vector3());
+  const axes = [['x', size.x], ['y', size.y], ['z', size.z]].sort((a, b) => a[1] - b[1]);
+  const [thin, mid, wide] = axes.map(a => a[0]);
+  if (thin !== 'z') {
+    if (mid === 'z') model.rotateX(Math.PI / 2);
+    else model.rotateY(Math.PI / 2);
+  }
+  if (wide !== 'x') model.rotateZ(Math.PI / 2);
+  root.updateMatrixWorld(true);
+
+  // —— 统一缩放到宽 10 个单位，并落到原点 ——
+  box = new THREE.Box3().setFromObject(model);
+  size = box.getSize(new THREE.Vector3());
+  const s = 10 / size.x;
+  model.scale.setScalar(s);
+  root.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(model);
+  const c = box.getCenter(new THREE.Vector3());
+  model.position.sub(c);
+  model.position.y -= box.min.y - c.y;   // 底面贴地
+  if (flip) model.rotation.y += Math.PI;
+  root.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(model);
+
+  // —— 相机：同一套 ——
+  const h = box.max.y - box.min.y;
+  if (view === 'front') {
+    cam.position.set(0, h * 0.52 + 1.1, 17);
+  } else {
+    cam.position.set(-7.5, h * 0.95 + 5.5, 14.5);
+  }
+  cam.lookAt(0, h * 0.45, 0);
+  cam.updateProjectionMatrix();
+
+  window.__info = { url: glbUrl, view, flip, size: size.toArray(), meshes: 0 };
+  model.traverse(o => { if (o.isMesh) window.__info.meshes++; });
+  renderer.render(scene, cam);
+  window.__ready = true;
+}, undefined, (e) => { window.__error = String(e); });
+</script>
+</body></html>

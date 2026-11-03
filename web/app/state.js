@@ -6,7 +6,8 @@ export const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** 后端取来的状态。 */
 export const S = {record:null, meta:null, snap:null, point:null, metrics:null,
-                  calibration:null, caveat:'', pinned:null, busy:false, config:null};
+                  calibration:null, caveat:'', pinned:null, busy:false,
+                  barMode:'count', config:null};   // 机顶条：count=记牌 / prob=概率
 
 /** 用户正在点选的牌。开局是手牌 / 底牌，录一手是本手。 */
 export const SEL = {hand:[], cards:[], play:[]};

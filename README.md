@@ -80,8 +80,9 @@ ddz serve            # 起本机后端，默认 127.0.0.1:8000（--host / --port
   录错点「撤销」，要留档点「导出 JSON」。
   校验与 `ddz new` / `ddz play` **完全相同** —— 走的是同一段代码（`source/manual.py`），
   所以网页录出来的 JSON 和命令行录出来的可以互相接续。
-- **牌桌**：三个座位一屏 —— 地主在上、下家和上家在下；我的一手是真牌面，
-  对手是牌背加张数，各家的已出牌也在位。
+- **牌桌**：一块**真 3D** 的机台（three.js 渲染，本地化，不依赖 CDN）—— 上家与下家在上、
+  **我在下**（我的牌摊在面前），只有我的一手是正面，对手是牌背加张数；中间是上一手。
+  鼠标移动时机器有轻微视差，进场有推镜；`prefers-reduced-motion` 下全部关掉。
 - **打开已有记录**：点「打开我的记录」选一份 JSON（也可以直接拖到页面上）。
 - **翻看决策点**：点步号，或用 ← / → 键。
 - **看某张牌**：把鼠标移到粒子云上，或移到侧栏的概率列表上 —— 两边互相高亮；
@@ -306,3 +307,4 @@ Schema（显式存入此前各家的出牌），见 [docs/data-schema.md](docs/d
 - [权重镜像](https://huggingface.co/palemoky/douzero-baselines)（Apache-2.0）— 免登录直连下载
 - [GSAP](https://gsap.com)（[GSAP Standard License](https://gsap.com/standard-license)）— 展示页动效，本地化在 `web/vendor/`
 - [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)（SIL OFL 1.1）— 像素字体，本地化在 `web/vendor/`
+- [three.js](https://threejs.org)（MIT）— 展示页的三维机台，本地化在 `web/vendor/`
