@@ -2,7 +2,7 @@
 // 选牌现在发生在**屏幕里的牌桌上**（点/拖），这里只管把选中态拼成请求；
 // 合法性仍由服务端判（ADR-0001）。
 
-import { S, SEL, PAD, NEED, $ } from './state.js';
+import { S, SEL, PAD, $ } from './state.js';
 import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText, overText } from './labels.js';
 import { setBanner } from './api.js';
 import * as machine from './machine.js';
@@ -13,6 +13,10 @@ let hintIndex = -1;   // 推荐键在候选里循环
 /** 牌池里每个点数还剩几张。数据来自后端，页面不自己数。 */
 const poolCounts = () => (S.snap && S.snap.pool_counts) || {};
 const latestView = () => S.snap.step === S.meta.total_steps;
+
+/** 开局面板要的张数来自后端；配置未到时不许开局。 */
+const openingHandSizes = () => (S.config && S.config.opening_hand_sizes) || {};
+const needFor = me => openingHandSizes()[me];
 
 /** 把 SEL.play 同步到 3D 手牌的选中态（抬牌）。 */
 export function syncPicked(){
@@ -58,8 +62,10 @@ function chips(host, sel, emptyText){
 
 /* ---------- 开局面板（保留原来的牌盘） ---------- */
 function renderNew(){
-  const need = NEED[$('new-me').value];
-  $('new-count').textContent = `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
+  const need = needFor($('new-me').value);
+  $('new-count').textContent = need === undefined
+    ? '手牌 ? · 底牌 ?/3'
+    : `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
   $('new-chips').innerHTML =
     (SEL.hand.length
       ? SEL.hand.map((c,i)=>`<span data-zone="hand" data-drop="${i}">${card(c)}</span>`).join('')
@@ -76,7 +82,7 @@ function renderNew(){
   }).join('');
   $('tgt-hand').classList.toggle('is-on', PAD.target === 'hand');
   $('tgt-cards').classList.toggle('is-on', PAD.target === 'cards');
-  const ok = SEL.hand.length === need && SEL.cards.length === 3;
+  const ok = need !== undefined && SEL.hand.length === need && SEL.cards.length === 3;
   $('new-go').disabled = !ok;
   $('new-hint').className = 'hint' + (ok ? '' : ' warn');
   $('new-hint').textContent = ok
@@ -187,7 +193,8 @@ export function init(dependencies){
       setBanner(`${NAME[r]} 一副牌只有 4 张。`, 'error'); return;
     }
     SEL[PAD.target].push(r);
-    if (PAD.target === 'hand' && SEL.hand.length >= NEED[$('new-me').value]) PAD.target = 'cards';
+    const need = needFor($('new-me').value);
+    if (PAD.target === 'hand' && need !== undefined && SEL.hand.length >= need) PAD.target = 'cards';
     renderNew();
   });
   $('new-chips').addEventListener('click', e => {
@@ -207,15 +214,15 @@ export function init(dependencies){
     const res = parseCards($('new-paste').value);
     if (res.error){ setBanner(res.error, 'error'); $('new-hint').className = 'hint warn';
       $('new-hint').textContent = res.error; return; }
-    const need = PAD.target === 'hand' ? NEED[$('new-me').value] : 3;
-    if (res.cards.length > need){
+    const need = PAD.target === 'hand' ? needFor($('new-me').value) : 3;
+    if (need === undefined || res.cards.length > need){
       const msg = `${PAD.target === 'hand' ? '手牌' : '底牌'}只需要 ${need} 张，你粘了 ${res.cards.length} 张。`;
       setBanner(msg, 'error'); $('new-hint').className = 'hint warn'; $('new-hint').textContent = msg;
       return;
     }
     SEL[PAD.target] = res.cards.slice();
     // 手牌满了就自动切到底牌，省一次点击
-    if (PAD.target === 'hand' && SEL.hand.length >= need) PAD.target = 'cards';
+    if (PAD.target === 'hand' && need !== undefined && SEL.hand.length >= need) PAD.target = 'cards';
     $('new-paste').value = '';
     renderNew();
   });

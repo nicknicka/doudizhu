@@ -41,6 +41,28 @@ class Snapshot:
     card_play_action_seq: tuple[tuple[str, ...], ...]
     bomb_num: int
 
+    @property
+    def winner(self) -> str | None:
+        """先出完牌的那一家（手牌 0 张）；牌局还没结束就是 ``None``。
+
+        记录里不存胜负（它能推出来），所以终局在这里推。注意它给的是**座位**：
+        地主出完是地主赢，农民任一家出完是农民赢。拿到座位后要判断阵营，
+        用 ``player == "landlord"``，别拿它跟 ``landlord_up`` 那类座位名混着比。
+        """
+        for player in TURN_ORDER:
+            if self.num_cards_left[player] == 0:
+                return player
+        return None
+
+    @property
+    def finished(self) -> bool:
+        """牌局是否已经结束。
+
+        结束之后 ``acting`` 只是轮转算法的副产物，没有「该谁出牌」这回事了 ——
+        要判断能不能继续录，看这个，别看 ``acting``。
+        """
+        return self.winner is not None
+
 
 def _acting_player(steps: tuple[Step, ...]) -> str:
     """下一步该谁动。
@@ -73,25 +95,6 @@ def _is_bomb(cards: tuple[str, ...]) -> bool:
     return set(cards) == {"B", "R"} and len(cards) == 2
 
 
-def relative_seats(me: str) -> dict[str, dict[str, str]]:
-    """以**我方**为参照的席位：我 / 上家 / 下家，以及各自身份。
-
-    出手顺序每三手循环一次，所以三者由顺序唯一确定，与谁当地主无关。
-    注意这是**相对位置**，与 landlord_up / landlord_down 那套"以地主为参照"的
-    内部位置名不是一回事 —— 换个我方位置，两边经常是反的。
-    """
-    i = TURN_ORDER.index(me)
-    return {
-        "me":   {"player": me,                          "role": _role(me)},
-        "down": {"player": TURN_ORDER[(i + 1) % 3],     "role": _role(TURN_ORDER[(i + 1) % 3])},
-        "up":   {"player": TURN_ORDER[(i - 1) % 3],     "role": _role(TURN_ORDER[(i - 1) % 3])},
-    }
-
-
-def _role(player: str) -> str:
-    return "landlord" if player == "landlord" else "peasant"
-
-
 def relative_seats(me: str) -> dict[str, str]:
     """以**我方**为参照，另两家分别是我的上家还是下家。
 
@@ -111,11 +114,13 @@ def my_turn_steps(record: MatchRecord) -> tuple[int, ...]:
 
     CLI 的校准与展示页后端都要这份序列，所以放记录层，别各算一遍。
     """
-    return tuple(
-        step
-        for step in range(len(record.steps) + 1)
-        if derive(record, steps=record.steps[:step]).acting == record.me
-    )
+    mine = []
+    for step in range(len(record.steps) + 1):
+        snapshot = derive(record, steps=record.steps[:step])
+        # 已经结束的局面不是决策点：轮次恰好转到我方也不算，此时没有可选择的一手
+        if not snapshot.finished and snapshot.acting == record.me:
+            mine.append(step)
+    return tuple(mine)
 
 
 def derive(record: MatchRecord, steps: tuple[Step, ...] | None = None) -> Snapshot:

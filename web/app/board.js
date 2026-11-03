@@ -41,7 +41,7 @@ function paintLabels(){
   for (const [player, el] of Object.entries(labels)){
     const seat = S.meta.seats[player];
     const mine = isMe(player);
-    const acting = v.acting === player;
+    const acting = !v.finished && v.acting === player;
     const played = v.played[player] || [];
     el.className = `seat-label${mine ? ' is-me' : ''}${acting ? ' is-acting' : ''}`;
     el.innerHTML =
@@ -95,7 +95,7 @@ function renderScoreboard(){
     (rank[S.meta.seats[a].relative] ?? 3) - (rank[S.meta.seats[b].relative] ?? 3));
   $('scoreboard').innerHTML = players.map(player => {
     const seat = S.meta.seats[player];
-    const mine = isMe(player), acting = v.acting === player;
+    const mine = isMe(player), acting = !v.finished && v.acting === player;
     const played = v.played[player] || [];
     return `<div class="sc${mine ? ' is-me' : ''}${acting ? ' is-acting' : ''}">`
       + `<span class="who"><b>${label(player)}</b>`

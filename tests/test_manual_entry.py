@@ -150,6 +150,27 @@ class TestAppend:
                 record, "landlord", Action(kind="play", cards=tuple(straight))
             )
 
+    def test_rejects_recording_after_the_game_ended(self, fresh):
+        """有人出完牌就是终局 —— 再录一手必须被拒，而不是继续往下走。"""
+        record = fresh
+        for _ in range(19):          # 19 个完整回合：地主领出单张，两家不要
+            card = derive(record).pool[0]
+            record = manual.append_step(
+                record, "landlord", Action(kind="play", cards=(card,))
+            )
+            record = manual.append_step(record, "landlord_down", Action(kind="pass"))
+            record = manual.append_step(record, "landlord_up", Action(kind="pass"))
+
+        # 第 20 张：地主出完牌，牌局到此结束（真实牌局里也不会再有人出）
+        record = manual.append_step(
+            record, "landlord", Action(kind="play", cards=(derive(record).pool[0],))
+        )
+        assert derive(record).finished
+        assert derive(record).winner == "landlord"
+
+        with pytest.raises(IllegalEntryError, match="已经结束"):
+            manual.append_step(record, "landlord_down", Action(kind="pass"))
+
     def test_rejects_an_unknown_card_type(self, fresh):
         with pytest.raises(IllegalEntryError, match="不是合法牌型"):
             manual.append_step(fresh, "landlord", Action(kind="play", cards=("3", "4", "6")))

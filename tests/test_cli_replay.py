@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from ddz.cli.main import main
-from ddz.record.io import load
+from ddz.record.io import load, save
+from ddz.record.schema import Action
 from ddz.record.state import derive
+from ddz.source import manual
 
 FIXTURES = ("landlord", "landlord_up", "landlord_down")
 HAND_17 = "34556789TTJJKK222"
@@ -34,6 +36,49 @@ def build_real_record(tmp_path: Path) -> Path:
     main(["play", "--in", str(path), "--out", str(path), "--player", "landlord", "--cards", "777"])
     main(["play", "--in", str(path), "--out", str(path), "--player", "landlord_down", "--pass"])
     return path
+
+
+def build_finished_record(tmp_path: Path) -> Path:
+    """造一局已经打完的记录：地主把 20 张一路领完，两家一路不要。"""
+    record = manual.start(
+        "landlord_up", HAND_17, "792",
+        record_id="over-1", created_at="2026-10-31T00:00:00+08:00",
+    )
+    for _ in range(19):
+        record = manual.append_step(
+            record, "landlord", Action(kind="play", cards=(derive(record).pool[0],))
+        )
+        record = manual.append_step(record, "landlord_down", Action(kind="pass"))
+        record = manual.append_step(record, "landlord_up", Action(kind="pass"))
+    record = manual.append_step(
+        record, "landlord", Action(kind="play", cards=(derive(record).pool[0],))
+    )
+    path = tmp_path / "finished.json"
+    save(record, path)
+    return path
+
+
+class TestGameOver:
+    """牌局结束之后，命令行不能再报"该谁行动"。"""
+
+    def test_show_reports_the_game_as_over(self, tmp_path, capsys):
+        path = build_finished_record(tmp_path)
+        assert main(["show", "--in", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert "牌局已结束：landlord 先出完牌" in out
+        assert "现在该" not in out
+
+    def test_play_after_the_game_is_over_is_refused(self, tmp_path, capsys):
+        path = build_finished_record(tmp_path)
+        assert main(["play", "--in", str(path), "--out", str(path),
+                     "--player", "landlord_down", "--pass"]) == 2
+        assert "已经结束" in capsys.readouterr().err
+
+    def test_suggest_after_the_game_is_over_says_so(self, tmp_path, capsys):
+        path = build_finished_record(tmp_path)
+        assert main(["show", "--in", str(path), "--suggest"]) == 0
+        out = capsys.readouterr().out
+        assert "牌局已结束" in out and "不再给建议" in out
 
 
 class TestReplayByStep:

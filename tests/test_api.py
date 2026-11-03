@@ -94,6 +94,22 @@ def test_analyze_shows_a_position_that_is_not_my_turn_without_a_point():
     assert got["point"] is None
 
 
+def test_analyze_has_no_decision_point_once_the_game_is_over():
+    """牌局已经打完 —— 只给局面，不给候选与分布（终局没有"该谁出牌"）。"""
+    from ddz.record.state import derive
+    from ddz.source import sim
+
+    # seed=0 这局由地主出完，最后一手出完之后轮次正好转到他下家
+    finished = next(r for r in sim.generate(1, seed=0) if r.me == "landlord_down")
+    assert derive(finished).finished, "这局应当已经打完"
+
+    got = analyze(finished, FakePolicy(), step=len(finished.steps))
+    assert got["snapshot"]["finished"] is True
+    assert got["snapshot"]["winner"] == "landlord"
+    assert got["point"] is None
+    assert len(finished.steps) not in got["my_steps"]
+
+
 def test_analyze_refuses_a_step_out_of_range():
     with pytest.raises(ValueError):
         analyze(make_record(), FakePolicy(), step=99)
@@ -129,6 +145,21 @@ def test_analyze_endpoint_reports_a_bad_record_as_400():
         r = client.post("/api/analyze", json={"record": bad})
         assert r.status_code == 400
         assert "schema_version" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_config_exposes_opening_hand_sizes_for_every_position():
+    """开局面板只能显示服务端下发的张数，不能自己复制 20/17/17。"""
+    client = _client_with_fake_policy()
+    try:
+        r = client.get("/api/config")
+        assert r.status_code == 200, r.text
+        assert r.json()["opening_hand_sizes"] == {
+            "landlord": 20,
+            "landlord_down": 17,
+            "landlord_up": 17,
+        }
     finally:
         app.dependency_overrides.clear()
 
@@ -178,6 +209,20 @@ def test_new_game_returns_a_record_the_cli_could_have_written():
         app.dependency_overrides.clear()
 
 
+def test_new_game_reports_expected_size_for_every_position():
+    """页面显示张数不等于服务端放行；三种位置都仍由 manual.start 独立校验。"""
+    client = _client_with_fake_policy()
+    try:
+        for me, expected in (("landlord", 20), ("landlord_down", 17), ("landlord_up", 17)):
+            r = client.post("/api/game/new", json={
+                "me": me, "my_hand": "3", "landlord_cards": LANDLORD_STR,
+            })
+            assert r.status_code == 400
+            assert f"{me} 开局应有 {expected} 张手牌" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_new_game_reports_a_bad_hand_as_400():
     client = _client_with_fake_policy()
     try:
@@ -199,6 +244,21 @@ def test_step_records_a_validated_hand():
         assert r.status_code == 200, r.text
         record = r.json()["record"]
         assert [s["action"]["cards"] for s in record["steps"]] == [["9", "9"]]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_step_returns_play_cards_in_canonical_order():
+    """接口和 CLI/JSON 共用同一个动作边界：8884 返回 4888。"""
+    client = _client_with_fake_policy()
+    try:
+        record = _new_game(client)
+        r = client.post(
+            "/api/game/step",
+            json={"record": record, "player": "landlord", "cards": "8884"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["record"]["steps"][0]["action"]["cards"] == ["4", "8", "8", "8"]
     finally:
         app.dependency_overrides.clear()
 
