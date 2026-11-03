@@ -15,12 +15,8 @@ from typing import Iterator
 
 import rlcard
 
-from ddz.record.schema import Action, Initial, MatchRecord, Step
+from ddz.record.schema import Action, Initial, MatchRecord, Step, TURN_ORDER
 from ddz.record.state import replay
-
-# RLCard 的 player_id：0 地主、1 地主下家、2 地主上家（出手顺序也是 0→1→2）
-PLAYER_ID_TO_POSITION = {0: "landlord", 1: "landlord_down", 2: "landlord_up"}
-POSITIONS_BY_ID = tuple(PLAYER_ID_TO_POSITION[i] for i in range(3))
 
 
 class SimulationError(RuntimeError):
@@ -37,6 +33,17 @@ class SimulatedGame:
     steps: tuple[Step, ...]
 
 
+def _positions_by_player_id(landlord_id: int) -> dict[int, str]:
+    """按当局实际地主编号映射三个 player_id 到相对位置。"""
+    if landlord_id not in range(3):
+        raise SimulationError(f"地主编号必须是 0、1、2，收到 {landlord_id}")
+    return {
+        landlord_id: "landlord",
+        (landlord_id + 1) % 3: "landlord_down",
+        (landlord_id - 1) % 3: "landlord_up",
+    }
+
+
 def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
     """跑一局完全随机的自对弈。同一个 seed 必然得到同一局。"""
     env = rlcard.make("doudizhu")
@@ -44,8 +51,9 @@ def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
     random.seed(seed)
 
     state, player_id = env.reset()
+    positions = _positions_by_player_id(int(state["raw_obs"]["landlord"]))
     start_hands = {
-        PLAYER_ID_TO_POSITION[i]: tuple(hand)
+        positions[i]: tuple(hand)
         for i, hand in enumerate(env.get_perfect_information()["hand_cards"])
     }
     landlord_cards = tuple(state["raw_obs"]["seen_cards"])
@@ -60,7 +68,7 @@ def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
         raw = random.choice(sorted(state["raw_legal_actions"]))
         action = Action(kind="pass") if raw == "pass" else Action(kind="play", cards=tuple(raw))
         steps.append(
-            Step(index=len(steps), player=PLAYER_ID_TO_POSITION[player_id], action=action)
+            Step(index=len(steps), player=positions[player_id], action=action)
         )
         state, player_id = env.step(raw, raw_action=True)
 
@@ -75,7 +83,7 @@ def play_one_game(seed: int, max_steps: int = 500) -> SimulatedGame:
 def to_records(game: SimulatedGame) -> tuple[MatchRecord, ...]:
     """一局仿真 → 三条记录（三家各一条视角）。"""
     records = []
-    for me in POSITIONS_BY_ID:
+    for me in TURN_ORDER:
         record = MatchRecord(
             record_id=f"sim-s{game.seed}-{me}",
             source="sim",

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
-from ddz.cards import FULL_DECK
+from ddz.cards import FULL_DECK, normalize
 from ddz.cli.main import main
-from ddz.record.io import load
+from ddz.record.io import dumps, load
 from ddz.record.schema import TURN_ORDER
 from ddz.record.state import derive
 from ddz.source import sim
@@ -32,6 +33,69 @@ class TestOneGame:
         game = sim.play_one_game(7)
         for card in game.three_landlord_cards:
             assert card in game.start_hands["landlord"]
+
+    def test_seats_follow_the_actual_landlord_id(self, monkeypatch):
+        """地主不必是 player 0；席位要由当局实际地主编号推导。"""
+
+        hands = (
+            "".join(FULL_DECK[20:37]),
+            "".join(FULL_DECK[:20]),
+            "".join(FULL_DECK[37:]),
+        )
+        landlord_cards = "345"
+
+        class StubEnv:
+            def __init__(self):
+                self.finished = False
+
+            def seed(self, seed):
+                pass
+
+            def reset(self):
+                state = {
+                    "raw_obs": {"landlord": 1, "seen_cards": landlord_cards},
+                    "raw_legal_actions": [landlord_cards],
+                }
+                return state, 1
+
+            def get_perfect_information(self):
+                return {"hand_cards": list(hands)}
+
+            def is_over(self):
+                return self.finished
+
+            def step(self, action, raw_action=False):
+                assert raw_action is True
+                assert action == landlord_cards
+                self.finished = True
+                return {}, 2
+
+        monkeypatch.setattr(sim.rlcard, "make", lambda name: StubEnv())
+        game = sim.play_one_game(seed=7)
+
+        assert game.start_hands == {
+            "landlord_up": tuple(hands[0]),
+            "landlord": tuple(hands[1]),
+            "landlord_down": tuple(hands[2]),
+        }
+        assert game.steps[0].player == "landlord"
+        assert all(card in game.start_hands["landlord"] for card in game.three_landlord_cards)
+
+        records = {record.me: record for record in sim.to_records(game)}
+        expected_hands = {
+            "landlord_up": normalize(tuple(hands[0])),
+            "landlord": normalize(tuple(hands[1])),
+            "landlord_down": normalize(tuple(hands[2])),
+        }
+        assert records["landlord"].initial.my_hand == expected_hands["landlord"]
+        assert records["landlord_down"].initial.my_hand == expected_hands["landlord_down"]
+        assert records["landlord_up"].initial.my_hand == expected_hands["landlord_up"]
+        for record in records.values():
+            assert record.initial.opponents is not None
+            assert set(record.initial.opponents) == set(TURN_ORDER) - {record.me}
+            assert record.initial.opponents == {
+                pos: hand for pos, hand in expected_hands.items() if pos != record.me
+            }
 
     def test_the_game_finishes(self):
         game = sim.play_one_game(7)
@@ -74,11 +138,31 @@ class TestBatch:
             list(sim.generate(0, seed=1))
 
     def test_same_seed_gives_the_same_batch(self):
-        from ddz.record.io import dumps
-
         assert [dumps(r) for r in sim.generate(2, seed=3)] == [
             dumps(r) for r in sim.generate(2, seed=3)
         ]
+
+    def test_landlord_zero_output_stays_byte_identical(self):
+        expected = {
+            7: {
+                "landlord": "15cf9c1282bc7051b114a49b8d6e86f686be5786614975dd1a71c6bc0fd4c911",
+                "landlord_down": "e4d9e31c88d8762e7fb2ca43e46cc2d51146c7e9916fb2d659b72d109d549d12",
+                "landlord_up": "43bca025b8a310bd6099b9eee78ac331b26761e2cd89e7069798835a7985fdaf",
+            },
+            123: {
+                "landlord": "06dc4aafe6ff21b884d63b934a8d69f5ea155eff82d021a4b4f721bd30feb590",
+                "landlord_down": "4c462b7b6d14a6c857d8d58d718a6fa3ba68be4795a018b7f242849ab8747535",
+                "landlord_up": "d7e00a4661649374e5f8426c5927c47c0390d19f69a1bae92767b645dae371b9",
+            },
+        }
+        actual = {
+            seed: {
+                record.me: sha256(dumps(record).encode("utf-8")).hexdigest()
+                for record in sim.to_records(sim.play_one_game(seed))
+            }
+            for seed in expected
+        }
+        assert actual == expected
 
 
 class TestCli:
