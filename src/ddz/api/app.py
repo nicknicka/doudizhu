@@ -272,10 +272,17 @@ def create_app() -> FastAPI:
     app.mount("/vendor", StaticFiles(directory=WEB / "vendor"), name="vendor")
     # 展示页的脚本按模块分文件，从 /app 取
     app.mount("/app", StaticFiles(directory=WEB / "app"), name="app")
+    # 3D 机身资产（console-b.glb）—— 页面加 ?shell=glb 时 machine.js 会来取
+    app.mount("/assets", StaticFiles(directory=WEB / "assets"), name="assets")
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return render_page()
+
+    @app.get("/glb", response_class=HTMLResponse)
+    def glb_test() -> str:
+        """单看机身的测试页：场景里只有 console-b.glb，不带展示页那一套。"""
+        return (WEB / "glb-test.html").read_text(encoding="utf-8")
 
     @app.get("/api/health")
     def health() -> dict[str, bool]:

@@ -20,8 +20,6 @@ export const countIn = (cards, c) => cards.filter(x => x === c).length;
 
 export function card(c){ return `<i class="c">${SHORT[c] || NAME[c] || c}</i>`; }
 
-export function back(){ return '<i class="bk"></i>'; }
-
 const seatOf = player => (S.meta && S.meta.seats && S.meta.seats[player]) || null;
 
 /** 这个座位在人话里叫什么（我 / 上家 / 下家）。 */
