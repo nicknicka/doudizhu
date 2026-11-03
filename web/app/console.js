@@ -2,7 +2,7 @@
 // 它只负责"把用户点的牌收上来、拼成请求"，合法性由服务端判。
 
 import { S, SEL, PAD, $ } from './state.js';
-import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText } from './labels.js';
+import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText, overText } from './labels.js';
 import { setBanner } from './api.js';
 
 let deps = { refresh: async () => {}, mutate: async () => false };
