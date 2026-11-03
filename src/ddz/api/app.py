@@ -83,6 +83,10 @@ def _snapshot_view(snapshot, step: int) -> dict[str, Any]:
         "step": step,
         "me": snapshot.me,
         "acting": snapshot.acting,
+        # 终局由记录层推（谁先出完谁赢）。结束之后 acting 没有意义，
+        # 页面要按 finished 收手，别再提示"现在该谁出牌"。
+        "finished": snapshot.finished,
+        "winner": snapshot.winner,
         "my_hand": list(snapshot.my_hand),
         "remaining": dict(snapshot.num_cards_left),
         "played": {p: list(c) for p, c in snapshot.played_cards.items()},

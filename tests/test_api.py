@@ -94,6 +94,22 @@ def test_analyze_shows_a_position_that_is_not_my_turn_without_a_point():
     assert got["point"] is None
 
 
+def test_analyze_has_no_decision_point_once_the_game_is_over():
+    """牌局已经打完 —— 只给局面，不给候选与分布（终局没有"该谁出牌"）。"""
+    from ddz.record.state import derive
+    from ddz.source import sim
+
+    # seed=0 这局由地主出完，最后一手出完之后轮次正好转到他下家
+    finished = next(r for r in sim.generate(1, seed=0) if r.me == "landlord_down")
+    assert derive(finished).finished, "这局应当已经打完"
+
+    got = analyze(finished, FakePolicy(), step=len(finished.steps))
+    assert got["snapshot"]["finished"] is True
+    assert got["snapshot"]["winner"] == "landlord"
+    assert got["point"] is None
+    assert len(finished.steps) not in got["my_steps"]
+
+
 def test_analyze_refuses_a_step_out_of_range():
     with pytest.raises(ValueError):
         analyze(make_record(), FakePolicy(), step=99)

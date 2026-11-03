@@ -28,11 +28,10 @@ class NotCalibratableError(ValueError):
 
 def winner_side(record: MatchRecord) -> str:
     """谁赢了。记录里不存结果（它能推出来），所以在这里推。"""
-    final = derive(record)
-    for player, left in final.num_cards_left.items():
-        if left == 0:
-            return "landlord" if player == "landlord" else "peasants"
-    raise NotCalibratableError(f"{record.record_id} 打完了都没人出完牌，记录不完整")
+    winner = derive(record).winner
+    if winner is None:
+        raise NotCalibratableError(f"{record.record_id} 打完了都没人出完牌，记录不完整")
+    return "landlord" if winner == "landlord" else "peasants"
 
 
 def my_side(me: str) -> str:
