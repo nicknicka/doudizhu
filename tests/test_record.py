@@ -9,7 +9,7 @@ import pytest
 from ddz.cards import FULL_DECK
 from ddz.record.io import dumps, loads
 from ddz.record.schema import Action, Initial, MatchRecord, Step
-from ddz.record.state import _acting_player, derive, my_turn_steps, replay
+from ddz.record.state import _acting_player, derive, my_turn_steps, relative_seats, replay
 
 FIXTURES = ("landlord", "landlord_up", "landlord_down")
 
@@ -166,6 +166,33 @@ class TestGameOver:
         assert len(record.steps) == 58
         assert len(record.steps) not in my_turn_steps(record)
         assert my_turn_steps(record) == tuple(range(1, 58, 3))
+class TestRelativeSeats:
+    @pytest.mark.parametrize(
+        ("me", "up", "down"),
+        [
+            ("landlord", "landlord_up", "landlord_down"),
+            ("landlord_down", "landlord", "landlord_up"),
+            ("landlord_up", "landlord_down", "landlord"),
+        ],
+    )
+    def test_up_and_down_are_relative_to_me(self, me, up, down):
+        """上家紧挨在我之前，下家紧挨在我之后 —— 与身份无关。"""
+        assert relative_seats(me) == {up: "up", down: "down"}
+
+    def test_relative_seats_is_defined_once(self):
+        """记录层只保留一份生效定义，避免同名死代码误导后续修改。"""
+        import ast
+        import inspect
+        import ddz.record.state as state_module
+
+        tree = ast.parse(inspect.getsource(state_module))
+        definitions = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "relative_seats"
+        ]
+        assert len(definitions) == 1
+
 
 
 class TestTurnRotation:

@@ -95,25 +95,6 @@ def _is_bomb(cards: tuple[str, ...]) -> bool:
     return set(cards) == {"B", "R"} and len(cards) == 2
 
 
-def relative_seats(me: str) -> dict[str, dict[str, str]]:
-    """以**我方**为参照的席位：我 / 上家 / 下家，以及各自身份。
-
-    出手顺序每三手循环一次，所以三者由顺序唯一确定，与谁当地主无关。
-    注意这是**相对位置**，与 landlord_up / landlord_down 那套"以地主为参照"的
-    内部位置名不是一回事 —— 换个我方位置，两边经常是反的。
-    """
-    i = TURN_ORDER.index(me)
-    return {
-        "me":   {"player": me,                          "role": _role(me)},
-        "down": {"player": TURN_ORDER[(i + 1) % 3],     "role": _role(TURN_ORDER[(i + 1) % 3])},
-        "up":   {"player": TURN_ORDER[(i - 1) % 3],     "role": _role(TURN_ORDER[(i - 1) % 3])},
-    }
-
-
-def _role(player: str) -> str:
-    return "landlord" if player == "landlord" else "peasant"
-
-
 def relative_seats(me: str) -> dict[str, str]:
     """以**我方**为参照，另两家分别是我的上家还是下家。
 
