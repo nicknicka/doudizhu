@@ -33,7 +33,8 @@ export async function api(path, body){
 
 /** 轮不到我方时给横幅的默认话术。 */
 export function idleNote(){
-  if (!S.snap || S.point) return '';
+  if (!S.snap) return '';
   if (S.snap.finished) return `牌局已结束 —— ${actorName(S.snap.winner)}先出完牌。`;
+  if (S.point) return '';
   return `现在该 ${label(S.snap.acting)} 出牌 —— 还没轮到你，把这一手录进去。`;
 }
