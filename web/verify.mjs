@@ -73,6 +73,93 @@ const machineStatus = page => page.evaluate(async () =>
   (await import('/app/machine.js')).machineStatus());
 const frameStats = page => page.evaluate(async () =>
   (await import('/app/machine.js')).frameStats());
+
+// 保真像素基准（ADR-0004）：同一条归一化坐标，在主页画布与 /glb 原貌页画布上取 5×5 中位色块。
+// 机身取景会随布局和相机收敛变化，所以"取景矩形 + 像素"必须在同一次 evaluate 里读完，
+// 分两次读会错位。色块靠极值找（金取最黄、靛蓝取最暗），但打分的是 5×5 中位数本身 ——
+// 零散的抗锯齿暗点会在中位数里被淘汰，只有真是整块色的位置才留得下。
+const FIDELITY_PROBES = [
+  { id: '壳-左',   fx: 0.100, fy: 0.72, mode: 'flat' },
+  { id: '壳-右',   fx: 0.865, fy: 0.72, mode: 'flat' },
+  { id: '饰条-左', fx: 0.020, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
+  { id: '饰条-右', fx: 0.980, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
+  { id: '靛蓝-左', fx: 0.021, fy: 0.20, mode: 'indigo', wx: 0.010, wy: 0.014 },
+  { id: '靛蓝-右', fx: 0.986, fy: 0.50, mode: 'indigo', wx: 0.016, wy: 0.018 },
+];
+const FIDELITY_MAX_DIFF = 8;    // 单通道：必须过
+const FIDELITY_MEAN_DIFF = 4;   // 六个探针的均值：参考线
+const colorHex = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+const sampleFidelity = (page, sel) => page.evaluate(async ({ sel, probes }) => {
+  const c = document.querySelector(sel);
+  const gl = c.getContext('webgl2') || c.getContext('webgl');
+  const dpr = c.width / c.clientWidth;
+  const px = new Uint8Array(c.width * c.height * 4);
+  gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const at = (x, y) => {                       // CSS px → 画布像素，翻转 y
+    const X = Math.round(x * dpr), Y = Math.round(y * dpr);
+    if (X < 0 || Y < 0 || X >= c.width || Y >= c.height) return null;
+    const k = ((c.height - 1 - Y) * c.width + X) * 4;
+    return [px[k], px[k + 1], px[k + 2]];
+  };
+  const median = list => { const s = [...list].sort((a, b) => a - b); return s[(s.length - 1) >> 1]; };
+  const patch = (x, y) => {
+    const rs = [], gs = [], bs = [];
+    for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) {
+      const p = at(x + i, y + j);
+      if (!p) return null;
+      rs.push(p[0]); gs.push(p[1]); bs.push(p[2]);
+    }
+    return [median(rs), median(gs), median(bs)];
+  };
+  const score = (p, mode) => {
+    if (!p) return null;
+    if (mode === 'gold') return p[0] - p[2];
+    if (mode === 'indigo') {
+      return (p[2] - p[0]) >= 6 && p[0] + p[1] + p[2] <= 300 ? -(p[0] + p[1] + p[2]) : null;
+    }
+    return 0;
+  };
+  // /glb 页自己暴露取景框；主页面问 machine.js 现算的投影
+  const frame = typeof window.__glbFrame === 'function'
+    ? window.__glbFrame()
+    : (await import('/app/machine.js')).machineStatus().tablet;
+  if (!frame || !(frame.w > 0)) return { frame: null, out: [] };
+  const out = [];
+  for (const s of probes) {
+    const x0 = frame.x + frame.w * s.fx, y0 = frame.y + frame.h * s.fy;
+    const wx = Math.max(0, Math.round(frame.w * (s.wx || 0)));
+    const wy = Math.max(0, Math.round(frame.h * (s.wy || 0)));
+    let best = null;
+    for (let j = -wy; j <= wy; j++) for (let i = -wx; i <= wx; i++) {
+      const x = Math.round(x0) + i, y = Math.round(y0) + j;
+      const pm = patch(x, y), sc = score(pm, s.mode);
+      if (sc === null) continue;
+      const d = Math.hypot(i, j);
+      if (!best || sc > best.sc || (sc === best.sc && d < best.d)) best = { sc, d, p5: pm };
+    }
+    out.push({ id: s.id, p5: best ? best.p5 : null });
+  }
+  return { frame, out };
+}, { sel, probes: FIDELITY_PROBES });
+
+// 比色：逐探针单通道差 ≤8 必须过；均值只报不卡（ADR-0004 的参考线）。
+function compareFidelity(mainSample, refSample) {
+  let worst = 0, sum = 0, n = 0;
+  for (const p of FIDELITY_PROBES) {
+    const ref = (refSample.out || []).find(o => o.id === p.id);
+    const own = (mainSample.out || []).find(o => o.id === p.id);
+    if (!ref?.p5 || !own?.p5) { problems.push(`保真探针「${p.id}」没取到色块`); continue; }
+    const d = Math.max(...ref.p5.map((v, i) => Math.abs(v - own.p5[i])));
+    worst = Math.max(worst, d); sum += d; n++;
+    if (d > FIDELITY_MAX_DIFF) {
+      problems.push(`保真探针「${p.id}」比 /glb 原貌差 ${d}/255（上限 ${FIDELITY_MAX_DIFF}）：` +
+        `主页面 ${colorHex(own.p5)} vs 原貌 ${colorHex(ref.p5)}`);
+    }
+  }
+  const mean = n ? sum / n : NaN;
+  console.log(`保真色块 ${n}/${FIDELITY_PROBES.length} 个：最大单通道差 ${worst}，均值 ${mean.toFixed(2)}` +
+    `（上限 ${FIDELITY_MAX_DIFF} / 参考 ${FIDELITY_MEAN_DIFF}）`);
+}
 async function waitForMachineState(page, predicate, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -148,8 +235,20 @@ try {
   if (shell.status !== 'ready' || !shell.ready) problems.push(`根路径 GLB 机身未就绪：${shell.status} ${shell.error}`);
   for (const name of requiredNodes) if (!shell.nodes.includes(name)) problems.push(`GLB 缺少节点 ${name}`);
   if (!shell.buttonsVisible) problems.push('GLB Buttons 节点不可见');
-  if (!shell.ibl) problems.push('主页面没有 IBL');
-  if (shell.toneMappingName !== 'ACESFilmic') problems.push(`主页面色调映射不是 ACES：${shell.toneMappingName}`);
+  // ADR-0004 保真：主页面就是原貌渲染 —— 无环境贴图、不套色调映射、固定三盏基础灯
+  if (shell.environment) problems.push('主页面不该有环境贴图（IBL）');
+  if (shell.toneMappingName !== 'None') problems.push(`主页面色调映射不是 None：${shell.toneMappingName}`);
+  if (shell.toneMappingExposure !== 1) problems.push(`主页面曝光不是 1：${shell.toneMappingExposure}`);
+  const lights = shell.lights || [];
+  const lightKey = l => `${l.type}|${l.intensity}|${l.color}|${l.position.map(v => v.toFixed(3)).join(',')}`;
+  const wantedLights = ['AmbientLight|1.2|#ffffff|0.000,0.000,0.000',
+                        'DirectionalLight|1.6|#ffffff|-4.000,6.000,8.000',
+                        'DirectionalLight|0.5|#dfe8ff|6.000,2.000,6.000'];
+  if (lights.length !== 3) problems.push(`主页面灯光数量不是 3：${lights.length}`);
+  else for (const want of wantedLights) {
+    if (!lights.map(lightKey).includes(want)) problems.push(`主页面缺少灯 ${want}`);
+  }
+  if (!shell.contactShadow) problems.push('主页面没有机底接触阴影');
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
   if (shell.buttons.length !== 10) problems.push(`透明键热区数量不是 10：${shell.buttons.length}`);
@@ -173,6 +272,8 @@ try {
 
   // 静止后不再出帧；DPR 不超过 2
   await waitForFramesToSettle(page);
+  // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
+  const mainFidelity = await sampleFidelity(page, '#scene');
   const idleA = await frameStats(page);
   await page.waitForTimeout(500);
   const idleB = await frameStats(page);
@@ -402,7 +503,8 @@ try {
 
   // /glb：原样查看模型，不加环境贴图、不加色调映射
   {
-    const glb = await browser.newPage({ viewport: { width: 1280, height: 1200 }, deviceScaleFactor: 2 });
+    // 视口必须能把整机装进画布：这是保真比色的坐标系，被裁掉就会取不到边缘色块
+    const glb = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
     watchPage(glb, '/glb');
     await glb.goto(`${BASE}/glb`);
     await glb.waitForFunction(() => window.__glbPage?.(), null, { timeout: 30000 });
@@ -410,6 +512,13 @@ try {
     if (!status.ready) problems.push('/glb：模型没有加载上');
     if (status.environment) problems.push('/glb：不应有环境贴图');
     if (status.toneMapping !== 0) problems.push(`/glb：不应设置色调映射（${status.toneMapping}）`);
+    const refFrame = await glb.evaluate(() => ({ frame: window.__glbFrame(), w: innerWidth, h: innerHeight }));
+    const rf = refFrame.frame;
+    if (!rf || rf.x < 0 || rf.y < 0 || rf.x + rf.w > refFrame.w || rf.y + rf.h > refFrame.h) {
+      problems.push(`/glb：${refFrame.w}×${refFrame.h} 没把机身完整放进画布，保真比色不成立`);
+    }
+    if (mainFidelity.frame) compareFidelity(mainFidelity, await sampleFidelity(glb, '#c'));
+    else problems.push('主页面没量出机身取景框，保真比色不成立');
     await glb.screenshot({ path: '/tmp/ddz-web-glb.png' });
     await glb.close();
   }
@@ -486,5 +595,5 @@ try {
 
 console.log(problems.length
   ? '发现问题:\n- ' + problems.join('\n- ')
-  : '✔ 无 pageerror / console error；根路径 GLB 机身 + 模型按键透明热区 + 屏内点牌选牌 + 记牌/概率 + 机侧/机下数据面板 + 窄屏操作条 + 错误态 + IBL/ACES + 按需渲染 均正常');
+  : '✔ 无 pageerror / console error；根路径 GLB 机身 + 模型按键透明热区 + 屏内点牌选牌 + 记牌/概率 + 机侧/机下数据面板 + 窄屏操作条 + 错误态 + 机身原貌保真色块 + 按需渲染 均正常');
 process.exit(problems.length ? 1 : 0);
