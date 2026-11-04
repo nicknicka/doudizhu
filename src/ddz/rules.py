@@ -17,11 +17,24 @@ from collections import Counter
 from rlcard.games.doudizhu.judger import DoudizhuJudger
 from rlcard.games.doudizhu.utils import CARD_TYPE, get_gt_cards
 
+from ddz.cards import CARD_ORDER
 from ddz.record.schema import Action
 from ddz.record.state import Snapshot
 
 # RLCard 自己的动作词表：空串以外的 'pass'
 RLCARD_PASS = "pass"
+
+_ACTION_TYPE_NAMES = {
+    "solo": "单张",
+    "pair": "对子",
+    "trio": "三张",
+    "trio_solo": "三带一",
+    "trio_pair": "三带二",
+    "four_two_solo": "四带二",
+    "four_two_pair": "四带两对",
+    "bomb": "炸弹",
+    "rocket": "王炸",
+}
 
 
 class _Card:
@@ -66,6 +79,88 @@ def canonical_combo(cards) -> str:
         return _COMBO_INDEX[key]
     except KeyError:
         raise ValueError(f"不是合法牌型：{sorted(cards)!r}") from None
+
+
+def combo_type(combo: str) -> str:
+    """RLCard 的牌型 id → 页面上的中文牌型。"""
+    kind = CARD_TYPE[0][combo][0][0]
+    if kind.startswith("solo_chain_"):
+        return "顺子"
+    if kind.startswith("pair_chain_"):
+        return "连对"
+    if kind.startswith("trio_chain_"):
+        return "飞机"
+    if kind.startswith("trio_solo_chain_"):
+        return "飞机带单"
+    if kind.startswith("trio_pair_chain_"):
+        return "飞机带对"
+    return _ACTION_TYPE_NAMES[kind]
+
+
+def _body_shape(kind: str) -> tuple[int, int] | None:
+    """返回 (主体每组的张数, 主体组数)；没有带牌的牌型返回 None。"""
+    if kind in {"trio_solo", "trio_pair"}:
+        return 3, 1
+    if kind in {"four_two_solo", "four_two_pair"}:
+        return 4, 1
+    if kind.startswith("trio_solo_chain_"):
+        return 3, int(kind.rsplit("_", 1)[1])
+    if kind.startswith("trio_pair_chain_"):
+        return 3, int(kind.rsplit("_", 1)[1])
+    return None
+
+
+def _body_ranks(combo: str, rank_size: int, n_ranks: int) -> list[str]:
+    counts = Counter(combo)
+    candidates = sorted(
+        (rank for rank, count in counts.items() if count >= rank_size),
+        key=lambda rank: CARD_ORDER[rank],
+    )
+    if n_ranks == 1:
+        return candidates[:1]
+
+    # 多组三张必须是连续点数；2 与王不能当飞机主体。翅膀里也可能有三张，
+    # 所以不能把所有三张都当成主体。
+    candidates = [rank for rank in candidates if CARD_ORDER[rank] < CARD_ORDER["2"]]
+    for start in range(len(candidates) - n_ranks + 1):
+        window = candidates[start:start + n_ranks]
+        if all(
+            CARD_ORDER[right] == CARD_ORDER[left] + 1
+            for left, right in zip(window, window[1:])
+        ):
+            return window
+    raise ValueError(f"无法从合法组合中找出飞机主体：{combo}")
+
+
+def combo_label(combo: str) -> str:
+    """把规范组合串按“主体 + 带牌”分段，完整保留每一张牌。"""
+    shape = _body_shape(CARD_TYPE[0][combo][0][0])
+    if shape is None:
+        return combo
+
+    rank_size, n_ranks = shape
+    counts = Counter(combo)
+    body_ranks = set(_body_ranks(combo, rank_size, n_ranks))
+    body = "".join(
+        rank * rank_size for rank in sorted(body_ranks, key=lambda rank: CARD_ORDER[rank])
+    )
+    wings = "".join(
+        rank * (counts[rank] - (rank_size if rank in body_ranks else 0))
+        for rank in sorted(counts, key=lambda rank: CARD_ORDER[rank])
+    )
+    return f"{body}+{wings}"
+
+
+def action_type(action: Action) -> str:
+    if action.is_pass:
+        return "不出"
+    return combo_type(canonical_combo(action.cards))
+
+
+def action_label(action: Action) -> str:
+    if action.is_pass:
+        return "不出"
+    return combo_label(canonical_combo(action.cards))
 
 
 def beat_options(hand_cards, last_move) -> set[str]:

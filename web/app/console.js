@@ -123,7 +123,8 @@ function renderPlay(){
   $('play-go').disabled = over || !latest || !SEL.play.length;
   $('play-pass').disabled = over || !latest;
   $('play-clear').disabled = !SEL.play.length;   // 清空只管选牌，历史局面也能用
-  $('play-hint-btn').disabled = !(S.point && S.point.actions.length);
+  const hasMyPoint = Boolean(mine && S.point && S.point.mine && S.point.actions.length);
+  $('play-hint-btn').disabled = !hasMyPoint;
   // 出牌机会切换：操作台最左的箱子与握把上的 ←/→ 同源（都是回放）
   const steps = m.my_steps, at = steps.indexOf(v.step);
   const canPrev = steps.some(st => st < v.step), canNext = steps.some(st => st > v.step);
@@ -136,11 +137,11 @@ function renderPlay(){
     : `第 ${v.step} / ${m.total_steps} 手`;
   $('step-cell').classList.toggle('is-history', !latest);
 
-  const picks = S.point ? S.point.actions.slice(0, 6) : [];
+  const picks = hasMyPoint ? S.point.actions.slice(0, 6) : [];
   $('play-picks').innerHTML = picks.map((a,i)=>
     `<button type="button" data-pick="${i}"${latest && !over ? '' : ' disabled'}>` +
     `<span>${a.label}</span>` +
-    `<span class="sc">${a.score>0?'+':''}${a.score.toFixed(3)}</span></button>`).join('');
+    `<span class="sc">${Math.round(a.probability * 100)}%</span></button>`).join('');
   $('play-picks').dataset.json = JSON.stringify(picks);
   $('play-picks').hidden = !picks.length;
 
@@ -159,7 +160,7 @@ function renderPlay(){
     $('play-hint').textContent = '这局已经打完了 —— 局面还能看，录不了新的一手（要改就按「撤销」）。';
     $('play-hint').className = 'hint warn';
   } else if (mine && picks.length){
-    $('play-hint').textContent = '这些是模型给所有合法动作排的序（Q 值，不是胜率）。点一下记下这一手，或在屏幕里自己点牌。';
+    $('play-hint').textContent = '这些是模型动作选择概率（Q 值经 T=1 softmax，所有合法动作合计 100%）。点一下记下这一手，或在屏幕里自己点牌。';
   } else {
     $('play-hint').textContent = `${actorName(v.acting)}出的牌在屏幕里点出来；他没有出就按「不要」。`;
   }
@@ -273,7 +274,7 @@ export function init(dependencies){
   });
   // 推荐键：每按一次换到下一个候选，并把那一手选到桌上
   $('play-hint-btn').addEventListener('click', () => {
-    const acts = (S.point && S.point.actions) || [];
+    const acts = (S.point && S.point.mine && S.point.actions) || [];
     if (!acts.length) return;
     hintIndex = (hintIndex + 1) % Math.min(acts.length, 6);
     const a = acts[hintIndex];
@@ -282,7 +283,7 @@ export function init(dependencies){
     $('play-hint').className = 'hint';
     $('play-hint').textContent =
       `推荐 ${hintIndex + 1}/${Math.min(acts.length, 6)}：${a.label}`
-      + `（Q 值 ${a.score > 0 ? '+' : ''}${a.score.toFixed(3)}，不是胜率）`;
+      + `（模型动作选择概率 ${Math.round(a.probability * 100)}%）`;
   });
   $('play-picks').addEventListener('click', async e => {
     const b = e.target.closest('button[data-pick]'); if (!b) return;
@@ -310,8 +311,6 @@ export function init(dependencies){
   $('step-prev').addEventListener('click', () => stepTo(-1));
   $('step-next').addEventListener('click', () => stepTo(1));
   const setBar = mode => { S.barMode = mode; deps.renderBar(); renderPlay(); };
-  $('dpad-up').addEventListener('click', () => setBar('count'));
-  $('dpad-down').addEventListener('click', () => setBar('prob'));
-  // 机顶那个按钮：点一下就换屏（记牌 ↔ 出牌概率）
+  // 机身右侧实体 BackKey：点一下就换屏（记牌 ↔ 出牌概率）
   $('bar-mode').addEventListener('click', () => setBar(S.barMode === 'prob' ? 'count' : 'prob'));
 }

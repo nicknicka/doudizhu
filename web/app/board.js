@@ -53,36 +53,40 @@ function paintLabels(){
   }
 }
 
-/** 机顶窄屏：记牌模式 = 点数 + 红点（剩几张）；概率模式 = 点数 + 上家/下家双色条。 */
+/** 副屏：记牌模式显示剩余张数；概率模式显示当前行动者 Top-3 完整动作。 */
 function renderCounter(){
+  const counter = $('counter');
+  counter.dataset.mode = S.barMode;
+  const cells = $('counter-cells');
+
+  if (S.barMode === 'prob'){
+    const point = S.point;
+    if (!point){
+      const message = S.snap.finished ? '本局已结束' : '当前不是你的出牌机会';
+      cells.innerHTML = `<p class="prob-empty">${message}</p>`;
+      return;
+    }
+    const predictions = (point.predictions || []).slice(0, 3);
+    const title = `${label(point.actor)} · 模型动作选择概率`;
+    cells.innerHTML = `<p class="prob-title">${title}</p>`
+      + `<div class="prob-list" style="--prob-count:${Math.max(1, predictions.length)}">`
+      + predictions.map(a =>
+        `<p class="prob-row"><span class="prob-action">${a.label}</span>`
+        + `<span class="prob-meta"><span class="prob-type">${a.type}</span>`
+        + `<span class="prob-pct">${Math.round(a.probability * 100)}%</span></span></p>`).join('')
+      + '</div>';
+    return;
+  }
+
   const pool = S.snap.pool_counts || {};
-  const point = S.point;
-  const prob = {};
-  if (point && point.cards) for (const row of point.cards) prob[row.card] = row.by;
-  const opps = (point && point.opponents) || [];
   const nm = r => NAME[r];
   const cls = r => (nm(r).length > 1 && !/^[0-9]+$/.test(nm(r)) ? 'long' : '');
-  $('counter-cells').innerHTML = RANKS.map(r => {
-    if (S.barMode === 'prob'){
-      const by = prob[r];
-      if (!by || !opps.length) return `<span class="cc is-out"><b class="${cls(r)}">${nm(r)}</b><i></i></span>`;
-      const a = by[opps[0]] || { expected: 0 }, b = by[opps[1]] || { expected: 0 };
-      const total = Math.max(0.001, a.expected + b.expected);
-      const aw = Math.round((a.expected / total) * 100);
-      return `<span class="cc" title="${label(opps[0])} ${a.expected.toFixed(2)} 张 · `
-        + `${label(opps[1])} ${b.expected.toFixed(2)} 张">`
-        + `<b class="${cls(r)}">${nm(r)}</b>`
-        + `<i class="bar"><s style="width:${aw}%"></s></i>`
-        + `<em>${a.expected.toFixed(1)}|${b.expected.toFixed(1)}</em>`
-        + `</span>`;
-    }
+  cells.innerHTML = RANKS.map(r => {
     const n = pool[r] || 0;
     const dots = Array.from({ length: Math.min(4, n) }, () => '<s></s>').join('');
     return `<span class="cc${n ? '' : ' is-out'}" title="${NAME[r]} 还剩 ${n} 张">`
       + `<b class="${cls(r)}">${nm(r)}</b><i>${dots}</i></span>`;
   }).join('');
-
-  $('bar-mode').textContent = S.barMode === 'prob' ? '出牌概率' : '记牌';
 }
 
 export function renderBar(){ renderCounter(); }
@@ -175,8 +179,8 @@ function place(payload){
   const top = rects.top;
   const counter = $('counter');
   if (top){
-    // 窄屏机顶条必须两行排 15 格；给足高度，文字才不会被压成糊线。
-    const th = Math.max(stacked ? 26 : 0, Math.min(top.h * 0.82, 64));
+    // 副屏内容最多两行：标题 + 横向 Top-3；尽量用满真屏高度，避免裁切。
+    const th = Math.max(stacked ? 30 : 0, Math.min(top.h, 64));
     counter.hidden = false;
     counter.style.left = `${top.x}px`;
     counter.style.width = `${top.w}px`;

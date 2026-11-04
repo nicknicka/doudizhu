@@ -71,8 +71,8 @@
   .overlay > *{pointer-events:none}
   .overlay button,.overlay .clickable{pointer-events:auto}
 
-  /* 机顶记牌条：一行 15 格，均分；点数正下方是红点 */
-  .counter{position:absolute;display:grid;grid-template-columns:1fr auto;
+  /* 机顶记牌条：一行 15 格，均分；点数正下方是红点；屏内没有切换键 */
+  .counter{position:absolute;display:grid;grid-template-columns:1fr;
            background:var(--ground);border:2px solid var(--ink);overflow:hidden}
   .counter .cells{min-width:0;display:grid;grid-template-columns:repeat(15,1fr);
            align-items:stretch;justify-items:stretch}
@@ -88,17 +88,23 @@
                  gap:2px;height:5px;margin-top:2px}
   .counter .cc i s{display:block;width:4px;height:4px;background:var(--accent)}
   .counter .cc.is-out{color:color-mix(in srgb,var(--muted) 62%,var(--ground))}
-  /* 概率模式：上家蓝 / 下家橙 的双色条 */
-  .counter .cc .bar{display:block;width:80%;height:5px;margin-top:2px;
-    background:var(--side-b);border:1px solid var(--ink);overflow:hidden}
-  .counter .cc .bar s{display:block;height:100%;background:var(--side-a)}
-  .counter .cc em{font-style:normal;font-size:.70em;color:var(--muted);
-                  line-height:1.2;white-space:nowrap}
-  .counter .mode-btn{height:100%;font:inherit;line-height:1.15;padding:0 9px;
-    color:var(--ground);background:var(--ink);border:none;
-    border-left:2px solid var(--ink);cursor:pointer;white-space:nowrap}
-  .counter .mode-btn:hover{background:var(--accent)}
-  .machine.is-stacked .counter .mode-btn{padding:0 5px}
+  /* 概率模式：标题一行，Top-3 横向三列；每列是完整动作 + 牌型 + 概率 */
+  .counter[data-mode="prob"] .cells{display:grid;grid-template-rows:auto minmax(0,1fr);
+    align-items:stretch;gap:.08em;padding:.12em .3em}
+  .prob-title{font-size:.64em;line-height:1;color:var(--muted);margin:0;text-align:center;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prob-list{display:grid;grid-template-columns:repeat(var(--prob-count,1),minmax(0,1fr));
+    min-width:0;min-height:0}
+  .prob-row{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-width:0;margin:0;padding:0 .45em;border-left:1px solid color-mix(in srgb,var(--ink) 20%,transparent);
+    line-height:1.08;white-space:nowrap}
+  .prob-row:first-child{border-left:none}
+  .prob-action{max-width:100%;line-height:1.08}
+  .prob-meta{display:flex;align-items:baseline;justify-content:center;gap:.4em;
+    max-width:100%;margin-top:.08em;font-size:.78em;line-height:1}
+  .prob-type{color:var(--muted)}
+  .prob-pct{font-variant-numeric:tabular-nums}
+  .prob-empty{margin:0;text-align:center;color:var(--muted);white-space:nowrap}
 
   /* 座位标签落在屏幕范围内 */
   .screen-hud{position:absolute;pointer-events:none}
@@ -158,8 +164,6 @@
   .tip.is-on{display:block}
   .k-up{grid-area:up}.k-down{grid-area:down}.k-left{grid-area:left}.k-right{grid-area:right}
   .key-center{grid-area:mid}
-  .bar-mode{grid-column:1/-1;text-align:center;font-size:10px;color:var(--ink);
-    border-top:1px dashed color-mix(in srgb,var(--ink) 35%,transparent);padding-top:3px}
   /* 键帽：三视图里那种黑键 + 金边 + 白字 */
   .key{font:inherit;font-size:12px;line-height:1;color:var(--ground);
     display:grid;place-items:center;aspect-ratio:1;min-width:0;padding:0;cursor:pointer;
@@ -219,7 +223,6 @@
   .machine.is-stacked .cluster{pointer-events:auto}
   .machine.is-stacked .cluster .key{font-size:9px;padding:0;box-shadow:0 2px 0 var(--well)}
   .machine.is-stacked .cluster .key-center{font-size:7px}
-  .machine.is-stacked .bar-mode{font-size:8px}
   .machine.is-stacked .scoreboard{border-bottom:1px solid var(--well);padding:2px 0 4px}
   .machine.is-stacked .scoreboard .sc{border:none;background:transparent;padding:0 8px;
     border-left:var(--px) solid var(--ink)}
@@ -603,7 +606,6 @@
           <!-- 机顶窄屏：点数 + 红点（剩几张）；右边那个按钮切换「记牌 / 出牌概率」 -->
           <div class="counter" id="counter">
             <div class="cells" id="counter-cells"></div>
-            <button class="mode-btn" id="bar-mode" type="button" data-tip="切换机顶屏：记牌 ↔ 出牌概率">记牌</button>
           </div>
 
           <!-- 座位标签落在屏幕范围内 -->
@@ -620,12 +622,14 @@
         <!-- 透明热区：位置/尺寸从 GLB Buttons 连通块量出；外观完全由模型给 -->
         <div class="controls" id="controls">
           <span class="tip" id="tip"></span>
+          <button class="key" id="bar-mode" type="button"
+                  aria-label="切换机顶屏" data-tip="BackKey · 切换记牌 / 出牌概率"></button>
           <div class="cluster cluster-l" id="keys-l">
-            <button class="key k-up" id="dpad-up" type="button" aria-label="切到记牌" data-tip="↑ · 机顶屏切到「记牌」"></button>
+            <button class="key k-up" id="dpad-up" type="button" aria-label="方向上键" data-tip="↑"></button>
             <button class="key k-left" id="dpad-left" type="button" aria-label="上一次出牌机会" data-tip="← · 上一次出牌机会"></button>
             <button class="key key-center" id="play-clear" type="button" aria-label="清空已选牌" data-tip="清空桌上已选的牌"></button>
             <button class="key k-right" id="dpad-right" type="button" aria-label="下一次出牌机会" data-tip="→ · 下一次出牌机会"></button>
-            <button class="key k-down" id="dpad-down" type="button" aria-label="切到出牌概率" data-tip="↓ · 机顶屏切到「出牌概率」"></button>
+            <button class="key k-down" id="dpad-down" type="button" aria-label="方向下键" data-tip="↓"></button>
             <button class="key key-round" id="new-round" type="button" aria-label="开新一轮" data-tip="开新一轮：在屏幕里录一手新牌局"></button>
           </div>
           <div class="cluster cluster-r" id="keys-r">
@@ -704,14 +708,14 @@
             <div class="keypad compact" id="play-keys"></div>
           </div>
           <p class="hint" id="play-hint"></p>
-          <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>↑↓</b> 切机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
+          <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>BackKey</b> 切换机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
         </div>
       </div>
 
       <!-- 窄屏最小 44px 操作条：同功能，DOM id 独立，点击转发给主热区 -->
       <div class="touchbar" id="touchbar" aria-label="掌机触控操作条">
-        <button type="button" data-control="dpad-up">记牌</button>
-        <button type="button" data-control="dpad-down">概率</button>
+
+
         <button type="button" data-control="dpad-left">← 机会</button>
         <button type="button" data-control="dpad-right">机会 →</button>
         <button type="button" data-control="play-clear">清空</button>

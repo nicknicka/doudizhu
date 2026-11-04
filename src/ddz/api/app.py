@@ -21,7 +21,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ddz.evaluation import evaluate
+from ddz.evaluation import (
+    ActionProbability,
+    evaluate,
+    my_action_probabilities,
+    opponent_action_probabilities,
+)
 from ddz.evaluation.calibration import SCORE_CAVEAT, calibrate
 from ddz.inference import card_summary, sample
 from ddz.policy.douzero import DouZeroPolicy, MissingWeightsError
@@ -33,7 +38,7 @@ from ddz.record.schema import (
     MatchRecord,
 )
 from ddz.record.state import derive, my_turn_steps, relative_seats
-from ddz.rules import legal_actions
+from ddz.rules import action_label, action_type
 from ddz.source import manual, sim
 
 REPO = Path(__file__).resolve().parents[3]
@@ -41,6 +46,47 @@ WEB = REPO / "web"
 
 DEFAULT_PARTICLES = 200
 DEFAULT_TOP_K = 3
+
+
+def _action_row(item: ActionProbability) -> dict[str, Any]:
+    action = item.action
+    row = {
+        "label": action_label(action),
+        "cards": list(action.cards),
+        "type": action_type(action),
+        "probability": item.probability,
+    }
+    if item.score is not None:
+        row["score"] = item.score
+    return row
+
+
+def _point_view(
+    shown,
+    dist,
+    top_k: int,
+    items: tuple[ActionProbability, ...],
+    diagnostics: dict[str, Any],
+    *,
+    mine: bool,
+) -> dict[str, Any]:
+    actions = [_action_row(item) for item in items]
+    predictions = actions[:top_k]
+    point = {
+        "actor": shown.acting,
+        "mine": mine,
+        "predictions": predictions,
+        "actions": actions,
+        "cards": card_summary(dist, shown.pool),
+        "particles": [
+            [list(p.hands[o]) for o in dist.opponents] for p in dist.particles
+        ],
+        "diagnostics": diagnostics,
+        "disclaimer": SCORE_DISCLAIMER,
+    }
+    if mine:
+        point["candidates"] = predictions
+    return point
 
 # 演示局与两个数据集级指标（评测 / 校准）。参数与 README 的两张表**逐字对齐**，
 # 否则页面和文档上的数字就会各说各话。
@@ -114,8 +160,9 @@ def analyze(
     """算出一个局面要显示的全部东西。
 
     返回分两层：``snapshot`` 是**要显示的那个局面**（一定在），``point`` 是
-    决策点专属的东西（候选、粒子、逐张概率）—— 只有那个局面确实轮到我方时才存在。
-    轮不到我方时 ``point`` 是 ``None``，页面照样把牌桌显示出来。
+    决策点专属的东西（动作概率、粒子、逐张牌概率）。终局时 ``point`` 是
+    ``None``；非终局时无论轮到我方还是对手都返回 ``point``，用 ``mine``
+    区分当前行动者。对手回合的 ``point`` 不含我方可录候选。
 
     ``step`` 指"看第几手之后的局面"。``None`` 交给后端挑一个默认视图：第一个
     轮到我方的决策点（一局打完时那就等于终局，没什么可看的，所以不能拿终局当默认）。
@@ -148,36 +195,25 @@ def analyze(
         "snapshot": _snapshot_view(shown, target),
         "point": None,
     }
-    if target not in mine:
-        return view          # 轮不到我方：只给局面，不给候选与分布
+    if shown.finished:
+        return view
 
-    actions = legal_actions(shown)
-    if not actions:
-        raise ValueError("这个局面下我方没有合法动作")
-    # 一次把所有合法动作都打上分：页面既要 top-k 做建议，也要完整清单
-    # 让用户"点一下就把这一手记下来"，而不是自己敲牌。
-    ranked, diagnostics = policy.rank(shown, actions, top_k=len(actions))
     dist = sample(shown, n_particles=particles, seed=target)
-
-    def row(candidate) -> dict[str, Any]:
-        action = candidate.action
-        return {
-            "label": "不出" if action.is_pass else "".join(action.cards),
-            "score": round(candidate.score, 4),
-            "cards": list(action.cards),      # 不要的话就是 []
-        }
-
+    if target in mine:
+        items, diagnostics = my_action_probabilities(shown, policy)
+    else:
+        items, diagnostics = opponent_action_probabilities(shown, policy, dist)
     view["point"] = {
+        **_point_view(
+            shown,
+            dist,
+            top_k,
+            items,
+            {**diagnostics, "n_particles": len(dist.particles)},
+            mine=target in mine,
+        ),
         "step": target,
         "opponents": list(dist.opponents),
-        "candidates": [row(c) for c in ranked[:top_k]],
-        "actions": [row(c) for c in ranked],
-        "cards": card_summary(dist, shown.pool),
-        "particles": [
-            [list(p.hands[o]) for o in dist.opponents] for p in dist.particles
-        ],
-        "diagnostics": diagnostics,
-        "disclaimer": SCORE_DISCLAIMER,
     }
     return view
 

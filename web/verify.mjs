@@ -74,6 +74,114 @@ const machineStatus = page => page.evaluate(async () =>
 const frameStats = page => page.evaluate(async () =>
   (await import('/app/machine.js')).frameStats());
 
+// 读副屏的真实 DOM，并检查每一行都落在副屏矩形内；仅看 innerHTML 抓不到裁切。
+const probabilityScreen = page => page.evaluate(async () => {
+  const { S } = await import('/app/state.js');
+  const { label } = await import('/app/labels.js');
+  const counter = document.getElementById('counter');
+  const box = counter.getBoundingClientRect();
+  const rows = [...counter.querySelectorAll('.prob-row')].map(row => {
+    const r = row.getBoundingClientRect();
+    return {
+      label: row.querySelector('.prob-action')?.textContent.trim() || '',
+      type: row.querySelector('.prob-type')?.textContent.trim() || '',
+      pct: row.querySelector('.prob-pct')?.textContent.trim() || '',
+      clipped: r.left < box.left - 1 || r.right > box.right + 1
+        || r.top < box.top - 1 || r.bottom > box.bottom + 1,
+    };
+  });
+  return {
+    mode: counter.dataset.mode,
+    hasPoint: Boolean(S.point),
+    actor: S.point?.actor || '',
+    actorLabel: S.point?.actor ? label(S.point.actor) : '',
+    mine: Boolean(S.point?.mine),
+    hasCandidates: Boolean(S.point?.candidates?.length),
+    predictions: (S.point?.predictions || []).map(a => ({
+      label: a.label, type: a.type, probability: a.probability,
+    })),
+    actions: (S.point?.actions || []).map(a => a.probability),
+    rows,
+    title: counter.querySelector('.prob-title')?.textContent.trim() || '',
+    empty: counter.querySelector('.prob-empty')?.textContent.trim() || '',
+    text: counter.textContent,
+    buttons: counter.querySelectorAll('button').length,
+  };
+});
+
+async function checkProbabilityTop3(page, label, expectedMine = true){
+  const got = await probabilityScreen(page);
+  if (got.mode !== 'prob') problems.push(`${label} 副屏不在概率模式`);
+  if (got.buttons) problems.push(`${label} 副屏里出现了 ${got.buttons} 个可点击按钮`);
+  const expectedTitle = `${got.actorLabel} · 模型动作选择概率`;
+  if (got.title !== expectedTitle) {
+    problems.push(`${label} 概率标题不对：${got.title || '(空)'}，应为 ${expectedTitle}`);
+  }
+  if (got.mine !== expectedMine) problems.push(`${label} 行动者归属标记不对`);
+  if (/胜率/.test(got.text)) problems.push(`${label} 把模型动作选择概率写成了胜率`);
+  if (!got.hasPoint || !got.predictions.length) problems.push(`${label} 没有拿到 Top-3 概率`);
+  if (got.rows.length > 3) problems.push(`${label} 概率行超过 3 条：${got.rows.length}`);
+  if (got.rows.length !== got.predictions.length) {
+    problems.push(`${label} 概率行数与 predictions 不一致：${got.rows.length}/${got.predictions.length}`);
+  }
+  for (const [i, row] of got.rows.entries()){
+    const want = got.predictions[i];
+    if (!want) continue;
+    const pct = `${Math.round(want.probability * 100)}%`;
+    if (row.label !== want.label || row.type !== want.type || row.pct !== pct) {
+      problems.push(`${label} 第 ${i + 1} 行与后端动作不一致：`
+        + `${row.label}/${row.type}/${row.pct}，应为 ${want.label}/${want.type}/${pct}`);
+    }
+    if (row.clipped) problems.push(`${label} 第 ${i + 1} 行被副屏裁切`);
+  }
+  for (let i = 1; i < got.predictions.length; i++){
+    if (got.predictions[i - 1].probability < got.predictions[i].probability) {
+      problems.push(`${label} Top-3 没有按概率降序`);
+      break;
+    }
+  }
+  if (!got.actions.length) problems.push(`${label} 没有拿到动作概率`);
+  if (!got.actions.every(p => Number.isFinite(p) && p >= 0 && p <= 1)) {
+    problems.push(`${label} 存在非法动作概率`);
+  }
+  const total = got.actions.reduce((sum, p) => sum + p, 0);
+  if (Math.abs(total - 1) > 1e-9) problems.push(`${label} 全部合法动作概率合计 ${total}，不是 1`);
+  return got;
+}
+
+async function checkProbabilityEmpty(page, label, expected){
+  const got = await probabilityScreen(page);
+  if (got.mode !== 'prob') problems.push(`${label} 副屏不在概率模式`);
+  if (got.buttons) problems.push(`${label} 副屏里出现了 ${got.buttons} 个可点击按钮`);
+  if (got.rows.length) problems.push(`${label} 不该有概率行，实际有 ${got.rows.length} 条`);
+  if (got.empty !== expected) problems.push(`${label} 空态文案不对：${got.empty || '(空)'}，应为 ${expected}`);
+  return got;
+}
+
+async function goToMyTurn(page, label){
+  const before = await page.evaluate(async () => {
+    const { S } = await import('/app/state.js');
+    return { mine: S.snap.acting === S.snap.me, hasPoint: Boolean(S.point),
+             current: S.snap.step, mySteps: S.meta.my_steps };
+  });
+  if (before.mine && before.hasPoint) return before;
+  const target = [...before.mySteps]
+    .sort((a, b) => Math.abs(a - before.current) - Math.abs(b - before.current))[0];
+  if (target === undefined || target === before.current) {
+    problems.push(`${label} 找不到可切换的我方出牌机会`);
+    return before;
+  }
+  await page.click(target < before.current ? '#dpad-left' : '#dpad-right');
+  await page.waitForTimeout(1200);
+  const after = await page.evaluate(async () => {
+    const { S } = await import('/app/state.js');
+    return { mine: S.snap.acting === S.snap.me, hasPoint: Boolean(S.point),
+             current: S.snap.step, mySteps: S.meta.my_steps };
+  });
+  if (!after.mine || !after.hasPoint) problems.push(`${label} 没回到我方出牌机会`);
+  return after;
+}
+
 // 保真像素基准（ADR-0004）：同一条归一化坐标，在主页画布与 /glb 原貌页画布上取 5×5 中位色块。
 // 机身取景会随布局和相机收敛变化，所以"取景矩形 + 像素"必须在同一次 evaluate 里读完，
 // 分两次读会错位。色块靠极值找（金取最黄、靛蓝取最暗），但打分的是 5×5 中位数本身 ——
@@ -264,21 +372,25 @@ try {
   if (!shell.contactShadow) problems.push('主页面没有机底接触阴影');
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
-  if (shell.buttons.length !== 10) problems.push(`透明键热区数量不是 10：${shell.buttons.length}`);
+  if (shell.buttons.length !== 11) problems.push(`透明键热区数量不是 11：${shell.buttons.length}`);
+  for (const id of ['bar-mode', 'dpad-up', 'dpad-left', 'play-clear', 'dpad-right',
+                    'dpad-down', 'new-round', 'play-hint-btn', 'undo', 'play-go', 'play-pass']) {
+    if (!shell.buttons.some(b => b.id === id)) problems.push(`模型投影热区缺少 ${id}`);
+  }
 
   const hotspots = await page.locator('#controls .key').evaluateAll(els => els.map(el => {
     const r = el.getBoundingClientRect();
     return { id: el.id, w: r.width, h: r.height, disabled: el.disabled,
              clip: getComputedStyle(el).clipPath };
   }));
-  if (hotspots.length !== 10) problems.push(`HTML 键热区数量不是 10：${hotspots.length}`);
+  if (hotspots.length !== 11) problems.push(`HTML 键热区数量不是 11：${hotspots.length}`);
   for (const h of hotspots){
     if (h.w < 8 || h.h < 8) problems.push(`键热区 ${h.id} 尺寸过小：${h.w}×${h.h}`);
     if (h.clip === 'none' && ['play-hint-btn','undo','play-go','play-pass'].includes(h.id)) {
       problems.push(`菱形键热区 ${h.id} 没有贴合描边`);
     }
   }
-  for (const id of ['dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
+  for (const id of ['bar-mode','dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
                     'play-hint-btn','undo','play-go','play-pass']) {
     if (!hotspots.some(h => h.id === id)) problems.push(`缺少主键热区 ${id}`);
   }
@@ -333,17 +445,24 @@ try {
   }
   await page.mouse.move(stageBox.x - 5, stageBox.y - 5);
 
-  // 机顶条：15 个点数；↓ 切到概率模式
-  if ((await page.locator('#counter .cc').count()) !== 15) problems.push('机顶条不是 15 个点数');
-  await page.click('#dpad-down');
+  // 副屏只有两种状态；切换入口只能是机身右侧的实体 BackKey，屏内不能有按钮。
+  if ((await page.locator('#counter button').count()) !== 0) problems.push('副屏里出现了模式切换按钮');
+  if ((await page.locator('#counter .cc').count()) !== 15) problems.push('记牌副屏不是 15 个点数');
+  if ((await page.locator('#counter .cc i s').count()) < 20) problems.push('记牌模式没有画出红点');
+  await page.click('#bar-mode');
   await page.waitForTimeout(300);
-  if ((await text(page, '#bar-mode')) !== '出牌概率') problems.push('机顶条没切到出牌概率');
-  if ((await page.locator('#counter .cc .bar').count()) < 10) problems.push('概率模式没有画出双色条');
-  // 机顶那个按钮本身也能切
+  if ((await probabilityScreen(page)).mode !== 'prob') problems.push('实体 BackKey 没切到概率模式');
+  await checkProbabilityTop3(page, '宽屏我方回合');
+  await page.screenshot({ path: '/tmp/ddz-web-prob.png', fullPage: true });
+  await page.click('#dpad-down');
+  await page.waitForTimeout(200);
+  if ((await probabilityScreen(page)).mode !== 'prob') problems.push('按 D-pad ↓ 不该切换副屏模式');
+  await page.click('#dpad-up');
+  await page.waitForTimeout(200);
+  if ((await probabilityScreen(page)).mode !== 'prob') problems.push('按 D-pad ↑ 不该切换副屏模式');
   await page.click('#bar-mode');
   await page.waitForTimeout(250);
-  if ((await text(page, '#bar-mode')) !== '记牌') problems.push('机顶按钮切不回记牌');
-  if ((await page.locator('#counter .cc i s').count()) < 20) problems.push('记牌模式没有画出红点');
+  if ((await probabilityScreen(page)).mode !== 'count') problems.push('实体 BackKey 没切回记牌模式');
 
   // 数据面板：默认不占页面，点"数据面板"才盖在屏幕上
   if (await page.locator('#crt').evaluate(el => el.classList.contains('is-open'))) {
@@ -439,6 +558,11 @@ try {
   }
   if (await page.locator('#opp-cell').isVisible()) problems.push('终局时还留着录对手牌的入口');
   if (!(await text(page, '#banner')).includes('牌局已结束')) problems.push('终局横幅没说明牌局已结束');
+  await page.click('#bar-mode');
+  await page.waitForTimeout(250);
+  await checkProbabilityEmpty(page, '宽屏终局', '本局已结束');
+  await page.click('#bar-mode');
+  await page.waitForTimeout(250);
 
   // 交互 3：左握把那个方键开新一轮 → 屏幕里录入 → 开局（我方当地主，第一手由我领出）
   await page.click('#new-round');
@@ -522,6 +646,23 @@ try {
       await page.click('#play-clear');
       await page.waitForTimeout(150);
     }
+    // 轮到对手：概率副屏显示对手 Top-3，但对手动作不能进入我方可录候选。
+    await page.click('#bar-mode');
+    await page.waitForTimeout(250);
+    await checkProbabilityTop3(page, '宽屏对手回合', false);
+    const opponentDeck = await page.evaluate(async () => {
+      const { S } = await import('/app/state.js');
+      return {
+        hasCandidates: Boolean(S.point?.candidates?.length),
+        picksHidden: document.getElementById('play-picks').hidden,
+        hintDisabled: document.getElementById('play-hint-btn').disabled,
+      };
+    });
+    if (opponentDeck.hasCandidates || !opponentDeck.picksHidden || !opponentDeck.hintDisabled) {
+      problems.push('对手动作被错误地放进了我方可录候选');
+    }
+    await page.click('#bar-mode');
+    await page.waitForTimeout(250);
     // 这一手按"不要"记下去（对手的牌是背面，实际牌型由服务端裁定）
     await page.click('#play-pass');
     await page.waitForTimeout(1400);
@@ -553,7 +694,7 @@ try {
     const r = el.getBoundingClientRect();
     return { w: r.width, h: r.height, visible: getComputedStyle(el).display !== 'none' };
   }));
-  if (touchTargets.length !== 10) problems.push(`窄屏操作条按钮数量不是 10：${touchTargets.length}`);
+  if (touchTargets.length !== 8) problems.push(`窄屏操作条按钮数量不是 8：${touchTargets.length}`);
   for (const [i, t] of touchTargets.entries()) {
     if (!t.visible || t.w < 44 || t.h < 44) {
       problems.push(`窄屏操作条第 ${i + 1} 个目标不足 44px：${t.w}×${t.h}`);
@@ -568,7 +709,7 @@ try {
     const counterEl = document.getElementById('counter'), counter = counterEl.getBoundingClientRect();
     const cell = document.querySelector('#counter .cc');
     const handline = document.getElementById('handline');
-    const barMode = document.getElementById('bar-mode');
+    const counterButtons = counterEl.querySelectorAll('button').length;
     const rowTops = {};
     document.querySelectorAll('#counter .cc').forEach(el => {
       const y = Math.round(el.getBoundingClientRect().top);
@@ -584,7 +725,7 @@ try {
       counterCellW: cell ? cell.getBoundingClientRect().width : 0,
       counterRows: Object.values(rowTops),
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
-      barModeHidden: !barMode || getComputedStyle(barMode).display === 'none',
+      counterButtons,
       docOverflow: document.documentElement.scrollWidth - innerWidth,
       bodyOverflow: document.body.scrollWidth - innerWidth,
     };
@@ -593,7 +734,7 @@ try {
     problems.push(`窄屏机身比台面还矮：stage ${narrowLayout.stageH.toFixed(1)}px < chassis ${narrowLayout.chassisH.toFixed(1)}px`);
   }
   if (!narrowLayout.handlineHidden) problems.push('420px 仍显示平面手牌副本，和 3D 9+8 手牌重复占高');
-  if (!narrowLayout.barModeHidden) problems.push('420px 机顶屏仍占宽显示切换键');
+  if (narrowLayout.counterButtons) problems.push('420px 副屏里仍显示模式切换按钮');
   if (narrowLayout.counterFs < 10) problems.push(`420px 机顶记牌字号过小：${narrowLayout.counterFs}px`);
   if (narrowLayout.counterCellW < 20) problems.push(`420px 机顶记牌格宽过窄：${narrowLayout.counterCellW.toFixed(1)}px`);
   if (JSON.stringify(narrowLayout.counterRows) !== JSON.stringify([8, 7])) {
@@ -615,6 +756,12 @@ try {
   if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
     problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`);
   }
+  await goToMyTurn(page, '窄屏我方回合');
+  await page.click('#bar-mode');
+  await page.waitForTimeout(300);
+  await checkProbabilityTop3(page, '窄屏我方回合');
+  await page.click('#bar-mode');
+  await page.waitForTimeout(250);
 
   // 新开一页复核 17 张这个真实高频状态；主流程此时已经改过手牌，不能拿它冒充 17 张。
   const fresh420 = await browser.newPage({ viewport: { width: 420, height: 1200 } });
@@ -681,7 +828,14 @@ try {
   if (!ns0.now) problems.push('窄屏出牌机会没有显示编号');
   if (ns0.btnW < 20 || ns0.btnH < 20) problems.push(`窄屏出牌机会按钮过小：${ns0.btnW}×${ns0.btnH}`);
   if (ns0.right > ns0.vw + 2) problems.push('窄屏出牌机会箱溢出屏幕');
-  if (ns0.nextOff && ns0.prevOff) {
+  const nsNav = await page.evaluate(async () => {
+    const { S } = await import('/app/state.js');
+    return { other: S.meta.my_steps.some(st => st !== S.snap.step) };
+  });
+  if (!nsNav.other) {
+    // 只有当前这一手时，两个方向都不可点是正确状态
+    if (!(ns0.nextOff && ns0.prevOff)) problems.push('窄屏只有一个出牌机会，回放按钮却仍可点');
+  } else if (ns0.nextOff && ns0.prevOff) {
     problems.push('窄屏出牌机会两个方向都点不动（历史局面应有可换的一手）');
   } else {
     const fwd = !ns0.nextOff;

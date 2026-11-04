@@ -190,3 +190,33 @@ class TestGameOverRule:
         snapshot = derive(finished_record(me="landlord_down"))
         assert snapshot.finished
         assert legal_actions(snapshot) == []
+
+
+class TestActionPresentation:
+    """展示层拿到的牌型名与完整组合必须和规则表一致。"""
+
+    def test_airplane_with_triplet_wings_does_not_have_empty_wings(self):
+        from ddz.rules import combo_label
+
+        assert combo_label("333444555777") == "333444555+777"
+
+    def test_every_legal_combo_keeps_all_cards_in_its_display_label(self):
+        from rlcard.games.doudizhu.utils import CARD_TYPE
+
+        from ddz.rules import combo_label
+
+        wing_kinds = {
+            "trio_solo",
+            "trio_pair",
+            "four_two_solo",
+            "four_two_pair",
+        }
+        for combo, entry in CARD_TYPE[0].items():
+            label = combo_label(combo)
+            assert Counter(label.replace("+", "")) == Counter(combo)
+            kind = entry[0][0]
+            if kind in wing_kinds or kind.startswith(("trio_solo_chain_", "trio_pair_chain_")):
+                body, wings = label.split("+")
+                assert body and wings, f"{combo} 的主体或翅膀被标成了空"
+            else:
+                assert "+" not in label

@@ -71,11 +71,15 @@ def test_analyze_lists_all_my_turn_steps():
     assert analyze(make_record(), FakePolicy())["my_steps"] == [2]
 
 
-def test_analyze_offers_more_than_one_candidate():
+def test_analyze_offers_top_three_complete_actions_with_model_probabilities():
     got = analyze(make_record(), FakePolicy())
-    labels = [c["label"] for c in got["point"]["candidates"]]
-    assert "不出" in labels
-    assert "AA" in labels, f"我手上有一对 A 能压 9，候选里应有它：{labels}"
+    actions = got["point"]["actions"]
+    top = got["point"]["predictions"]
+    assert 0 < len(top) <= 3
+    assert all(set(("label", "cards", "type", "probability")) <= row.keys() for row in top)
+    assert all(row["probability"] >= 0 for row in top)
+    assert all(row["cards"] == action["cards"] for row, action in zip(top, actions))
+    assert "不出" in {row["type"] for row in actions}
 
 
 def test_analyze_card_probabilities_are_conserved():
@@ -86,12 +90,17 @@ def test_analyze_card_probabilities_are_conserved():
     assert abs(total - got["snapshot"]["pool_size"]) < 0.5, f"期望张数加总 {total} 对不上牌池"
 
 
-def test_analyze_shows_a_position_that_is_not_my_turn_without_a_point():
-    """看历史局面（这儿是第 1 手，该下家）也得能显示牌桌 —— 只是没有候选。"""
-    got = analyze(make_record(), FakePolicy(), step=1)
+def test_analyze_shows_opponent_action_probabilities_when_it_is_not_my_turn():
+    """看历史局面（这儿是第 1 手，该下家）也要给出该行动者的 Top-3。"""
+    got = analyze(make_record(), FakePolicy(), step=1, particles=30)
     assert got["snapshot"]["step"] == 1
     assert got["snapshot"]["acting"] == "landlord_down"
-    assert got["point"] is None
+    point = got["point"]
+    assert point["actor"] == "landlord_down"
+    assert point["mine"] is False
+    assert point["opponents"] == ["landlord", "landlord_down"]
+    assert 0 < len(point["predictions"]) <= 3
+    assert point["predictions"] == point["actions"][:3]
 
 
 def test_analyze_has_no_decision_point_once_the_game_is_over():
@@ -306,9 +315,11 @@ def test_step_and_undo_then_analyze_round_trips():
 
         undone = client.post("/api/game/undo", json={"record": record}).json()["record"]
         assert len(undone["steps"]) == 1
-        # 撤销之后不该再轮到我方：仍然给局面，但不再给候选/分布
-        after = client.post("/api/analyze", json={"record": undone}).json()
-        assert after["point"] is None
+        # 撤销之后轮到我方上家：给局面，也给对手动作概率，但不给录牌候选。
+        after = client.post("/api/analyze", json={"record": undone, "particles": 20}).json()
+        assert after["point"]["actor"] == "landlord_down"
+        assert after["point"]["mine"] is False
+        assert "candidates" not in after["point"]
         assert after["snapshot"]["acting"] == "landlord_down"
     finally:
         app.dependency_overrides.clear()
@@ -325,27 +336,75 @@ def test_undo_on_an_empty_record_is_refused():
         app.dependency_overrides.clear()
 
 
-def test_analyze_before_my_turn_gives_the_position_without_a_point():
-    """刚开完局就还轮不到我方 —— 页面照样得能显示局面。"""
-    got = analyze(make_record(steps=()), FakePolicy())
+def test_analyze_before_my_turn_gives_opponent_top_three():
+    """刚开完局就还轮不到我方 —— 页面显示对手 Top-3，而不是我方候选。"""
+    got = analyze(make_record(steps=()), FakePolicy(), particles=20)
     assert got["my_steps"] == []
-    assert got["point"] is None
+    assert got["point"]["actor"] == "landlord"
+    assert got["point"]["mine"] is False
+    assert 0 < len(got["point"]["predictions"]) <= 3
+    assert "candidates" not in got["point"]
     assert got["current_acting"] == "landlord"
     assert got["snapshot"]["step"] == 0
     assert got["snapshot"]["remaining"] == {"landlord": 20, "landlord_down": 17, "landlord_up": 17}
 
 
-def test_analyze_hands_back_every_legal_action_with_its_cards():
+def test_analyze_hands_back_every_legal_action_with_its_cards_and_probability():
     """页面靠它做"点一下就把这一手记下来"，所以每个动作都得带具体牌面。"""
     got = analyze(make_record(), FakePolicy())
     actions = got["point"]["actions"]
     labels = {a["label"]: a for a in actions}
     assert "不出" in labels and labels["不出"]["cards"] == []
     assert labels["AA"]["cards"] == ["A", "A"]
-    # 全量动作是 top-k 的超集，且分数降序
-    assert len(actions) >= len(got["point"]["candidates"])
-    scores = [a["score"] for a in actions]
-    assert scores == sorted(scores, reverse=True)
+    assert len(got["point"]["predictions"]) == min(3, len(actions))
+    assert got["point"]["predictions"][0]["label"] == actions[0]["label"]
+    assert [a["probability"] for a in actions] == sorted(
+        (a["probability"] for a in actions), reverse=True
+    )
+
+
+def test_analyze_action_probabilities_sum_to_one_across_every_legal_action():
+    got = analyze(make_record(), FakePolicy())
+    probs = [a["probability"] for a in got["point"]["actions"]]
+    assert all(0 <= p <= 1 for p in probs)
+    assert abs(sum(probs) - 1) < 1e-9
+    assert got["point"]["diagnostics"]["probability_kind"] == "模型动作选择概率"
+
+
+def test_analyze_opponent_probabilities_are_average_of_particle_action_probabilities():
+    """对手概率 = 各手牌假设下 softmax 的等权平均；不合法假设贡献 0。"""
+    got = analyze(make_record(), FakePolicy(), step=1, particles=20)
+    actions = got["point"]["actions"]
+    assert actions
+    assert all(0 <= a["probability"] <= 1 for a in actions)
+    assert abs(sum(a["probability"] for a in actions) - 1) < 1e-9
+    assert [a["probability"] for a in actions] == sorted(
+        (a["probability"] for a in actions), reverse=True
+    )
+    assert got["point"]["diagnostics"]["n_particles"] == 20
+    assert got["point"]["diagnostics"]["temperature"] == 1.0
+
+
+def test_analyze_opponent_probability_is_stable_and_keeps_pass():
+    got_a = analyze(make_record(), FakePolicy(), step=1, particles=20)
+    got_b = analyze(make_record(), FakePolicy(), step=1, particles=20)
+    assert got_a["point"]["actions"] == got_b["point"]["actions"]
+    assert any(a["type"] == "不出" for a in got_a["point"]["actions"])
+
+
+def test_analyze_labels_complete_combinations_not_individual_cards():
+    got = analyze(make_record(), FakePolicy())
+    aa = next(a for a in got["point"]["actions"] if a["label"] == "AA")
+    assert aa["cards"] == ["A", "A"]
+    assert aa["type"] == "对子"
+
+
+def test_analyze_keeps_a_free_lead_combination_together():
+    """自由领出时也要显示完整牌组，不能把三带一拆成四张单牌。"""
+    got = analyze(make_record(me="landlord", steps=()), FakePolicy())
+    trio_solo = next(a for a in got["point"]["actions"] if a["label"] == "333+4")
+    assert trio_solo["cards"] == ["3", "3", "3", "4"]
+    assert trio_solo["type"] == "三带一"
 
 
 def test_analyze_reports_pool_counts():
