@@ -193,12 +193,25 @@ try {
   await waitForHealth();
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
-  watchPage(page, '主页面');
+  // 故意造一次被服务端拒掉的出牌时，浏览器会记一条 400；只有那一下放行
+  let expectReject = false;
+  watchPage(page, '主页面', msg => expectReject && /400 \(Bad Request\)/.test(msg));
 
+  // 机身还在下载时是 loading，不是失败：这时不能先弹「机身不可用」
+  let holdGlb = true;
+  await page.route('**/assets/console-b.glb', async route => {
+    if (holdGlb) await new Promise(r => setTimeout(r, 1500));
+    await route.continue();
+  });
   await page.goto(`${BASE}/`);
+  if (!(await page.locator('#machine-error').evaluate(el => el.hidden))) {
+    problems.push('3D 机身还在加载（loading）时就弹出了错误提示');
+  }
+  holdGlb = false;
   await page.waitForSelector('#who', { timeout: 40000 });
   await page.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
     { timeout: 40000 });
+  await waitForMachineState(page, s => s.status === 'ready' && s.ready);
   await page.waitForTimeout(900);
 
   // 座位与人称：以我方为参照；身份是徽章不是座位名
@@ -272,6 +285,30 @@ try {
 
   // 静止后不再出帧；DPR 不超过 2
   await waitForFramesToSettle(page);
+
+  // #25 操作台归位：出牌机会箱是台面第一个箱子，托盘顶边贴住机身下沿（画布留白用等量负 margin 收掉）
+  const deck = await page.evaluate(() => {
+    const bar = document.getElementById('deckbar');
+    const cells = [...bar.querySelectorAll(':scope > .cell')];
+    return { first: cells[0] ? cells[0].id : '', ids: cells.map(c => c.id) };
+  });
+  if (deck.first !== 'step-cell') {
+    problems.push(`操作台最左的箱子不是出牌机会：${deck.first || '(空)'}（${deck.ids.join(',')}）`);
+  }
+  const seam = await page.evaluate(() => {
+    const stage = document.getElementById('stage').getBoundingClientRect();
+    const chassis = document.getElementById('chassis').getBoundingClientRect();
+    return { stageTop: stage.top, chassisTop: chassis.top,
+             lip: document.getElementById('board').style.getPropertyValue('--lip') };
+  });
+  const tab = (await machineStatus(page)).tablet;
+  if (!tab) problems.push('量不到机身取景框，操作台贴合判定不成立');
+  else {
+    const gap = seam.chassisTop - (seam.stageTop + tab.y + tab.h);
+    if (gap > 12) problems.push(`操作台没贴住机身下沿：缝隙 ${gap.toFixed(1)}px（上限 12px，lip=${seam.lip}）`);
+    if (gap < -1) problems.push(`操作台压进了机身：${gap.toFixed(1)}px`);
+  }
+
   // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
   const mainFidelity = await sampleFidelity(page, '#scene');
   const idleA = await frameStats(page);
@@ -358,6 +395,33 @@ try {
     }
   }
 
+  // #25 出牌机会切换：台面里的 ←/→ 与握把上的 ←/→ 同源，点了真的换局面
+  const stepState = () => page.evaluate(() => ({
+    now: document.getElementById('step-now').textContent.trim(),
+    prevOff: document.getElementById('step-prev').disabled,
+    nextOff: document.getElementById('step-next').disabled,
+    leftOff: document.getElementById('dpad-left').disabled,
+    rightOff: document.getElementById('dpad-right').disabled,
+    latestHidden: document.getElementById('play-latest').hidden,
+    hint: document.getElementById('play-hint').textContent,
+  }));
+  const st0 = await stepState();
+  if (!/第\s*\d+/.test(st0.now)) problems.push(`出牌机会没显示编号：${st0.now}`);
+  if (st0.prevOff !== st0.leftOff || st0.nextOff !== st0.rightOff) {
+    problems.push('台面的 ←/→ 与握把上的 ←/→ 可用状态不一致');
+  }
+  if (st0.latestHidden) problems.push('在看历史局面时没有给出「回到最新」的入口');
+  if (!st0.hint.includes('回到最新')) problems.push('看历史局面时没提示「回到最新才能继续录」');
+  if (st0.nextOff) problems.push('历史局面下「下一次出牌机会」却点不动');
+  else {
+    await page.click('#step-next'); await page.waitForTimeout(900);
+    const st1 = await stepState();
+    if (st1.now === st0.now) problems.push('点「下一次出牌机会」没有换局面');
+    await page.click('#step-prev'); await page.waitForTimeout(900);
+    const st2 = await stepState();
+    if (st2.now !== st0.now) problems.push(`点「上一次出牌机会」没回到原来那一手：${st0.now} → ${st2.now}`);
+  }
+
   // 交互 2：推荐键 → 选中模型给的那一手（并在提示里说明是第几个候选）
   await page.click('#play-hint-btn');
   await page.waitForTimeout(250);
@@ -400,6 +464,31 @@ try {
   await page.waitForTimeout(1600);
   if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
   if (!(await text(page, '#board')).includes('该你出')) problems.push('开新局后第一手不是我方');
+
+  // #25 服务端拒掉一手时，已经选中的牌不能被清空（点了两张不同点数，凑不成牌型）
+  {
+    const handNow = await page.evaluate(async () => (await import('/app/state.js')).S.snap.my_hand);
+    let other = 1;
+    while (other < handNow.length && handNow[other] === handNow[0]) other++;
+    if (other >= handNow.length) problems.push('开局手牌清一色，没法造非法出牌');
+    else {
+      await clickCard(page, 0); await page.waitForTimeout(150);
+      await clickCard(page, other); await page.waitForTimeout(150);
+      const picked = await page.locator('#play-chips i.c').count();
+      if (picked !== 2) problems.push(`想选两张不同点数的牌，实际选上 ${picked} 张`);
+      expectReject = true;
+      await page.click('#play-go');
+      await page.waitForTimeout(900);
+      expectReject = false;
+      const afterReject = await page.locator('#play-chips i.c').count();
+      if (afterReject !== picked) {
+        problems.push(`出牌被服务端拒掉后已选中的牌被清空了：${picked} → ${afterReject} 张`);
+      }
+      const kind = await page.locator('#banner').getAttribute('data-kind');
+      if (kind !== 'error') problems.push(`出牌被服务端拒掉后横幅没报错（kind=${kind}）：${await text(page, '#banner')}`);
+      await page.click('#play-clear'); await page.waitForTimeout(150);
+    }
+  }
 
   // 交互 4：在屏幕里点一张自己的牌 → 出牌（领出时单张一定合法）
   const n4 = (await handPts(page)).length;
@@ -470,6 +559,89 @@ try {
       problems.push(`窄屏操作条第 ${i + 1} 个目标不足 44px：${t.w}×${t.h}`);
     }
   }
+  // #25 窄屏机身/机顶屏/操作台的版式硬约束：机身留主角位，记牌字能读，
+  // 托盘各层不互相压住，触控条不把页面撑宽。
+  const narrowLayout = await page.evaluate(() => {
+    const r = id => document.getElementById(id).getBoundingClientRect();
+    const stage = r('stage'), chassis = r('chassis'), score = r('scoreboard');
+    const deck = r('deckbar'), touch = r('touchbar');
+    const counterEl = document.getElementById('counter'), counter = counterEl.getBoundingClientRect();
+    const cell = document.querySelector('#counter .cc');
+    const handline = document.getElementById('handline');
+    const barMode = document.getElementById('bar-mode');
+    const rowTops = {};
+    document.querySelectorAll('#counter .cc').forEach(el => {
+      const y = Math.round(el.getBoundingClientRect().top);
+      rowTops[y] = (rowTops[y] || 0) + 1;
+    });
+    return {
+      stageH: stage.height, chassisH: chassis.height,
+      scoreTop: score.top, scoreBottom: score.bottom,
+      deckTop: deck.top, deckBottom: deck.bottom,
+      touchTop: touch.top, touchBottom: touch.bottom,
+      chassisTop: chassis.top, chassisBottom: chassis.bottom,
+      counterFs: parseFloat(getComputedStyle(counterEl).fontSize),
+      counterCellW: cell ? cell.getBoundingClientRect().width : 0,
+      counterRows: Object.values(rowTops),
+      handlineHidden: !handline || getComputedStyle(handline).display === 'none',
+      barModeHidden: !barMode || getComputedStyle(barMode).display === 'none',
+      docOverflow: document.documentElement.scrollWidth - innerWidth,
+      bodyOverflow: document.body.scrollWidth - innerWidth,
+    };
+  });
+  if (narrowLayout.stageH < narrowLayout.chassisH) {
+    problems.push(`窄屏机身比台面还矮：stage ${narrowLayout.stageH.toFixed(1)}px < chassis ${narrowLayout.chassisH.toFixed(1)}px`);
+  }
+  if (!narrowLayout.handlineHidden) problems.push('420px 仍显示平面手牌副本，和 3D 9+8 手牌重复占高');
+  if (!narrowLayout.barModeHidden) problems.push('420px 机顶屏仍占宽显示切换键');
+  if (narrowLayout.counterFs < 10) problems.push(`420px 机顶记牌字号过小：${narrowLayout.counterFs}px`);
+  if (narrowLayout.counterCellW < 20) problems.push(`420px 机顶记牌格宽过窄：${narrowLayout.counterCellW.toFixed(1)}px`);
+  if (JSON.stringify(narrowLayout.counterRows) !== JSON.stringify([8, 7])) {
+    problems.push(`420px 机顶记牌不是 8+7 两行：${narrowLayout.counterRows.join('+')}`);
+  }
+  if (narrowLayout.scoreBottom > narrowLayout.deckTop + 1) {
+    problems.push(`窄屏计分板与操作台相撞：${narrowLayout.scoreBottom.toFixed(1)} > ${narrowLayout.deckTop.toFixed(1)}`);
+  }
+  if (narrowLayout.deckBottom > narrowLayout.touchTop + 1) {
+    problems.push(`窄屏操作台与触控条相撞：${narrowLayout.deckBottom.toFixed(1)} > ${narrowLayout.touchTop.toFixed(1)}`);
+  }
+  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
+      || narrowLayout.deckBottom > narrowLayout.chassisBottom + 1) {
+    problems.push('窄屏计分板/操作台没有收进机身壳体');
+  }
+  if (Math.abs(narrowLayout.touchTop - narrowLayout.chassisBottom) > 2) {
+    problems.push(`窄屏触控条没有从机身底边接出：差 ${(narrowLayout.touchTop - narrowLayout.chassisBottom).toFixed(1)}px`);
+  }
+  if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
+    problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`);
+  }
+
+  // 新开一页复核 17 张这个真实高频状态；主流程此时已经改过手牌，不能拿它冒充 17 张。
+  const fresh420 = await browser.newPage({ viewport: { width: 420, height: 1200 } });
+  watchPage(fresh420, '420 复核');
+  await fresh420.goto(`${BASE}/`);
+  await fresh420.waitForSelector('#who', { timeout: 40000 });
+  await fresh420.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
+    { timeout: 40000 });
+  await waitForMachineState(fresh420, s => s.status === 'ready' && s.ready);
+  await fresh420.waitForTimeout(1200);
+  const freshHand = await fresh420.evaluate(async () => {
+    const m = await import('/app/machine.js');
+    const { S } = await import('/app/state.js');
+    const pts = m.handPoints();
+    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y) }));
+    return { n: S.snap.my_hand.length, rows: m.machineStatus().handRows,
+             pts: hits.length, miss: hits.filter(p => p.i !== p.pick) };
+  });
+  if (freshHand.n !== 17) problems.push(`420px 复核样本不是 17 张：${freshHand.n}`);
+  if (freshHand.rows.length !== 2 || freshHand.rows[0]?.count !== 9 || freshHand.rows[1]?.count !== 8) {
+    problems.push(`420px 17 张手牌不是 9+8 双排：${freshHand.rows.map(r => r.count).join('+')}`);
+  }
+  if (freshHand.pts !== freshHand.n || freshHand.miss.length) {
+    problems.push(`420px 手牌拾取错位：${freshHand.pts}/${freshHand.n} 个点，错 ${freshHand.miss.length} 张`);
+  }
+  await fresh420.close();
+
   // 窄屏仍能从屏里点中真牌
   const narrowPts = await handPts(page);
   if (narrowPts.length < 3) problems.push('窄屏屏里拿不到手牌坐标');
@@ -489,6 +661,41 @@ try {
   });
   if (narrowCloud.hasPoint && (narrowCloud.blank || narrowCloud.empty)) {
     problems.push('窄屏有分析数据时粒子云却是空的');
+  }
+  // #25 窄屏上出牌机会箱也要在台面里、能被点，不溢出屏幕
+  await page.evaluate(() => document.getElementById('play-clear')?.click());
+  await page.waitForTimeout(150);
+  const narrowStep = () => page.evaluate(() => {
+    const cell = document.getElementById('step-cell');
+    const r = cell.getBoundingClientRect();
+    const prev = document.getElementById('step-prev').getBoundingClientRect();
+    const next = document.getElementById('step-next').getBoundingClientRect();
+    return { w: r.width, h: r.height, right: r.right, vw: innerWidth,
+             now: document.getElementById('step-now').textContent.trim(),
+             btnW: Math.min(prev.width, next.width), btnH: Math.min(prev.height, next.height),
+             prevOff: document.getElementById('step-prev').disabled,
+             nextOff: document.getElementById('step-next').disabled };
+  });
+  const ns0 = await narrowStep();
+  if (ns0.w < 60 || ns0.h < 30) problems.push(`窄屏出牌机会箱被压没了：${ns0.w}×${ns0.h}`);
+  if (!ns0.now) problems.push('窄屏出牌机会没有显示编号');
+  if (ns0.btnW < 20 || ns0.btnH < 20) problems.push(`窄屏出牌机会按钮过小：${ns0.btnW}×${ns0.btnH}`);
+  if (ns0.right > ns0.vw + 2) problems.push('窄屏出牌机会箱溢出屏幕');
+  if (ns0.nextOff && ns0.prevOff) {
+    problems.push('窄屏出牌机会两个方向都点不动（历史局面应有可换的一手）');
+  } else {
+    const fwd = !ns0.nextOff;
+    await page.click(fwd ? '#step-next' : '#step-prev');
+    await page.waitForTimeout(900);
+    const ns1 = await narrowStep();
+    if (ns1.now === ns0.now) problems.push('窄屏点出牌机会按钮没有换局面');
+    // 回到最新那一手：有「回到最新」就用它，否则反向点一次
+    if (!(await page.locator('#play-latest').isHidden())) {
+      await page.click('#play-latest'); await page.waitForTimeout(900);
+    } else {
+      await page.click(fwd ? '#step-prev' : '#step-next');
+      await page.waitForTimeout(900);
+    }
   }
 
   // 最后一次点牌/按键操作后也必须归于静止

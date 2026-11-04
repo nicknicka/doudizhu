@@ -64,8 +64,11 @@ async function loadRecord(record, note){
 
 function stepTo(delta){
   if (S.busy || !S.meta) return;
-  const list = S.meta.my_steps, i = list.indexOf(S.snap.step);
-  const next = list[i + delta];
+  // 同 console.js：当前位置不一定落在 my_steps 里，按方向取最近的出牌机会。
+  const list = S.meta.my_steps, cur = S.snap.step;
+  const next = delta < 0
+    ? [...list].reverse().find(st => st < cur)
+    : list.find(st => st > cur);
   if (next !== undefined) refresh(next);
 }
 

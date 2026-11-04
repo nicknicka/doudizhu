@@ -192,19 +192,26 @@
   .controls .hud button{pointer-events:auto}
   .hud{position:absolute;display:flex;flex-direction:column;gap:.42em;
        padding:.5em .46em;overflow:hidden}
-  /* 机身下方的仓体：宽屏透明（子元素仍按原样定位）；窄屏收成一整块托盘 */
-  .chassis{display:contents}
-  .machine.is-stacked .chassis{position:relative;display:flex;flex-direction:column;
-    gap:10px;margin-top:-2px;border:var(--px) solid var(--ink);
-    background:var(--shell);box-shadow:4px 4px 0 var(--ink);padding:11px}
-  /* 两侧握把壳体往下延伸，把仓体抱住 —— 窄屏也还是"一台机器" */
+  /* 机身下方的操作台托盘：宽窄屏都是同一块底座，紧贴机身下沿 —— 不是网页里的另一张卡片 */
+  .chassis{position:relative;display:block;margin:0;padding:0;
+    margin-top:calc(-1 * var(--lip, 0px));
+    border:var(--px) solid var(--ink);border-top:none;
+    background:
+      radial-gradient(circle at 10px 12px,var(--ink) 0 1.5px,var(--shell-lo) 1.6px 2.5px,transparent 2.8px),
+      radial-gradient(circle at calc(100% - 10px) 12px,var(--ink) 0 1.5px,var(--shell-lo) 1.6px 2.5px,transparent 2.8px),
+      linear-gradient(180deg,var(--shell-hi),var(--shell));
+    box-shadow:inset 0 2px 0 color-mix(in srgb,#fff 28%,transparent),
+               inset 0 -5px 0 var(--shell-lo),0 5px 0 var(--ink)}
+  .machine.is-stacked .chassis{display:flex;flex-direction:column;
+    gap:10px;margin-top:0;padding:10px 11px 12px}
+  /* 两侧握把壳体往下延伸，把托盘抱住 —— 机器下沿不断开 */
   .grip-rail{display:none}
   .machine.is-stacked .grip-rail{display:block;position:absolute;top:-26px;bottom:-2px;
     width:20px;background:var(--shell);border:var(--px) solid var(--ink);z-index:-1}
   .machine.is-stacked .grip-rail.l{left:-2px;border-right:none}
   .machine.is-stacked .grip-rail.r{right:-2px;border-left:none}
   .machine.is-stacked .deckbar{border:none;box-shadow:none;margin:0;background:transparent;
-    border-top:var(--px) solid var(--ink);padding:10px 0 0}
+    padding:0}
   .machine.is-stacked .deckbar::before,
   .machine.is-stacked .deckbar::after{display:none}
   /* 窄屏也让按键留在握把上：机器轮廓不散 */
@@ -213,20 +220,13 @@
   .machine.is-stacked .cluster .key{font-size:9px;padding:0;box-shadow:0 2px 0 var(--well)}
   .machine.is-stacked .cluster .key-center{font-size:7px}
   .machine.is-stacked .bar-mode{font-size:8px}
-  .machine.is-stacked .scoreboard{border-bottom:var(--px) solid var(--ink);padding-bottom:10px}
+  .machine.is-stacked .scoreboard{border-bottom:1px solid var(--well);padding:2px 0 4px}
   .machine.is-stacked .scoreboard .sc{border:none;background:transparent;padding:0 8px;
     border-left:var(--px) solid var(--ink)}
   .machine.is-stacked .scoreboard .sc:first-child{border-left:none;padding-left:0}
   .machine.is-stacked .scoreboard .sc.is-acting{box-shadow:none;outline:2px solid var(--accent)}
   .machine.is-stacked .deckbar{border:none;box-shadow:none;margin:0;background:transparent;
     border-top:var(--px) solid var(--ink);padding:10px 0 0}
-  .machine.is-stacked .deckbar::before,
-  .machine.is-stacked .deckbar::after{display:none}
-  .machine.is-stacked .scoreboard{border-bottom:var(--px) solid var(--ink);padding-bottom:10px}
-  .machine.is-stacked .scoreboard .sc{border:none;background:transparent;padding:0 8px;
-    border-left:var(--px) solid var(--ink)}
-  .machine.is-stacked .scoreboard .sc:first-child{border-left:none;padding-left:0}
-  .machine.is-stacked .scoreboard .sc.is-acting{box-shadow:none;outline:2px solid var(--accent)}
 
 
 
@@ -242,12 +242,33 @@
 
   /* 屏下状态条 */
 
-  /* ---------- 机下操作台 ---------- */
-  .deckbar{position:relative;margin-top:12px;border:var(--px) solid var(--ink);
-           background:var(--shell);box-shadow:4px 4px 0 var(--ink);padding:10px 12px;
-           display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:10px 18px}
-  /* 按键图例：键帽上按用户要求不印字，功能常驻列在这里，不必悬浮才发现 */
-  .legend{margin:0 0 10px;font-size:11px;line-height:1.7;color:var(--muted);
+  /* ---------- 机下操作台（#25）：机身底沿的延伸 ---------- */
+  /* 台面三列：左 = 出牌机会（回放），中 = 已选，右 = 候选 */
+  .deckbar{position:relative;margin:0;border:none;background:transparent;
+           padding:12px 14px 14px;
+           display:grid;
+           grid-template-columns:minmax(150px,.62fr) minmax(0,1fr) minmax(0,1.12fr);
+           gap:12px 18px}
+  .deckbar .cell-wide{grid-column:1/-1}
+  /* 台面与机身之间的接缝：实体上唇 + 凹槽，不是网页卡齿 */
+  .deckbar{background:linear-gradient(180deg,var(--shell-hi),var(--shell));
+           box-shadow:inset 0 2px 0 color-mix(in srgb,#fff 24%,transparent),
+                      inset 0 -2px 0 var(--shell-lo)}
+  .deckbar::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;
+                   background:var(--shell-lo);border-bottom:1px solid var(--well);
+                   pointer-events:none}
+  /* 出牌机会切换：放在操作台最左侧（它本质是回放，不该散在牌桌上） */
+  .step-cell .stepper{display:flex;align-items:center;gap:6px}
+  .step-cell .stepper button{min-width:30px;padding:2px 0;text-align:center;box-shadow:none}
+  .step-cell .now{flex:1;min-width:0;text-align:center;white-space:nowrap;font-size:12px;
+                  padding:2px 4px;color:var(--ink);background:var(--ground);
+                  border:var(--px) solid var(--ink)}
+  .step-cell .latest{margin-top:6px;width:100%}
+  .step-cell .latest[hidden]{display:none}
+  .step-cell .sub{color:color-mix(in srgb,var(--muted) 78%,transparent)}
+  .step-cell.is-history{outline:var(--px) solid var(--accent);outline-offset:-4px}
+  /* 按键图例：印在操作台上的丝印，不是网页里另起一行文字 */
+  .legend{margin:0;font-size:11px;line-height:1.7;color:var(--muted);grid-column:1/-1;
           display:flex;flex-wrap:wrap;gap:0 14px}
   .legend b{font-weight:400;color:var(--ink)}
   .legend .lg{white-space:nowrap}
@@ -260,13 +281,6 @@
   .handline i{font-style:normal;min-width:22px;padding:0 5px;line-height:1.5;font-size:12px;
               text-align:center;border:var(--px) solid var(--ink);background:var(--ground);
               color:var(--ink)}
-  /* 机下操作台：也做个小接口，看着是接在机身上的扩展件 */
-  .deckbar::before{content:"";position:absolute;top:-13px;left:50%;transform:translateX(-50%);
-                   width:132px;height:13px;background:var(--shell);
-                   border:var(--px) solid var(--ink);border-bottom:none}
-  .deckbar::after{content:"";position:absolute;top:-9px;left:50%;transform:translateX(-50%);
-                  width:96px;height:9px;background:repeating-linear-gradient(
-                    90deg,var(--well) 0 8px,transparent 8px 14px)}
   .deckbar .cell{min-width:0}
   .deckbar .k{font-size:12px;color:var(--muted);margin-bottom:4px}
   .deckbar .k b{font-weight:400;color:var(--ink)}
@@ -462,20 +476,103 @@
     .machine.panel-open .crt{grid-column:auto;margin-top:12px}
     .machine-unit{width:100%}
     .stage{max-height:none}
-    .touchbar{display:grid;grid-template-columns:repeat(5,minmax(44px,1fr));gap:6px;
-      margin-top:10px;padding:8px;border:var(--px) solid var(--ink);background:var(--shell)}
-    .touchbar button{min-width:44px;min-height:44px;padding:4px 3px;box-shadow:none;
+    .touchbar{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(44px,1fr);
+      gap:4px;margin-top:0;padding:5px 6px;overflow-x:auto;overscroll-behavior-x:contain;
+      border:var(--px) solid var(--ink);border-top:2px solid var(--ink);
+      background:var(--shell-lo);box-shadow:inset 0 2px 0 color-mix(in srgb,#fff 20%,transparent),
+      0 3px 0 var(--ink);scrollbar-width:thin}
+    .touchbar button{min-width:44px;min-height:44px;padding:4px 3px;
+      color:var(--ground);background:var(--ink);border:2px solid var(--ink);
+      box-shadow:inset 0 2px 0 color-mix(in srgb,#fff 22%,transparent),
+                 inset 0 -2px 0 color-mix(in srgb,#000 34%,transparent);
       font-size:11px;line-height:1.2;white-space:nowrap}
+    .touchbar button:hover:enabled{background:color-mix(in srgb,var(--accent) 42%,var(--ink))}
+    .touchbar button:active:enabled{box-shadow:inset 0 2px 0 color-mix(in srgb,#000 30%,transparent)}
     .chassis{display:block}
-    .machine.is-stacked .chassis{margin-top:10px}
-    .machine.is-stacked .scoreboard{display:grid;margin-top:0}
-    .machine.is-stacked .deckbar{margin-top:10px;padding:10px 12px}
+    /* 窄屏也把画布留白收进托盘；2px 是托盘与机底接触阴影的接缝，
+       不是一整条网页卡片之间的空隙。 */
+    .machine.is-stacked .chassis{margin-top:calc(2px - var(--lip, 0px))}
+    .machine.is-stacked .scoreboard{display:grid;margin-top:0;font-size:10px;
+      line-height:1.25}
+    /* 窄屏把操作台压扁：两列排布 + 去掉与触控条重复的图例，机身才留得住主角位 */
+    .machine.is-stacked .deckbar{margin-top:0;padding:5px 0 0;gap:4px 8px;
+      grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+    .machine.is-stacked .deckbar .handline,
+    .machine.is-stacked .deckbar .step-cell,
+    .machine.is-stacked .deckbar .hint,
+    .machine.is-stacked .deckbar .cell-wide{grid-column:1/-1}
+    .machine.is-stacked .deckbar .legend{display:none}
+    .machine.is-stacked .handline{gap:3px;padding-bottom:4px}
+    .machine.is-stacked .handline .lb{font-size:11px}
+    .machine.is-stacked .handline i{min-width:18px;padding:0 3px;font-size:11px;line-height:1.35}
+    .machine.is-stacked .deckbar .k{margin-bottom:2px;font-size:11px}
+    /* 出牌机会一行排完：标签 / ← 第 N 次 → / 回到最新 */
+    .machine.is-stacked .step-cell{display:grid;align-items:center;
+      grid-template-columns:auto minmax(0,1fr) auto;gap:5px;min-height:28px}
+    .machine.is-stacked .step-cell .k{margin:0}
+    .machine.is-stacked .step-cell .stepper{display:grid;grid-template-columns:26px minmax(0,1fr) 26px;
+      min-width:0;gap:3px}
+    .machine.is-stacked .step-cell .stepper button{min-width:0;width:26px;padding:1px 0;
+      box-shadow:none;line-height:1.2}
+    .machine.is-stacked .step-cell .now{padding:1px 3px;line-height:1.2}
+    .machine.is-stacked .step-cell .latest{grid-column:3;width:auto;margin:0;
+      padding:2px 5px;font-size:10px;box-shadow:none}
+    .machine.is-stacked .hint{margin:2px 0 0;font-size:11px}
+    .machine.is-stacked .picks button{font-size:11px;padding:2px 6px}
   }
   @media (max-width:620px){
+    /* 机顶条只有屏幕上方一条窄带。两行 8+7 格让 15 个点数都有足够格宽，
+       且不靠缩到 5px 假装清楚；概率模式只保留色条，精确数值仍在数据面板。 */
+    .counter .cells{grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(2,1fr)}
+    .counter .cc{flex-direction:row;gap:1px;padding:0 1px;line-height:1}
+    .counter .cc b.long{font-size:.88em;letter-spacing:0}
+    .counter .cc i{height:auto;margin-top:0;gap:1px}
+    .counter .cc i s{width:3px;height:3px}
+    .counter .cc .bar{width:9px;height:4px;margin:0}
+    .counter .cc em{display:none}
+    /* 420px 机顶屏不再塞切换键：同一功能已在下方触控条，让出整格宽度给点数。 */
+    .counter .mode-btn{display:none}
+    .machine.is-stacked .chassis{gap:4px;padding:5px 7px 6px}
+    .machine.is-stacked .grip-rail{top:-13px;width:11px}
+    .machine.is-stacked .scoreboard{gap:0;padding:1px 0 3px}
+    .machine.is-stacked .scoreboard .sc{padding:0 5px;border-left:1px solid var(--well)}
+    .machine.is-stacked .scoreboard .sc .who{gap:2px;flex-wrap:nowrap;white-space:nowrap}
+    .machine.is-stacked .scoreboard .sc .cnt{margin-left:0}
+    .machine.is-stacked .scoreboard .sc .turn-flag{margin-left:1px;font-size:9px}
+    .machine.is-stacked .scoreboard .sc .badge{padding:0 2px;font-size:9px}
+    .machine.is-stacked .scoreboard .sc .played{font-size:9px;line-height:1.2}
+    /* 3D 手牌已经排成 9+8；这份平面副本只在 620px 以上补读，窄屏不再重复占高。 */
+    .machine.is-stacked .handline{display:none}
+    .machine.is-stacked .deckbar{padding-top:3px;gap:3px 6px}
+    .machine.is-stacked .deckbar .k{font-size:9px;line-height:1.2;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    .machine.is-stacked .step-cell{min-height:32px;gap:3px}
+    .machine.is-stacked .step-cell .k .sub{display:none}
+    .machine.is-stacked .step-cell .stepper{grid-template-columns:24px minmax(0,1fr) 24px;gap:2px}
+    .machine.is-stacked .step-cell .stepper button{width:24px;min-height:24px;font-size:10px}
+    .machine.is-stacked .step-cell .now{font-size:10px;padding:2px;line-height:1.25}
+    .machine.is-stacked .step-cell .latest{font-size:9px;padding:1px 4px}
+    /* 对手回合：候选区为空，收起；出牌人与从点数条选中的牌并成一行。 */
+    .machine.is-stacked .deckbar.is-opp-turn .play-picks-cell{display:none}
+    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell{
+      grid-column:1/-1;display:flex;align-items:center;gap:6px;min-height:24px}
+    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .k{margin:0;flex:0 0 auto}
+    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .chips{flex:1;min-width:0;
+      flex-wrap:nowrap;overflow:hidden}
+    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .chips .empty{display:none}
+    .machine.is-stacked .deckbar.is-opp-turn #opp-cell .k{display:none}
+    .machine.is-stacked .deckbar.is-opp-turn .keypad.compact{grid-template-columns:repeat(15,minmax(0,1fr));gap:2px}
+    .machine.is-stacked .deckbar.is-opp-turn .keypad.compact button{min-height:25px;padding:3px 0;font-size:9px}
+    .machine.is-stacked .chips{gap:3px}
+    .machine.is-stacked #play-chips i.c{min-width:18px;height:21px;padding:0 1px;font-size:10px}
+    .machine.is-stacked .picks{gap:3px}
+    .machine.is-stacked .picks button{font-size:9px;padding:1px 4px;gap:3px;box-shadow:none}
+    .machine.is-stacked .hint{margin:0;font-size:9px;line-height:1.35;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
     .machine .crt{padding:10px}
     .machine .crt-grid{gap:18px}
-    .touchbar{grid-template-columns:repeat(5,minmax(44px,1fr));padding:6px;gap:5px}
-    .touchbar button{font-size:10px;padding-inline:1px}
+    .touchbar{padding:4px 5px;gap:3px}
+    .touchbar button{font-size:9px;padding-inline:1px}
   }
 
 </style>
@@ -582,23 +679,32 @@
         <span class="grip-rail l" aria-hidden="true"></span>
         <span class="grip-rail r" aria-hidden="true"></span>
         <div class="scoreboard" id="scoreboard"></div>
-        <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>↑↓</b> 切机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
         <div class="deckbar" id="deckbar">
           <p class="handline" id="handline"></p>
-          <div class="cell">
+          <!-- 最左：出牌机会切换（本质是回放） -->
+          <div class="cell step-cell" id="step-cell">
+            <div class="k">出牌机会 <span class="sub">· 回放</span></div>
+            <div class="stepper">
+              <button type="button" id="step-prev" aria-label="上一次出牌机会" title="上一次出牌机会">←</button>
+              <span class="now" id="step-now">—</span>
+              <button type="button" id="step-next" aria-label="下一次出牌机会" title="下一次出牌机会">→</button>
+            </div>
+            <button type="button" class="latest" id="play-latest" hidden>回到最新 →</button>
+          </div>
+          <div class="cell play-selected-cell">
             <div class="k"><b id="play-who"></b> <span id="play-count"></span></div>
             <div class="chips" id="play-chips"></div>
           </div>
-          <div class="cell">
+          <div class="cell play-picks-cell">
             <div class="k">模型的候选（点一下直接记下这一手）</div>
             <div class="picks" id="play-picks"></div>
-            <button type="button" id="play-latest" hidden>→ 回到最新</button>
           </div>
-          <div class="cell" id="opp-cell" hidden>
+          <div class="cell cell-wide" id="opp-cell" hidden>
             <div class="k">录对手出的牌：从他还没现身的点数里点</div>
             <div class="keypad compact" id="play-keys"></div>
           </div>
           <p class="hint" id="play-hint"></p>
+          <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>↑↓</b> 切机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
         </div>
       </div>
 
@@ -648,8 +754,8 @@
   </section>
 </div>
 
-<!-- three 的 addons（GLTFLoader / RoomEnvironment）用裸名 "three" 导入，
-     靠 importmap 指回同一份 vendor，避免 GLTFLoader / RoomEnvironment 取到第二份 three -->
+<!-- three 的 addons（GLTFLoader）用裸名 "three" 导入，
+     靠 importmap 指回同一份 vendor，避免 GLTFLoader 取到第二份 three -->
 <script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
 <script type="module" src="app/main.js"></script>
 </body>
