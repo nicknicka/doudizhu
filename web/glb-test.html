@@ -37,10 +37,10 @@ scene.add(fill);
 
 const rig = new THREE.Group();
 scene.add(rig);
-let ready = false, spin = 0, tilt = -0.06, dist = 14;
+let ready = false, spin = 0, tilt = -0.06, dist = 14, body = null;
 
 new GLTFLoader().load('/assets/console-b.glb', (gltf) => {
-  const body = gltf.scene;
+  body = gltf.scene;
   body.scale.setScalar(1 / 20);            // 建模单位是 mm，缩到"整机宽 10 个单位"
   body.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(body);
@@ -89,6 +89,20 @@ renderer.setAnimationLoop(() => {
 window.__glbPage = () => ready;   // 给验证脚本问"模型到位了没"
 window.__glbStatus = () => ({ ready, environment: Boolean(scene.environment),
   toneMapping: renderer.toneMapping, toneMappingExposure: renderer.toneMappingExposure });
+// 正面外框在画布上的投影：验证脚本拿它当取样坐标系，跟主页面用同一套归一化坐标。
+window.__glbFrame = () => {
+  if (!ready) return null;
+  const box = new THREE.Box3().setFromObject(body);
+  const toPx = (x, y) => {
+    const p = new THREE.Vector3(x, y, box.max.z).project(camera);
+    return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight };
+  };
+  const pts = [toPx(box.min.x, box.min.y), toPx(box.max.x, box.min.y),
+               toPx(box.max.x, box.max.y), toPx(box.min.x, box.max.y)];
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+};
 </script>
 </body>
 </html>

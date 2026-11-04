@@ -124,8 +124,17 @@ function renderPlay(){
   $('play-pass').disabled = over || !latest;
   $('play-clear').disabled = !SEL.play.length;   // 清空只管选牌，历史局面也能用
   $('play-hint-btn').disabled = !(S.point && S.point.actions.length);
-  $('dpad-left').disabled = !S.meta.my_steps.some(st => st < v.step);
-  $('dpad-right').disabled = !S.meta.my_steps.some(st => st > v.step);
+  // 出牌机会切换：操作台最左的箱子与握把上的 ←/→ 同源（都是回放）
+  const steps = m.my_steps, at = steps.indexOf(v.step);
+  const canPrev = steps.some(st => st < v.step), canNext = steps.some(st => st > v.step);
+  $('dpad-left').disabled = !canPrev;
+  $('dpad-right').disabled = !canNext;
+  $('step-prev').disabled = !canPrev;
+  $('step-next').disabled = !canNext;
+  $('step-now').textContent = at >= 0
+    ? `第 ${at + 1} / ${steps.length} 次`
+    : `第 ${v.step} / ${m.total_steps} 手`;
+  $('step-cell').classList.toggle('is-history', !latest);
 
   const picks = S.point ? S.point.actions.slice(0, 6) : [];
   $('play-picks').innerHTML = picks.map((a,i)=>
@@ -138,6 +147,7 @@ function renderPlay(){
   // 录对手的牌：对手的牌是背面，只能从他还没现身的点数里点
   const oppTurn = latest && !over && !mine;
   $('opp-cell').hidden = !oppTurn;
+  $('deckbar').classList.toggle('is-opp-turn', oppTurn);
   if (oppTurn) keypadStub();
 
   $('play-latest').hidden = latest;
@@ -286,13 +296,19 @@ export function init(dependencies){
   });
 
   /* ---------- 十字键 ---------- */
+  // 当前位置可能不是"我方出牌机会"（录完一手落在最新局面就是），
+  // 所以按方向找最近的一个机会，而不是只认 indexOf —— 否则按钮亮着却点不动。
   const stepTo = delta => {
-    const list = S.meta.my_steps, i = list.indexOf(S.snap.step);
-    const next = list[i + delta];
+    const list = S.meta.my_steps, cur = S.snap.step;
+    const next = delta < 0
+      ? [...list].reverse().find(st => st < cur)
+      : list.find(st => st > cur);
     if (next !== undefined) deps.refresh(next);
   };
   $('dpad-left').addEventListener('click', () => stepTo(-1));
   $('dpad-right').addEventListener('click', () => stepTo(1));
+  $('step-prev').addEventListener('click', () => stepTo(-1));
+  $('step-next').addEventListener('click', () => stepTo(1));
   const setBar = mode => { S.barMode = mode; deps.renderBar(); renderPlay(); };
   $('dpad-up').addEventListener('click', () => setBar('count'));
   $('dpad-down').addEventListener('click', () => setBar('prob'));

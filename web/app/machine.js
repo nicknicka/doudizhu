@@ -3,7 +3,6 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
-import { RoomEnvironment } from '../vendor/three/examples/jsm/environments/RoomEnvironment.js';
 import { reduce } from './state.js';
 import { NAME } from './labels.js';
 
@@ -28,7 +27,7 @@ let canvas, stage, overlayHook;
 let renderer, scene, camera, rig, body, screenGroup, screenMesh, screenMat;
 let tableScene, tableCam, rt;
 let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, cardGeo;
-let handMeshes = [], handHits = [], hitGeo, hitMat;
+let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
 let screenSize = new THREE.Vector2(0.001, 0.001), screenPx = null;
 let buttons = [], buttonZones = [], modelSize = new THREE.Vector3(10, 4.2, 1.0);
 let screenCenter = new THREE.Vector3();
@@ -38,7 +37,7 @@ let pointerTarget = { x: 0, y: 0 }, view = { x: 0, y: 0 };
 let parallaxRunning = false, parallaxStart = 0;
 let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
-let nodes = [], buttonsVisible = false, ibl = false;
+let nodes = [], buttonsVisible = false, contactShadow = null;
 let frameCount = 0, renderQueued = false, dirty = true;
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -73,14 +72,15 @@ function faceTexture(rank){
   g.fillStyle = cssVar('--ground'); g.fillRect(0, 0, 52, 74);
   g.strokeStyle = cssVar('--ink'); g.lineWidth = 3;
   g.strokeRect(1.5, 1.5, 49, 71);
-  const label = NAME[rank] || rank;
-  const cjk = label.length > 1 && !/^[0-9]+$/.test(label);
+  // 手牌叠扇后只露出左侧约半张牌。点数必须落在这条可见带里，
+  // 并且把 10 缩成两字符宽、王缩成小/大，避免只露出半个字。
+  const label = { T: '10', B: '小', R: '大' }[rank] || NAME[rank] || rank;
   g.fillStyle = cssVar('--ink');
   g.textAlign = 'left'; g.textBaseline = 'top';
-  g.font = `${label.length > 1 ? (cjk ? 27 : 22) : 40}px Pixel, monospace`;
-  g.fillText(label, 4, 1);
-  g.font = '18px Pixel, monospace';
-  g.fillText('♠', 5, 38);
+  g.font = `${label.length > 1 ? 18 : 24}px Pixel, monospace`;
+  g.fillText(label, 3, 3);
+  g.font = '16px Pixel, monospace';
+  g.fillText('♠', 5, 37);
   return asTexture(c);
 }
 function backTexture(){
@@ -174,7 +174,10 @@ function layRow(ranks, x, z, faceUp, tilt, spacing, scale = 1, track = false,
       hit.position.set(px, lift, pz);
       hit.rotation.set(tilt, yaw, roll, 'YXZ');
       hit.scale.setScalar(scale);
-      hit.userData = { handIndex: offset + i };
+      // 手牌是叠扇：牌 i 的可见部分被右邻压住，投影点必须落在可见带内，
+      // 否则落点会命中的右邻（拾取与点击错位）。
+      hit.userData = { handIndex: offset + i,
+                       visibleShift: n > 1 ? (spacing - CARD_W * scale) / 2 : 0 };
       handHits.push(hit);
       cardGroup.add(hit);
     }
@@ -191,14 +194,32 @@ function drawCards(){
     const place = SEAT_3D[rel] || SEAT_3D.down;
     if (rel === 'me'){
       const hand = lastSnap.my_hand || [];
-      handMeshes = []; handHits = [];
-      const n = Math.max(hand.length, 1);
-      const per = (n - 1) * 0.46 + 1;
-      const szMax = 13.0 / (CARD_W * per);
-      const sz = Math.max(narrowHand ? 1.26 : 1.22,
-                          tinyHand ? Math.min(2.10, szMax) : 0);
-      const gap = n > 1 ? CARD_W * sz * 0.46 : 0;
-      layRow(hand, place.x, place.z, true, HAND_TILT, gap, sz, true, 0, -0.018);
+      handMeshes = []; handHits = []; handRows = [];
+      if (tinyHand && hand.length > 9){
+        // 420px 下 17 张牌塞单排时每张只露约 11px，点数必然糊成一条。
+        // 分成 9+8 两排，索引仍按原手牌顺序连续；前排靠近玩家，后排靠桌心。
+        const split = Math.ceil(hand.length / 2);
+        const sz = 2.20;
+        const gap = CARD_W * sz * 0.62;
+        const rows = [
+          { cards: hand.slice(0, split), offset: 0, z: place.z + 0.86 },
+          { cards: hand.slice(split), offset: split, z: place.z - 0.86 },
+        ];
+        for (const row of rows){
+          layRow(row.cards, place.x, row.z, true, HAND_TILT, gap, sz, true,
+                 row.offset, -0.012);
+          handRows.push({ start: row.offset, count: row.cards.length });
+        }
+      } else {
+        const n = Math.max(hand.length, 1);
+        const per = (n - 1) * 0.46 + 1;
+        const szMax = 13.0 / (CARD_W * per);
+        const sz = Math.max(narrowHand ? 1.26 : 1.22,
+                            tinyHand ? Math.min(2.10, szMax) : 0);
+        const gap = n > 1 ? CARD_W * sz * 0.46 : 0;
+        layRow(hand, place.x, place.z, true, HAND_TILT, gap, sz, true, 0, -0.018);
+        handRows.push({ start: 0, count: hand.length });
+      }
     } else {
       const back = Math.min(lastSnap.remaining[player], MAX_BACKS);
       const dir = rel === 'up' ? 1 : -1;
@@ -213,7 +234,7 @@ function drawCards(){
   const want = 0.86 * trickScale;
   const fit = trick.length > 1 ? 13.0 / (trick.length - 1) : want;
   const trickGap = Math.max(cardW * 0.46, Math.min(want, fit));
-  layRow(trick, 0, tinyHand ? 0.95 : (narrowHand ? 0.55 : 1.45),
+  layRow(trick, 0, tinyHand ? -1.10 : (narrowHand ? 0.55 : 1.45),
          true, TRICK_TILT, trickGap, trickScale, false, 0, -0.02);
 }
 
@@ -459,15 +480,43 @@ function resize(w, h){
   requestRender();
 }
 
-/* ---------- 模型 ---------- */
-function setupEnvironment(){
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const room = new RoomEnvironment();
-  scene.environment = pmrem.fromScene(room, 0.04).texture;
-  scene.environmentIntensity = 1.0;
-  pmrem.dispose();
-  ibl = true;
+/* ---------- 机底接触阴影 ---------- */
+// ADR-0004 允许的唯一额外层：不改材质响应，只在机身下面压一块软贴片。
+function contactShadowTexture(){
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(128, 64, 0, 128, 64, 126);
+  grd.addColorStop(0, 'rgba(20,19,16,0.30)');
+  grd.addColorStop(0.45, 'rgba(20,19,16,0.13)');
+  grd.addColorStop(1, 'rgba(20,19,16,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
+function makeContactShadow(){
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: contactShadowTexture(), transparent: true,
+      depthWrite: false, toneMapped: false }),
+  );
+  mesh.name = 'ContactShadow';
+  mesh.visible = false;
+  return mesh;
+}
+function placeContactShadow(box){
+  if (!contactShadow) return;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const w = size.x * 1.02, h = size.y * 0.26;
+  contactShadow.scale.set(w, h, 1);
+  contactShadow.position.set(center.x, box.min.y - h * 0.16, box.min.z - 0.42);
+  contactShadow.visible = true;
+}
+
+/* ---------- 模型 ---------- */
 function installModel(gltf){
   body = gltf.scene;
   body.name = 'ConsoleB';
@@ -508,16 +557,23 @@ function installModel(gltf){
   screenGroup = nextScreenGroup;
   screenMesh = nextScreenMesh;
   modelSize = nextModelSize;
+  placeContactShadow(bb);
   ready = true; status = 'ready'; error = '';
   resize(stageW, stageH);
+  // installModel 时画布尺寸通常没变，resize 会提前返回；这里必须立即布局，
+  // 否则 ready 后到入场动画结束前，屏与键热区都会短暂读成空。
+  relayout();
   if (!reduce && window.gsap){
+    // 入场缩放只改变投影，不会重新 emit；结束时补一次 relayout，
+    // 让座位标签/热区/机下托盘的贴合都用"落定后"的 rect，而不是动画中途的。
     gsap.from(rig.scale, { x: 0.94, y: 0.94, z: 0.94, duration: 0.8,
-      ease: 'power2.out', onUpdate: requestRender });
+      ease: 'power2.out', onUpdate: requestRender, onComplete: relayout });
   }
 }
 function loadModel(){
   ready = false; status = 'loading'; error = '';
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
+  if (contactShadow) contactShadow.visible = false;
   if (body && rig){ rig.remove(body); body = null; screenGroup = null; screenMesh = null; }
   emit();
   requestRender();
@@ -557,7 +613,7 @@ export function init(canvasEl, hook){
   }
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   renderer.setPixelRatio(dpr);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;   // ADR-0004：与 /glb 一致，不套 ACES
   renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = false;
@@ -568,11 +624,12 @@ export function init(canvasEl, hook){
   rig = new THREE.Group();
   rig.rotation.x = TILT;
   scene.add(rig);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  const key = new THREE.DirectionalLight(0xfff4e0, 2.0); key.position.set(-6, 9, 12); scene.add(key);
-  const fill = new THREE.DirectionalLight(0xdfe8ff, 0.65); fill.position.set(8, 3, 9); scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffffff, 0.85); rim.position.set(0, -6, -8); scene.add(rim);
-  setupEnvironment();
+  contactShadow = makeContactShadow();
+  rig.add(contactShadow);
+  // ADR-0004：沿用 /glb 的三盏基础灯，不开环境贴图、不加 rim 光。
+  scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-4, 6, 8); scene.add(key);
+  const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5); fill.position.set(6, 2, 6); scene.add(fill);
 
   tableScene = new THREE.Scene();
   tableScene.background = hex('--side-a').clone().offsetHSL(0, 0, -0.16);
@@ -704,20 +761,42 @@ export function handPoints(){
   tableScene.updateMatrixWorld(true);
   return handHits.map(hit => {
     const v = hit.position.clone();
+    const shift = hit.userData.visibleShift;
+    if (shift) v.add(tmp.set(shift, 0, 0).applyQuaternion(hit.quaternion));
     cardGroup.localToWorld(v);
     const n = v.project(tableCam);
     return { i: hit.userData.handIndex,
              ...projectScreenLocal(n.x * screenSize.x / 2, n.y * screenSize.y / 2) };
   }).sort((a, b) => a.i - b.i);
 }
+const TONE_MAPPING_NAMES = ['None', 'Linear', 'Reinhard', 'Cineon', 'ACESFilmic'];
 export function machineStatus(){
+  // ADR-0004：验收要能直接读到环境贴图、色调映射、曝光和三盏灯的参数。
+  const lights = [];
+  if (scene) scene.traverse(o => {
+    if (!o.isLight) return;
+    lights.push({ type: o.type, color: '#' + o.color.getHexString(), intensity: o.intensity,
+                  position: [o.position.x, o.position.y, o.position.z] });
+  });
+  let tablet = null;
+  if (ready && body && camera){
+    camera.updateMatrixWorld(true);
+    body.updateWorldMatrix(true, true);
+    tablet = projectFrontBox(modelBox(body));
+  }
   return {
-    source: 'glb', status, ready, error, nodes, buttonsVisible, ibl,
+    source: 'glb', status, ready, error, nodes, buttonsVisible,
+    environment: !!(scene && scene.environment),
     toneMapping: renderer ? renderer.toneMapping : null,
-    toneMappingName: renderer && renderer.toneMapping === THREE.ACESFilmicToneMapping
-      ? 'ACESFilmic' : renderer ? String(renderer.toneMapping) : null,
+    toneMappingName: renderer
+      ? (TONE_MAPPING_NAMES[renderer.toneMapping] ?? String(renderer.toneMapping)) : null,
+    toneMappingExposure: renderer ? renderer.toneMappingExposure : null,
+    lights,
+    contactShadow: !!(contactShadow && contactShadow.visible),
+    tablet,
     screen: screenPx, screenSize: { w: screenSize.x, h: screenSize.y },
     buttons: buttons.map(b => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h })),
+    handRows,
   };
 }
 export function frameStats(){

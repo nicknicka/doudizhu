@@ -119,7 +119,8 @@ function setMachineError(status, error){
   const box = $('machine-error');
   if (!box) return;
   const failed = status === 'error' || status === 'no-webgl';
-  box.hidden = status === 'ready';
+  // 只有真的失败才亮这块面板：加载中亮出来会显示「3D 机身不可用」，与事实矛盾。
+  box.hidden = !failed;
   $('machine-retry').hidden = !failed;       // loading 时隐藏，避免重复发起加载
   $('machine-error-text').textContent = failed
     ? (error || '机身加载失败。')
@@ -150,6 +151,16 @@ function place(payload){
   setMachineError(status, error);
   placeHotspots(status === 'ready' ? buttons : []);
 
+  // 操作台托盘贴合机身下沿：机身底边（stage 局部坐标）到 stage 底还有一段空画布，
+  // 用等量的负 margin 把它收掉（留 8px 给机底接触阴影），托盘就成了机身下沿的延伸。
+  const tb = rects.tablet;
+  if (tb){
+    const lip = Math.max(0, stage.clientHeight - (tb.y + tb.h) - 8);
+    machineEl.style.setProperty('--lip', `${lip.toFixed(1)}px`);
+  } else {
+    machineEl.style.removeProperty('--lip');
+  }
+
   const s = rects.screen;
   if (!s) return;
   const ov = $('overlay');
@@ -164,13 +175,14 @@ function place(payload){
   const top = rects.top;
   const counter = $('counter');
   if (top){
-    const th = Math.min(top.h * 0.82, 64);
+    // 窄屏机顶条必须两行排 15 格；给足高度，文字才不会被压成糊线。
+    const th = Math.max(stacked ? 26 : 0, Math.min(top.h * 0.82, 64));
     counter.hidden = false;
     counter.style.left = `${top.x}px`;
     counter.style.width = `${top.w}px`;
     counter.style.top = `${top.y + (top.h - th) / 2}px`;
     counter.style.height = `${th}px`;
-    counter.style.fontSize = `${Math.max(8, Math.min(15, th * 0.34)).toFixed(1)}px`;
+    counter.style.fontSize = `${Math.max(stacked ? 10 : 8, Math.min(15, th * 0.34)).toFixed(1)}px`;
   } else {
     counter.hidden = true;
   }
