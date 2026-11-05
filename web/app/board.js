@@ -155,16 +155,6 @@ function place(payload){
   setMachineError(status, error);
   placeHotspots(status === 'ready' ? buttons : []);
 
-  // 操作台托盘贴合机身下沿：机身底边（stage 局部坐标）到 stage 底还有一段空画布，
-  // 用等量的负 margin 把它收掉（留 8px 给机底接触阴影），托盘就成了机身下沿的延伸。
-  const tb = rects.tablet;
-  if (tb){
-    const lip = Math.max(0, stage.clientHeight - (tb.y + tb.h) - 8);
-    machineEl.style.setProperty('--lip', `${lip.toFixed(1)}px`);
-  } else {
-    machineEl.style.removeProperty('--lip');
-  }
-
   const s = rects.screen;
   if (!s) return;
   const ov = $('overlay');

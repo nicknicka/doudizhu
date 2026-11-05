@@ -69,8 +69,69 @@ const clickCard = async (page, k) => {
   pt = (await handPts(page))[k];
   await page.mouse.click(box.x + pt.x, box.y + pt.y);
 };
+
+// 极简模式下操作台是 dock 上沿的浮层，默认收起；需要操作前先展开。
+// 展开的是 #panel（不是机身），所以机身版式不受它影响。
+const openDeck = async page => {
+  const opened = await page.evaluate(() => {
+    const p = document.getElementById('panel');
+    if (!p) return true;
+    if (p.classList.contains('is-open')) return true;
+    p.classList.add('is-open');
+    return false;
+  });
+  if (!opened) await page.waitForTimeout(150);
+  await page.waitForTimeout(400); // 等浮层拉起动画落位
+};
 const machineStatus = page => page.evaluate(async () =>
   (await import('/app/machine.js')).machineStatus());
+
+// 操作台浮层的版式硬约束：接在 dock 上沿之上、不压真屏、不出屏、内容不外溢。
+// 机身投影的下沿允许被浮层压掉一点点（浮层是立体的一块，最下沿的机座压边 <=24px），
+// 但真屏必须完整露出 —— 展开态只平移不缩放，所以 stage + 投影坐标是 1:1 的。
+const checkPanelLayout = async (page, label) => {
+  const geo = await page.evaluate(async () => {
+    const rect = el => el.getBoundingClientRect();
+    const stage = rect(document.getElementById('stage'));
+    const panel = rect(document.getElementById('panel'));
+    const dock = rect(document.getElementById('dock'));
+    const deck = rect(document.getElementById('deckbar'));
+    const ms = (await import('/app/machine.js')).machineStatus();
+    const scr = ms.screen || {}, tab = ms.tablet || {};
+    return {
+      open: document.getElementById('panel').classList.contains('is-open'),
+      panel: panel.toJSON(), dock: dock.toJSON(), deck: deck.toJSON(),
+      scrollH: document.getElementById('panel').scrollHeight,
+      clientH: document.getElementById('panel').clientHeight,
+      screenBottom: stage.top + (scr.y || 0) + (scr.h || 0),
+      machineBottom: tab.h ? stage.top + tab.y + tab.h : null,
+      vw: innerWidth,
+    };
+  });
+  if (!geo.open) problems.push(`${label}：操作台浮层没有展开`);
+  if (geo.panel.bottom > geo.dock.top + 1) {
+    problems.push(`${label}：操作台浮层没接在 dock 上沿之上`
+      + `（浮层底 ${geo.panel.bottom.toFixed(1)} > dock 顶 ${geo.dock.top.toFixed(1)}）`);
+  }
+  if (geo.panel.top < geo.screenBottom - 1) {
+    problems.push(`${label}：操作台浮层压住真屏`
+      + `（浮层顶 ${geo.panel.top.toFixed(1)} < 真屏底 ${geo.screenBottom.toFixed(1)}）`);
+  }
+  if (geo.machineBottom !== null && geo.panel.top < geo.machineBottom - 24) {
+    problems.push(`${label}：操作台浮层把机身投影吃掉了`
+      + `（浮层顶 ${geo.panel.top.toFixed(1)}，机底 ${geo.machineBottom.toFixed(1)}）`);
+  }
+  if (geo.panel.left < -1 || geo.panel.right > geo.vw + 1) {
+    problems.push(`${label}：操作台浮层横向出屏`
+      + `（${geo.panel.left.toFixed(1)}..${geo.panel.right.toFixed(1)}，视口宽 ${geo.vw}）`);
+  }
+  if (geo.deck.left < geo.panel.left - 1 || geo.deck.right > geo.panel.right + 1) {
+    problems.push(`${label}：操作台内容横向溢出了浮层`);
+  }
+  if (geo.scrollH > geo.clientH + 1) {
+    problems.push(`${label}：操作台内容被浮层裁掉（需要滚动 ${geo.scrollH - geo.clientH}px）`);
+  }
+};
 const frameStats = page => page.evaluate(async () =>
   (await import('/app/machine.js')).frameStats());
 
@@ -407,18 +468,19 @@ try {
   if (deck.first !== 'step-cell') {
     problems.push(`操作台最左的箱子不是出牌机会：${deck.first || '(空)'}（${deck.ids.join(',')}）`);
   }
-  const seam = await page.evaluate(() => {
-    const stage = document.getElementById('stage').getBoundingClientRect();
-    const chassis = document.getElementById('chassis').getBoundingClientRect();
-    return { stageTop: stage.top, chassisTop: chassis.top,
-             lip: document.getElementById('board').style.getPropertyValue('--lip') };
+  const deckState = await page.evaluate(() => {
+    const p = document.getElementById('panel');
+    const cs = getComputedStyle(p);
+    return { open: p.classList.contains('is-open'), visibility: cs.visibility,
+             opacity: Number(cs.opacity), pointerEvents: cs.pointerEvents,
+             chassisTop: document.getElementById('chassis').getBoundingClientRect().top };
   });
-  const tab = (await machineStatus(page)).tablet;
-  if (!tab) problems.push('量不到机身取景框，操作台贴合判定不成立');
-  else {
-    const gap = seam.chassisTop - (seam.stageTop + tab.y + tab.h);
-    if (gap > 12) problems.push(`操作台没贴住机身下沿：缝隙 ${gap.toFixed(1)}px（上限 12px，lip=${seam.lip}）`);
-    if (gap < -1) problems.push(`操作台压进了机身：${gap.toFixed(1)}px`);
+  if (deckState.open || deckState.visibility === 'visible'
+      || deckState.opacity > 0.01 || deckState.pointerEvents !== 'none') {
+    problems.push('操作台浮层默认没有收起：应该只留 dock 上的「出牌机会」入口');
+  }
+  if (deckState.chassisTop !== 0) {
+    problems.push(`极简态宽屏不该再显示机身壳体：chassis 顶 ${deckState.chassisTop.toFixed(1)}px`);
   }
 
   // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
@@ -492,7 +554,10 @@ try {
   if (panelRects.panel.left < panelRects.screen.right) problems.push('宽屏数据面板不在机身右侧');
   await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
 
-  // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
+  // 极简模式下操作台默认收起，先展开才能操作内部控件
+  await openDeck(page);
+  await checkPanelLayout(page, '宽屏');
+    // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
   // 选中模型是"按点数计数、从左往右抬起"的，所以要点那张真正会被抬起的牌
   // （它自己的点数在它左边没出现过），否则点在重复点数的第二/三张上是"再加一张"。
   const hand = await page.evaluate(async () => (await import('/app/state.js')).S.snap.my_hand);
@@ -595,6 +660,19 @@ try {
   await page.waitForTimeout(1600);
   if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
   if (!(await text(page, '#board')).includes('该你出')) problems.push('开新局后第一手不是我方');
+
+  // 20 张满手牌也必须每一张都能从屏里点中；扇面外缘不能跑出可拾取区域。
+  const fullHand = await page.evaluate(async () => {
+    const m = await import('/app/machine.js');
+    const { S } = await import('/app/state.js');
+    const hits = m.handPoints().map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y) }));
+    return { n: S.snap.my_hand.length, pts: hits.length,
+             miss: hits.filter(p => p.i !== p.pick) };
+  });
+  if (fullHand.n !== 20 || fullHand.pts !== fullHand.n || fullHand.miss.length) {
+    problems.push(`20 张满手牌拾取错位：${fullHand.pts}/${fullHand.n} 个点，`
+      + `错 ${fullHand.miss.length} 张 ${JSON.stringify(fullHand.miss)}`);
+  }
 
   // #25 服务端拒掉一手时，已经选中的牌不能被清空（点了两张不同点数，凑不成牌型）
   {
@@ -747,19 +825,19 @@ try {
   if (JSON.stringify(narrowLayout.counterRows) !== JSON.stringify([8, 7])) {
     problems.push(`420px 机顶记牌不是 8+7 两行：${narrowLayout.counterRows.join('+')}`);
   }
+  // 操作台已经脱离机身，窄屏只剩一条计分板收在壳体里；
+  // 浮层本身由 checkPanelLayout 保证接在 dock 上沿之上。
+  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
+      || narrowLayout.scoreBottom > narrowLayout.chassisBottom + 1) {
+    problems.push('窄屏计分板没有收进机身壳体');
+  }
   if (narrowLayout.scoreBottom > narrowLayout.deckTop + 1) {
     problems.push(`窄屏计分板与操作台相撞：${narrowLayout.scoreBottom.toFixed(1)} > ${narrowLayout.deckTop.toFixed(1)}`);
   }
   if (narrowLayout.deckBottom > narrowLayout.touchTop + 1) {
     problems.push(`窄屏操作台与触控条相撞：${narrowLayout.deckBottom.toFixed(1)} > ${narrowLayout.touchTop.toFixed(1)}`);
   }
-  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
-      || narrowLayout.deckBottom > narrowLayout.chassisBottom + 1) {
-    problems.push('窄屏计分板/操作台没有收进机身壳体');
-  }
-  if (Math.abs(narrowLayout.touchTop - narrowLayout.chassisBottom) > 2) {
-    problems.push(`窄屏触控条没有从机身底边接出：差 ${(narrowLayout.touchTop - narrowLayout.chassisBottom).toFixed(1)}px`);
-  }
+  await checkPanelLayout(page, '窄屏');
   if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
     problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`);
   }
