@@ -247,13 +247,15 @@ async function goToMyTurn(page, label){
 // 机身取景会随布局和相机收敛变化，所以"取景矩形 + 像素"必须在同一次 evaluate 里读完，
 // 分两次读会错位。色块靠极值找（金取最黄、靛蓝取最暗），但打分的是 5×5 中位数本身 ——
 // 零散的抗锯齿暗点会在中位数里被淘汰，只有真是整块色的位置才留得下。
+// 靛蓝描边只有几个像素宽，锚点必须落在足够宽的斜边段上；机身正中的右侧轮廓更细，
+// 5×5 里大部分是背景，取不到描边本身。
 const FIDELITY_PROBES = [
   { id: '壳-左',   fx: 0.100, fy: 0.72, mode: 'flat' },
   { id: '壳-右',   fx: 0.865, fy: 0.72, mode: 'flat' },
   { id: '饰条-左', fx: 0.020, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
   { id: '饰条-右', fx: 0.980, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
-  { id: '靛蓝-左', fx: 0.021, fy: 0.20, mode: 'indigo', wx: 0.010, wy: 0.014 },
-  { id: '靛蓝-右', fx: 0.986, fy: 0.50, mode: 'indigo', wx: 0.016, wy: 0.018 },
+  { id: '靛蓝-左上', fx: 0.021, fy: 0.20, mode: 'indigo', wx: 0.010, wy: 0.014 },
+  { id: '靛蓝-右下', fx: 0.979, fy: 0.80, mode: 'indigo', wx: 0.010, wy: 0.014 },
 ];
 const FIDELITY_MAX_DIFF = 8;    // 单通道：必须过
 const FIDELITY_MEAN_DIFF = 4;   // 六个探针的均值：参考线
@@ -299,14 +301,21 @@ const sampleFidelity = (page, sel) => page.evaluate(async ({ sel, probes }) => {
     const wx = Math.max(0, Math.round(frame.w * (s.wx || 0)));
     const wy = Math.max(0, Math.round(frame.h * (s.wy || 0)));
     let best = null;
+    const hits = [];
     for (let j = -wy; j <= wy; j++) for (let i = -wx; i <= wx; i++) {
       const x = Math.round(x0) + i, y = Math.round(y0) + j;
       const pm = patch(x, y), sc = score(pm, s.mode);
       if (sc === null) continue;
+      hits.push(pm);
       const d = Math.hypot(i, j);
       if (!best || sc > best.sc || (sc === best.sc && d < best.d)) best = { sc, d, p5: pm };
     }
-    out.push({ id: s.id, p5: best ? best.p5 : null });
+    // 靛蓝描边只有几个像素宽：取极值会各自锁到两侧的抗锯齿过渡（主页面压着透明底、
+    // /glb 压着米色底），两边必然不同。取窗口内全部命中像素的中位色，量的才是描边本身。
+    const p5 = s.mode === 'indigo' && hits.length
+      ? [0, 1, 2].map(k => median(hits.map(p => p[k])))
+      : (best ? best.p5 : null);
+    out.push({ id: s.id, p5 });
   }
   return { frame, out };
 }, { sel, probes: FIDELITY_PROBES });
