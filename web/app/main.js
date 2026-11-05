@@ -15,6 +15,7 @@ function renderAll(){
   board.render();
   consolePanel.render();
   panels.render();
+  updateStatusStrip();
 }
 
 async function refresh(target, note){
@@ -85,24 +86,24 @@ function stepTo(delta){
   if (next !== undefined) refresh(next);
 }
 
-/* ---------- 工具条 ---------- */
-$('new-toggle').addEventListener('click', () => {
+/* ---------- 工具条：入口全部收在底部 dock ---------- */
+const toggleNewPanel = () => {
   if (consolePanel.isNewPanelOpen()) consolePanel.hideNewPanel();
   else consolePanel.showNewPanel();
-});
+};
 // 左握把那个方键：开新一轮（在屏幕里录入，不跳页）
 $('new-round').addEventListener('click', () => consolePanel.showNewPanel());
 $('newgame-close').addEventListener('click', () => consolePanel.hideNewPanel());
 $('undo').addEventListener('click', () =>
   mutate('/api/game/undo', {record:S.record}, '已撤销最后一手。'));
-$('export').addEventListener('click', () => {
+const exportRecord = () => {
   const blob = new Blob([JSON.stringify(S.record, null, 2) + '\n'], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${S.record.record_id || 'record'}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-});
+};
 
 /* ---------- 打开记录 ---------- */
 async function readFile(file){
@@ -114,7 +115,6 @@ async function readFile(file){
     setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
   }
 }
-$('file').addEventListener('change', e => { readFile(e.target.files[0]); e.target.value = ''; });
 document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
 document.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
 document.addEventListener('drop', e => {
@@ -157,11 +157,11 @@ const closeData = () => {
   crtPanel && crtPanel.classList.remove('is-open');
   machineEl && machineEl.classList.remove('panel-open');
 };
-$('data-toggle').addEventListener('click', () => {
+const toggleDataPanel = () => {
   crtPanel.classList.toggle('is-open');
   machineEl.classList.toggle('panel-open', crtPanel.classList.contains('is-open'));
   if (crtPanel.classList.contains('is-open')) panels.resize();
-});
+};
 $('data-close').addEventListener('click', closeData);
 addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -267,11 +267,7 @@ addEventListener('keydown', e => {
 });
 
 
-/* ---------- 极简模式：首屏只剩机身 + 底部 Dock ---------- */
-document.body.classList.add('is-minimal');
-// 把数据面板按钮移到 body 直接子级，脱离 .page 的 stacking context，确保可点击
-const dataToggle = $('data-toggle');
-if (dataToggle) document.body.appendChild(dataToggle);
+/* ---------- 操作台与状态带：首屏只剩机身 + 底部 dock ---------- */
 
 // 操作台：状态行常驻在 dock，deckbar 作为独立浮层从 dock 上沿拉起
 const panel = $('panel');
@@ -288,12 +284,6 @@ function updateStatusStrip(){
   stripSub.textContent = `全局第 ${v.step}/${m.total_steps} 手`
     + (k >= 0 ? ` · 我的第 ${k + 1} 次出牌机会` : '');
 }
-// 用 MutationObserver 监听 #who 的变化
-const whoEl = $('who');
-if (whoEl){
-  new MutationObserver(updateStatusStrip).observe(whoEl, { childList: true, characterData: true, subtree: true });
-}
-
 // Dock 按钮事件
 const dockMap = {
   'dock-steps': () => {
@@ -301,9 +291,9 @@ const dockMap = {
     panel?.classList.toggle('is-open');
     syncDockActive();
   },
-  'dock-data': () => { $('data-toggle')?.click(); },
-  'dock-new': () => { $('new-toggle')?.click(); },
-  'dock-export': () => { $('export')?.click(); },
+  'dock-data': toggleDataPanel,
+  'dock-new': toggleNewPanel,
+  'dock-export': exportRecord,
 };
 document.querySelectorAll('.dock-btn').forEach(btn => {
   const id = btn.id;
@@ -313,14 +303,8 @@ document.querySelectorAll('.dock-btn').forEach(btn => {
       if (e.target.tagName !== 'INPUT') fileInput?.click();
     });
     fileInput?.addEventListener('change', e => {
-      // 转发给页面原始的 file input
-      const origFile = $('file');
-      if (origFile && e.target.files?.length){
-        const dt = new DataTransfer();
-        dt.items.add(e.target.files[0]);
-        origFile.files = dt.files;
-        origFile.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      readFile(e.target.files[0]);
+      e.target.value = '';
     });
     return;
   }
