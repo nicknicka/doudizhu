@@ -876,13 +876,83 @@ try {
   }
 
   // 交互 4：在屏幕里点一张自己的牌 → 出牌（领出时单张一定合法）
+  // 顺带验 #48：点的若是同点数的**非首张**，出牌区必须显示被点那张的花色，
+  // 而不是"按下标/排序猜"的首张（只有点非首张，两种结果才不同，才验得出接线）。
   const n4 = (await handPts(page)).length;
-  await clickCard(page, Math.round((n4 - 1) * 0.5));
+  const faceCheck = await page.evaluate(async () => {
+    const { S } = await import('/app/state.js');
+    const vc = await import('/app/virtual-cards.js');
+    const hand = S.snap.my_hand;
+    const played = (S.snap.played || {})[S.snap.me] || [];
+    const cards = vc.handCards(S.record.record_id, hand, vc.rankCounts(played));
+    const seen = {};
+    let k = -1;
+    for (let i = 0; i < hand.length; i++){
+      const j = seen[hand[i]] || 0; seen[hand[i]] = j + 1;
+      if (j > 0 && hand[i] !== 'B' && hand[i] !== 'R'){ k = i; break; }
+    }
+    let other = -1;
+    for (let i = 0; i < hand.length; i++) if (hand[i] !== hand[k]){ other = i; break; }
+    return {
+      k, other,
+      rank: k >= 0 ? hand[k] : null,
+      otherRank: other >= 0 ? hand[other] : null,
+      suit: k >= 0 ? cards[k].suit : null,
+    };
+  });
+  await clickCard(page, faceCheck.k >= 0 ? faceCheck.k : Math.round((n4 - 1) * 0.5));
   await page.waitForTimeout(220);
   if (!(await page.locator('#play-chips i.c').count())) problems.push('轮到我方时，屏幕里点牌没选上');
+
+  // #48 回归（评审反例）：再加选一张别的点数，删掉它的牌片后，先点的那张同点数牌
+  // 身份不能丢 —— 旧实现用 adoptPlay() 按下标重排，会把身份挪回同点数的第一张。
+  if (faceCheck.k >= 0 && faceCheck.other >= 0) {
+    await clickCard(page, faceCheck.other);
+    await page.waitForTimeout(220);
+    const both = await page.locator('#play-chips i.c').count();
+    if (both !== 2) problems.push(`#48 删牌片回归：想选两张不同点数的牌，实际选上 ${both} 张`);
+    else {
+      const drop = await page.evaluate(async rank => {
+        const { SEL } = await import('/app/state.js');
+        const { RANKS } = await import('/app/labels.js');
+        return SEL.play.slice().sort((a, b) => RANKS.indexOf(a) - RANKS.indexOf(b)).indexOf(rank);
+      }, faceCheck.otherRank);
+      if (drop < 0) problems.push('#48 删牌片回归：找不到另一张点数的牌片');
+      else {
+        await page.click(`#play-chips [data-drop="${drop}"]`);
+        await page.waitForTimeout(220);
+        const left = await page.locator('#play-chips i.c').count();
+        if (left !== 1) problems.push(`#48 删牌片回归：删掉另一张后应剩 1 张，实际 ${left} 张`);
+      }
+    }
+  }
+  // 回归步骤若没把选择收敛到一张，先清空再只点最初那张，保证主断言能独立跑。
+  if ((await page.locator('#play-chips i.c').count()) !== 1) {
+    await page.click('#play-clear');
+    await page.waitForTimeout(150);
+    await clickCard(page, faceCheck.k >= 0 ? faceCheck.k : Math.round((n4 - 1) * 0.5));
+    await page.waitForTimeout(220);
+  }
   await page.click('#play-go');
   await page.waitForTimeout(1400);
   if (!(await text(page, '#banner')).includes('已录')) problems.push('录我方的牌没有反馈');
+  if (faceCheck.k >= 0) {
+    const got = await page.evaluate(async rank => {
+      const { S } = await import('/app/state.js');
+      const vc = await import('/app/virtual-cards.js');
+      const played = (S.snap.played || {})[S.snap.me] || [];
+      const trick = S.snap.last_move || [];
+      const mine = vc.isMyTrick(played, trick);
+      const suits = vc.trickCards(S.record.record_id, trick, vc.rankCounts(played), mine)
+                      .filter(c => c.rank === rank).map(c => c.suit);
+      return { mine, suits };
+    }, faceCheck.rank);
+    if (!got.mine) problems.push('刚打完一手，出牌区却不认这是我的牌');
+    if (!got.suits.includes(faceCheck.suit)) {
+      problems.push(`#48 出牌区花色没跟着被点的那张走：${faceCheck.rank} 点的是 ${faceCheck.suit}，`
+        + `出牌区给了 ${JSON.stringify(got.suits)}`);
+    }
+  }
 
   // 交互 5：轮到对手 → 出场"录对手牌"的点数条，且能选、受牌池上限约束
   if (!(await page.locator('#opp-cell').isVisible())) {

@@ -5,11 +5,26 @@
 // 每点数恰好四张，四个花色各用一次，整局 54 张的 (点数, 花色) 组合天然不重复。
 // 出现次序由调用方按「我已打出的牌 + 当前手牌」算好传进来。
 //
-// 这里全是纯函数，不碰 DOM，方便 node --test 直接验算法。
+// 算法是纯函数，不碰 DOM，方便 node --test 直接验算法；唯一的活状态是
+// **会话内的花色顺序**（SESSION）—— 我实际点出去的牌要把花色带进出牌区（#48），
+// 刷新页面 SESSION 就没了，回到按 record_id 确定性重推。
 
 // 只有四个代号与判定，人看的字形在 labels.js（SUIT_GLYPH）。
 export const SUITS = ['S', 'H', 'D', 'C'];          // 顺序只决定遍历次序，不代表大小
 const RED_SUITS = new Set(['H', 'D']);
+
+/* ---------- 会话内的花色顺序（#48） ----------
+   默认每个点数的四个花色就按 rankSuits 排；我点出去一张，就把那张的花色挪到
+   「我已打出」那一段的末尾，手里剩下的牌原地不动。只在内存里，不进牌局记录。 */
+const SESSION = new Map();                          // recordId -> { [rank]: suit[] }
+
+/** 清空会话：换记录、重开记录、测试用。刷新页面本来就没有了。 */
+export function resetSession(){ SESSION.clear(); }
+
+function sessionOrder(recordId, rank){
+  const m = SESSION.get(recordId);
+  return (m && m[rank]) || rankSuits(recordId, rank);
+}
 
 export function isRedSuit(suit){ return RED_SUITS.has(suit); }
 
@@ -36,7 +51,7 @@ export function rankSuits(recordId, rank){
  */
 export function suitOf(recordId, rank, k){
   if (rank === 'B' || rank === 'R') return null;
-  const order = rankSuits(recordId, rank);
+  const order = sessionOrder(recordId, rank);
   const i = ((k % order.length) + order.length) % order.length;
   return order[i];
 }
@@ -91,4 +106,41 @@ export function isMyTrick(played = [], trick = []){
   if (!trick.length || trick.length > played.length) return false;
   const from = played.length - trick.length;
   return trick.every((rank, i) => played[from + i] === rank);
+}
+
+/**
+ * 我打出当前手牌里的第 pickedIdx 张（下标集合）。被点中的那几张把花色带进出牌区，
+ * 手里剩下的牌保持原花色 —— 同点数有多张时，点哪张就是哪张，不按下标或排序猜。
+ *
+ * @param handRanks   出牌前的手牌（保持服务器给的顺序）
+ * @param playedCounts 出牌前我已打出的各点数张数
+ * @returns 撤回函数：服务端不认这一手时调一下，会话回到提交之前。
+ */
+export function commitPlay(recordId, handRanks = [], playedCounts = {}, pickedIdx = []){
+  const picked = new Set([...pickedIdx].filter(i => handRanks[i]));
+  if (!picked.size) return () => {};
+  let map = SESSION.get(recordId);
+  if (!map) SESSION.set(recordId, map = {});
+  const seen = {}, byRank = {};                     // byRank[rank] = 被点中的是手里第几张
+  handRanks.forEach((rank, i) => {
+    const j = seen[rank] || 0; seen[rank] = j + 1;
+    if (rank !== 'B' && rank !== 'R' && picked.has(i))
+      (byRank[rank] || (byRank[rank] = [])).push(j);
+  });
+  const before = {};
+  for (const rank of Object.keys(byRank)){
+    const order = (map[rank] || rankSuits(recordId, rank)).slice();
+    const p = playedCounts[rank] || 0, h = seen[rank];
+    // 前 p 张是已出区，不动；点中的挪到它末尾；手里的其余牌原地不动
+    const going = byRank[rank].map(j => order[p + j]);
+    const stay = order.slice(p, p + h).filter((_, j) => !byRank[rank].includes(j));
+    before[rank] = map[rank];
+    map[rank] = [...order.slice(0, p), ...going, ...stay, ...order.slice(p + h)];
+  }
+  return () => {
+    for (const rank of Object.keys(before)){
+      if (before[rank] === undefined) delete map[rank];
+      else map[rank] = before[rank];
+    }
+  };
 }

@@ -1,10 +1,10 @@
-// 展示层虚拟牌身份的算法单测。只测纯函数，不碰 DOM。
+// 展示层虚拟牌身份的单测：纯算法 + 会话内顺序（SESSION），不碰 DOM。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   SUITS, rankSuits, suitOf, handCards, trickCards, isMyTrick, rankCounts,
-  isRedSuit,
+  isRedSuit, commitPlay, resetSession,
 } from '../app/virtual-cards.js';
 
 const RANKS = ['3','4','5','6','7','8','9','T','J','Q','K','A','2'];
@@ -117,4 +117,66 @@ test('isMyTrick 只看我出牌记录的尾部', () => {
   assert.ok(!isMyTrick(['3', '5'], ['5', '5']));
   assert.ok(!isMyTrick([], ['5']));
   assert.ok(!isMyTrick(['5'], []));
+});
+
+/* ---------- #48：同一张虚拟牌从手牌跟到出牌区 ---------- */
+
+test('点出去的那张牌，花色跟着走进出牌区，手里的牌不跳', () => {
+  const id = 'follow-my-card';
+  resetSession();
+  const hand = ['5', '5', '5'];
+  const before = handCards(id, hand, {});                 // 出牌前三个花色各就各位
+  commitPlay(id, hand, {}, new Set([1]));                 // 点的是中间那张
+  const after = handCards(id, ['5', '5'], { 5: 1 });
+  const trick = trickCards(id, ['5'], { 5: 1 }, true);
+  assert.deepEqual(trick.map(c => c.suit), [before[1].suit], '出牌区要显示点到的那张');
+  assert.deepEqual(after.map(c => c.suit), [before[0].suit, before[2].suit], '没点的牌花色不许跳');
+});
+
+test('一次点出同点数多张，花色也整组跟着走', () => {
+  const id = 'follow-many';
+  resetSession();
+  const hand = ['5', '5', '5', '5'];
+  const before = handCards(id, hand, {});
+  commitPlay(id, hand, {}, new Set([0, 3]));               // 点第一张和最后一张
+  const after = handCards(id, ['5', '5'], { 5: 2 });
+  const trick = trickCards(id, ['5', '5'], { 5: 2 }, true);
+  assert.deepEqual(trick.map(c => c.suit).sort(), [before[0].suit, before[3].suit].sort());
+  assert.deepEqual(after.map(c => c.suit), [before[1].suit, before[2].suit]);
+  const four = [...after, ...trick].map(c => c.suit);
+  assert.equal(new Set(four).size, 4, `四张 5 的花色应互不相同: ${four}`);
+});
+
+test('点过牌以后，手牌与出牌区的（点数, 花色）仍零重复', () => {
+  const id = 'no-dup-after-click';
+  resetSession();
+  const hand = ['7', '7', '7', 'J', 'J'];
+  const before = handCards(id, hand, {});
+  commitPlay(id, hand, {}, new Set([0, 2, 3]));            // 点两张 7 和一张 J
+  const after = handCards(id, ['7', 'J'], { 7: 2, J: 1 });
+  const trick = trickCards(id, ['7', '7', 'J'], { 7: 2, J: 1 }, true);
+  const shown = [...after, ...trick];
+  const key = c => `${c.rank}${c.suit}`;
+  assert.equal(new Set(shown.map(key)).size, shown.length, `可见牌重了: ${shown.map(key)}`);
+  assert.deepEqual(trick.filter(c => c.rank === '7').map(c => c.suit).sort(),
+                   [before[0].suit, before[2].suit].sort());
+});
+
+test('提交失败能撤回：会话回到点牌之前', () => {
+  const id = 'rollback';
+  resetSession();
+  const hand = ['9', '9'];
+  const before = handCards(id, hand, {});
+  const undo = commitPlay(id, hand, {}, new Set([1]));
+  undo();
+  assert.deepEqual(handCards(id, hand, {}).map(c => c.suit), before.map(c => c.suit));
+});
+
+test('刷新页面（会话清空）后按 record_id 确定性重推', () => {
+  const id = 'refresh-redo';
+  const hand = ['7', '7', 'K'];
+  const fresh = handCards(id, hand, {});
+  commitPlay(id, hand, {}, new Set([1]));
+  resetSession();                                          // 刷新 = 模块状态没了
+  assert.deepEqual(handCards(id, hand, {}).map(c => c.suit), fresh.map(c => c.suit));
 });

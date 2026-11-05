@@ -5,6 +5,7 @@
 import { S, SEL, PAD, $ } from './state.js';
 import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText, overText } from './labels.js';
 import { setBanner } from './api.js';
+import { rankCounts, commitPlay as commitSessionPlay } from './virtual-cards.js';
 import * as machine from './machine.js';
 import { pulseDesk } from './deskbg.js';
 
@@ -92,8 +93,23 @@ export function toggleCard(index){
   commitPlay(); syncPicked(); renderPlay();
 }
 
+/** 出牌前把「点的是哪张」记进会话：花色要跟着那张牌走进出牌区（#48）。
+    返回撤回函数 —— 服务端不认这一手时把它调回来，一次失败的提交不至于带偏会话。 */
+function rememberPlay(player){
+  if (player !== S.snap.me || !pickedIdx.size) return () => {};
+  const played = (S.snap.played || {})[S.snap.me] || [];
+  return commitSessionPlay(S.record.record_id, S.snap.my_hand || [], rankCounts(played), pickedIdx);
+}
+
 const cardSuitOrder = r => RANKS.indexOf(r);
 const sortPicked = () => SEL.play.slice().sort((a, b) => cardSuitOrder(a) - cardSuitOrder(b));
+/* 牌片按显示顺序对应的「具体哪一张」：同点数按手牌下标排，与 sortPicked() 的稳定排序一致。
+   删牌片时按它删，不能再用 adoptPlay() 按点数前几张重排 —— 那会把同点数的身份挪回第一张（#48 评审）。 */
+const sortedPickedIdx = () => {
+  const hand = (S.snap && S.snap.my_hand) || [];
+  return [...pickedIdx].sort((a, b) =>
+    cardSuitOrder(hand[a]) - cardSuitOrder(hand[b]) || a - b);
+};
 
 /* ---------- 开局面板（保留原来的牌盘） ---------- */
 function renderNew(){
@@ -278,17 +294,20 @@ export function init(dependencies){
   });
   $('play-chips').addEventListener('click', e => {
     const s = e.target.closest('[data-drop]'); if (!s) return;
-    SEL.play.splice(Number(s.dataset.drop), 1); adoptPlay(); syncPicked(); renderPlay();
+    const idx = sortedPickedIdx()[Number(s.dataset.drop)];
+    if (idx !== undefined) pickedIdx.delete(idx);
+    commitPlay(); syncPicked(); renderPlay();
   });
   $('play-clear').addEventListener('click', () => { SEL.play = []; adoptPlay(); syncPicked(); renderPlay(); });
   $('play-latest').addEventListener('click', () => deps.refresh(S.meta.total_steps));
 
   $('play-go').addEventListener('click', async () => {
     const player = S.snap.acting, cards = sortPicked().join('');
+    const undo = rememberPlay(player);
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards},
                           `已录：${actorName(player)} ${cards}。`)){
       SEL.play = []; adoptPlay(); syncPicked();
-    }
+    } else undo();
   });
   $('play-pass').addEventListener('click', async () => {
     const player = S.snap.acting;

@@ -9,6 +9,7 @@ import * as consolePanel from './console.js';
 import * as machine from './machine.js';
 import { initDeskPixels } from './deskbg.js';
 import { turnText, overText } from './labels.js';
+import { resetSession } from './virtual-cards.js';
 
 function renderAll(){
   board.render();
@@ -60,6 +61,7 @@ async function mutate(path, body, note){
 
 async function loadRecord(record, note){
   const previous = S.record;
+  resetSession();                       // 换 / 重开记录：花色回到 record_id 确定性重推（#48）
   S.record = record;
   if (!(await refresh(null, note))) S.record = previous;
 }
