@@ -562,8 +562,8 @@
     .counter .cc i.long s{width:3px;height:3px;min-width:0;min-height:0}
     .counter[data-mode="prob"] .cells{padding:1px 2px;gap:1px}
     /* 420px 机顶屏不再塞切换键：记牌 ↔ 概率已挪到机身方向键（↑ 记牌 / ↓ 概率），
-       让出整格宽度给 15 个点数。 */
-    .counter .mode-btn{display:none}
+       让出整格宽度给 15 个点数。实体返回键的热区也收起，免得盖子比米粒还小。 */
+    .controls .key-back{display:none}
     .machine.is-stacked .chassis{gap:4px;padding:5px 7px 6px}
     .machine.is-stacked .grip-rail{top:-13px;width:11px}
     .machine.is-stacked .scoreboard{gap:0;padding:1px 0 3px}
@@ -904,8 +904,6 @@
         <!-- 透明热区：位置/尺寸从 GLB Buttons 连通块量出；外观完全由模型给 -->
         <div class="controls" id="controls">
           <span class="tip" id="tip"></span>
-          <button class="key" id="bar-mode" type="button"
-                  aria-label="切换机顶屏" data-tip="BackKey · 切换记牌 / 出牌概率"></button>
           <div class="cluster cluster-l" id="keys-l">
             <button class="key k-up" id="dpad-up" type="button" aria-label="方向上键" data-tip="↑"></button>
             <button class="key k-left" id="dpad-left" type="button" aria-label="上一次出牌机会" data-tip="← · 上一次出牌机会"></button>
@@ -919,6 +917,12 @@
             <button class="key k-y" id="undo" type="button" aria-label="撤销" data-tip="↺ · 撤销：撤掉刚记下的那一手"></button>
             <button class="key go k-a" id="play-go" type="button" aria-label="出牌" data-tip="▶ · 出牌：把桌上选中的牌记下来"></button>
             <button class="key k-b" id="play-pass" type="button" aria-label="不要" data-tip="✕ · 不要：这一手不出"></button>
+          </div>
+          <!-- 副屏右侧的实体返回键：切换机顶屏「记牌 ↔ 出牌概率」，位置由 GLB BackKey 量出 -->
+          <div class="cluster cluster-back" id="keys-back">
+            <button class="key key-back" id="bar-mode" type="button"
+                    aria-label="切换机顶屏：记牌 ↔ 出牌概率"
+                    data-tip="机顶屏：记牌 ↔ 出牌概率"></button>
           </div>
         </div>
 

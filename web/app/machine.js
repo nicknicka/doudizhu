@@ -475,6 +475,32 @@ function projectFrontBox(box){
     projectPoint(box.min.x, box.max.y, box.max.z),
   ]);
 }
+// 节点在**机身自己坐标系**里的包围盒：整机旋转不该把它撑胖，
+// 否则转起来量到的就不是那个平面本身了。
+function modelLocalBox(obj){
+  // 先刷到世界矩阵（含父级）：body.matrixWorld 过期的瞬间量出来的是错盒子。
+  obj.updateWorldMatrix(true, true);
+  const toBody = new THREE.Matrix4().copy(body.matrixWorld).invert();
+  const box = new THREE.Box3();
+  obj.traverse(mesh => {
+    if (!mesh.isMesh || !mesh.geometry) return;
+    mesh.geometry.computeBoundingBox();
+    const m = new THREE.Matrix4().copy(toBody).multiply(mesh.matrixWorld);
+    box.union(mesh.geometry.boundingBox.clone().applyMatrix4(m));
+  });
+  return box.isEmpty() ? null : box;
+}
+// 正面四角的投影**四边形**（不是包围盒）：机身转起来以后副屏是斜的，
+// 用 AABB 贴上去必然顶到区域外面；角点才能让覆盖层跟着一起转。
+function projectFrontQuad(box){
+  const z = box.max.z;
+  return {
+    tl: projectModelPoint(box.min.x, box.max.y, z),
+    tr: projectModelPoint(box.max.x, box.max.y, z),
+    br: projectModelPoint(box.max.x, box.min.y, z),
+    bl: projectModelPoint(box.min.x, box.min.y, z),
+  };
+}
 function unionRects(list){
   if (!list.length) return null;
   const x = Math.min(...list.map(r => r.x));
@@ -565,7 +591,9 @@ function relayout(){
     ...(backKeyRect ? [{ id: 'bar-mode', ...backKeyRect }] : []),
   ];
   const topNode = body.getObjectByName('SubDisplay');
-  const top = topNode ? projectFrontBox(modelBox(topNode)) : null;
+  const topBox = topNode ? modelLocalBox(topNode) : null;
+  const topQuad = topBox ? projectFrontQuad(topBox) : null;
+  const top = topQuad ? rectFromPoints([topQuad.tl, topQuad.tr, topQuad.br, topQuad.bl]) : null;
   const tablet = projectFrontBox(modelBox(body));
   const left = unionRects(buttons.filter(b => ['dpad-up','dpad-down','dpad-left','dpad-right','play-clear','new-round'].includes(b.id)));
   const right = unionRects(buttons.filter(b => ['play-hint-btn','undo','play-go','play-pass'].includes(b.id)));
@@ -579,7 +607,7 @@ function relayout(){
     const rtH = Math.max(100, Math.min(2048, Math.round(rtW / aspect)));
     if (rt.width !== rtW || rt.height !== rtH) rt.setSize(rtW, rtH);
   }
-  emit({ seats, rects: { screen, left, right, top, tablet }, buttons });
+  emit({ seats, rects: { screen, left, right, top, topQuad, tablet }, buttons });
   requestRender();
 }
 function emit(extra = {}){
@@ -662,6 +690,14 @@ function installModel(gltf){
   const buttonsNode = body.getObjectByName('Buttons');
   if (!buttonsNode.visible) throw new Error('GLB 的 Buttons 节点不可见');
   const measuredZones = measureButtons(buttonsNode);
+  // 副屏右侧那颗实体返回键：机顶屏「记牌 ↔ 出牌概率」的切换点。
+  // 它不是 Buttons 连通块里的键，所以单独量一次几何。
+  const backBox = modelLocalBox(body.getObjectByName('BackKey'));
+  if (!backBox) throw new Error('BackKey 节点没有可量的几何');
+  measuredZones.push(['bar-mode', {
+    minX: backBox.min.x, maxX: backBox.max.x,
+    minY: backBox.min.y, maxY: backBox.max.y, maxZ: backBox.max.z,
+  }, '']);
   const screenNode = body.getObjectByName('Screen');
   const sb = nodeGeometryBoxLocal(screenNode, body);
   if (!sb) throw new Error('Screen 节点没有可量的几何');

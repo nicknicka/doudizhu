@@ -433,6 +433,7 @@ try {
   if (!shell.contactShadow) problems.push('主页面没有机底接触阴影');
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
+  // 10 颗机身按键 + 副屏右侧那颗实体返回键（切机顶屏模式）= 11 个可量热区
   if (shell.buttons.length !== 11) problems.push(`透明键热区数量不是 11：${shell.buttons.length}`);
   for (const id of ['bar-mode', 'dpad-up', 'dpad-left', 'play-clear', 'dpad-right',
                     'dpad-down', 'new-round', 'play-hint-btn', 'undo', 'play-go', 'play-pass']) {
@@ -451,8 +452,8 @@ try {
       problems.push(`菱形键热区 ${h.id} 没有贴合描边`);
     }
   }
-  for (const id of ['bar-mode','dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
-                    'play-hint-btn','undo','play-go','play-pass']) {
+  for (const id of ['dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
+                    'play-hint-btn','undo','play-go','play-pass','bar-mode']) {
     if (!hotspots.some(h => h.id === id)) problems.push(`缺少主键热区 ${id}`);
   }
 
@@ -525,6 +526,59 @@ try {
   await page.click('#bar-mode');
   await page.waitForTimeout(250);
   if ((await probabilityScreen(page)).mode !== 'count') problems.push('实体 BackKey 没切回记牌模式');
+  if ((await page.locator('#counter .cc i s').count()) < 20) problems.push('记牌模式没有画出红点');
+
+  // 副屏必须**绑在模型上**：机顶条按副屏四角做透视映射，转机身时跟着一起斜，
+  // 而不是一块固定矩形（那会在转动时顶出槽位）。
+  const counterQuad = () => page.evaluate(() => {
+    const el = document.getElementById('counter');
+    const cs = getComputedStyle(el);
+    const m = new DOMMatrix(cs.transform);
+    const W = el.offsetWidth, H = el.offsetHeight;
+    const box = el.offsetParent.getBoundingClientRect();
+    const at = (x, y) => {
+      const p = m.transformPoint(new DOMPoint(x, y));
+      return { x: p.x + box.left, y: p.y + box.top };
+    };
+    return { transform: cs.transform, W, tl: at(0, 0), tr: at(W, 0), bl: at(0, H), br: at(W, H) };
+  });
+  const restQuad = await counterQuad();
+  if (!/^matrix3d/.test(restQuad.transform)) {
+    problems.push(`机顶条没走四边形映射（回落到固定矩形）：${restQuad.transform}`);
+  }
+  const bodyPoint = await page.evaluate(async () => {
+    const r = document.getElementById('scene').getBoundingClientRect();
+    const scr = document.getElementById('screen-hud').getBoundingClientRect();
+    const m = await import('/app/machine.js');
+    for (let fy = 0.06; fy <= 0.92; fy += 0.04) {
+      for (let fx = 0.06; fx <= 0.94; fx += 0.04) {
+        const x = r.left + r.width * fx, y = r.top + r.height * fy;
+        if (x > scr.left && x < scr.right && y > scr.top && y < scr.bottom) continue;
+        if (m.isOnBody(x, y)) return { x, y };
+      }
+    }
+    return null;
+  });
+  if (!bodyPoint) {
+    problems.push('机身上找不到可拖的点，没法验证副屏跟随');
+  } else {
+    await page.mouse.move(bodyPoint.x, bodyPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(bodyPoint.x + 160, bodyPoint.y, { steps: 8 });
+    await page.waitForTimeout(80);
+    const turned = await counterQuad();
+    await page.mouse.up();
+    const tilt = Math.abs(turned.tr.y - turned.tl.y);
+    if (tilt < 1) problems.push(`转机身后机顶条没跟着斜：顶边高差 ${tilt.toFixed(2)}px`);
+    if (turned.W >= restQuad.W) {
+      problems.push(`转机身后机顶条没有随副屏收窄：${restQuad.W.toFixed(1)} → ${turned.W.toFixed(1)}px`);
+    }
+    await waitForFramesToSettle(page);
+    const backQuad = await counterQuad();
+    if (Math.abs(backQuad.tl.y - restQuad.tl.y) > 1.5) {
+      problems.push(`松手机顶条没回弹归位：${restQuad.tl.y.toFixed(1)} → ${backQuad.tl.y.toFixed(1)}px`);
+    }
+  }
 
   // 数据面板：默认不占页面，点"数据面板"才盖在屏幕上
   if (await page.locator('#crt').evaluate(el => el.classList.contains('is-open'))) {
@@ -797,7 +851,7 @@ try {
     const counterButtons = counterEl.querySelectorAll('button').length;
     const rowTops = {};
     document.querySelectorAll('#counter .cc').forEach(el => {
-      const y = Math.round(el.getBoundingClientRect().top);
+      const y = el.offsetTop;
       rowTops[y] = (rowTops[y] || 0) + 1;
     });
     return {
@@ -807,7 +861,7 @@ try {
       touchTop: touch.top, touchBottom: touch.bottom,
       chassisTop: chassis.top, chassisBottom: chassis.bottom,
       counterFs: parseFloat(getComputedStyle(counterEl).fontSize),
-      counterCellW: cell ? cell.getBoundingClientRect().width : 0,
+      counterCellW: cell ? cell.offsetWidth : 0,
       counterRows: Object.values(rowTops),
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
       counterButtons,

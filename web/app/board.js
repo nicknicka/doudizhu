@@ -133,6 +133,43 @@ function setMachineError(status, error){
     : (status === 'loading' ? '正在加载 3D 机身…' : '');
 }
 
+/* ---------- 四边形贴片 ----------
+   机身一转，副屏的投影就是斜的四边形；AABB 贴上去必然顶出槽位。
+   这里求 3x3 单应矩阵（矩形 → 四角），再翻成 CSS matrix3d。 */
+function m3adj(m){
+  return [
+    m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+    m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+    m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+  ];
+}
+function m3mul(a, b){
+  const c = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++){
+    c[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  }
+  return c;
+}
+function m3mulv(m, v){
+  return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+          m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+          m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+}
+function basisToPoints(p){
+  const m = [p[0].x, p[1].x, p[2].x, p[0].y, p[1].y, p[2].y, 1, 1, 1];
+  const v = m3mulv(m3adj(m), [p[3].x, p[3].y, 1]);
+  return m3mul(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
+}
+/** (0,0)-(w,h) 的矩形 → 四角 [tl,tr,br,bl]，返回 CSS transform 值。 */
+function quadMatrix(w, h, quad){
+  const src = basisToPoints([{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }]);
+  const t = m3mul(basisToPoints(quad), m3adj(src));
+  const k = 1 / t[8];
+  const m = t.map(v => v * k);
+  // matrix3d 是列主序：x'=(m0·x+m1·y+m2)/(m6·x+m7·y+m8)
+  return `matrix3d(${m[0]},${m[3]},0,${m[6]},`
+    + `${m[1]},${m[4]},0,${m[7]},0,0,1,0,${m[2]},${m[5]},0,${m[8]})`;
+}
 function placeHotspots(items){
   const ready = items.length > 0;
   const controls = $('controls');
@@ -168,12 +205,37 @@ function place(payload){
   sh.style.width = `${s.w}px`; sh.style.height = `${s.h}px`;
   for (const [player, el] of Object.entries(labels)) el.style.display = seats[player] ? '' : 'none';
 
-  const top = rects.top;
+  const top = rects.top, quad = rects.topQuad;
   const counter = $('counter');
-  if (top){
-    // 副屏内容最多两行：标题 + 横向 Top-3；尽量用满真屏高度，避免裁切。
-    const th = Math.max(stacked ? 30 : 0, Math.min(top.h, 64));
+  if (quad){
+    // 副屏的投影是四边形：按四角做透视映射，机身怎么转它怎么跟，
+    // 不会像 AABB 那样顶出槽位。宽度严格贴合副屏，高度只沿副屏自身
+    // 的高度方向伸缩——窄屏要两行排 15 格，撑高比压成糊线好。
+    const ux = quad.tr.x - quad.tl.x, uy = quad.tr.y - quad.tl.y;
+    const vx = quad.bl.x - quad.tl.x, vy = quad.bl.y - quad.tl.y;
+    const qw = Math.hypot(ux, uy) || 1;
+    const qh = Math.hypot(vx, vy) || 1;
+    const th = Math.max(stacked ? 26 : 0, Math.min(qh * 0.82, 64));
+    const k = th / qh;
+    const ox = quad.tl.x - vx * (k - 1) / 2, oy = quad.tl.y - vy * (k - 1) / 2;
     counter.hidden = false;
+    counter.style.left = '0px';
+    counter.style.top = '0px';
+    counter.style.width = `${qw.toFixed(2)}px`;
+    counter.style.height = `${th.toFixed(2)}px`;
+    counter.style.transformOrigin = '0 0';
+    counter.style.transform = quadMatrix(qw, th, [
+      { x: ox, y: oy },
+      { x: ox + ux, y: oy + uy },
+      { x: ox + ux + vx * k, y: oy + uy + vy * k },
+      { x: ox + vx * k, y: oy + vy * k },
+    ]);
+    counter.style.fontSize = `${Math.max(stacked ? 10 : 8, Math.min(15, th * 0.34)).toFixed(1)}px`;
+  } else if (top){
+    // 没量到四边形（旧模型/异常）时退回 AABB，别让机顶条整个消失。
+    const th = Math.max(stacked ? 26 : 0, Math.min(top.h * 0.82, 64));
+    counter.hidden = false;
+    counter.style.transform = 'none';
     counter.style.left = `${top.x}px`;
     counter.style.width = `${top.w}px`;
     counter.style.top = `${top.y + (top.h - th) / 2}px`;
