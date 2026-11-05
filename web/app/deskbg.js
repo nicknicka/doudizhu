@@ -1,24 +1,29 @@
-// 桌面像素方块田：方向 B「慢波方块田 · 中档」，纯 Canvas2D。
+// 页面背景：方波田 —— 纯 Canvas2D，铺满整个视口。
+// 两级**方波**（阶跃，不是正弦）沿 24° 叠加：同一相位上整条方块一起跳变，
+// 所以看得到一条条斜向"田垄"在慢慢走。参数与配色出自 .oil-ui/pixel-wave-bg 设计稿。
 // 不碰 WebGL 上下文（那是 three.js 的），只做背景层；光池/浮尘仍在 template.html 里。
-// 参数与配色出自 .oil-ui/pixel-wave-bg 设计稿（参考 React Bits Shape Waves 的速度手感，未搬代码）。
 
 const INK = '#141310', ACCENT = '#e0442a';
-const PITCH = 12, SIZE = 5;
-const L1 = 220, L2 = 340, T1 = 7200, T2 = 11000;
 const RAD = 24 * Math.PI / 180, CX = Math.cos(RAD), CY = Math.sin(RAD);
+const T1 = 7200, T2 = 11000;                 // 两级波的周期（ms）
+const D1 = 0.46, D2 = 0.54;                  // 占空比：高电平占一个周期的比例
+const COLS = 104;                            // 视口宽切多少格；格子随屏自适应
 const A_LO = 0.025, A_HI = 0.085;            // 中档强度
-const SIDE_LO = 0.32;
+const SIDE_LO = 0.45;                        // 方块最小边比例：对齐设计稿「推荐档」sizeLo .45
 const STEP = (A_HI - A_LO) / 4;              // 透明度量化成 4 级台阶
 const ACC = 0.02, PEAK = 0.80;               // 只有波峰中央极少几颗走强调色
 const FPS = 30;                              // 波很慢，30fps 够用，别占满主线程
+
+// 方波：相位落在占空比内为 +1，否则 -1
+const square = (phase, duty) => (phase - Math.floor(phase)) < duty ? 1 : -1;
 
 export function initDeskPixels(canvas){
   if (!canvas) return () => {};
   const ctx = canvas.getContext('2d');
   if (!ctx) return () => {};
 
-  let w = 1, h = 1, dpr = 1, cols = 0, rows = 0, acc = [];
-  let raf = 0, disposed = false;
+  let w = 1, h = 1, dpr = 1, cols = 0, rows = 0, pitch = 12, size = 5, l1 = 260, l2 = 420;
+  let acc = [], raf = 0, disposed = false;
 
   function build(){
     const r = canvas.getBoundingClientRect();
@@ -27,7 +32,12 @@ export function initDeskPixels(canvas){
     w = r.width; h = r.height;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    cols = Math.ceil(w / PITCH); rows = Math.ceil(h / PITCH);
+    // 格子按视口宽度定尺寸：宽屏不掉成一片沙，窄屏也不会糊成一团
+    pitch = Math.max(9, Math.min(20, Math.round(w / COLS)));
+    size = Math.max(3, Math.round(pitch * 0.42));
+    l1 = Math.max(180, Math.min(420, w * 0.22));   // 一级波长跟着视口走
+    l2 = l1 * 1.62;
+    cols = Math.ceil(w / pitch); rows = Math.ceil(h / pitch);
     acc = [];
     for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) acc.push(Math.random() < ACC);
   }
@@ -37,12 +47,12 @@ export function initDeskPixels(canvas){
     ctx.clearRect(0, 0, w, h);
     const cx0 = w * 0.5, band = w * 0.20;     // 强调色只落在中央 40% 宽
     for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++){
-      const x = i * PITCH + SIZE / 2, y = j * PITCH + SIZE / 2;
+      const x = i * pitch + size / 2, y = j * pitch + size / 2;
       const u = x * CX + y * CY;              // 沿 24° 方向的投影
-      const s1 = Math.sin(2 * Math.PI * u / L1 - 2 * Math.PI * t / T1);
-      const s2 = Math.sin(2 * Math.PI * u / L2 - 2 * Math.PI * t / T2 + 1.7);
-      const v = 0.5 + 0.25 * s1 + 0.25 * s2;
-      const side = SIZE * (SIDE_LO + (1 - SIDE_LO) * v);
+      const s1 = square(u / l1 - t / T1, D1);
+      const s2 = square(u / l2 - t / T2 + 0.31, D2);
+      const v = 0.5 + 0.25 * s1 + 0.25 * s2;  // 0 / .25 / .5 / .75 / 1
+      const side = size * (SIDE_LO + (1 - SIDE_LO) * v);
       let a = A_LO + (A_HI - A_LO) * v;
       a = Math.round(a / STEP) * STEP;
       ctx.globalAlpha = a;
