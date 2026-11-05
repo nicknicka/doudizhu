@@ -443,6 +443,41 @@ try {
     if (!lights.map(lightKey).includes(want)) problems.push(`主页面缺少灯 ${want}`);
   }
   if (!shell.contactShadow) problems.push('主页面没有机底接触阴影');
+  // ADR-0006：真投影软阴影。灯仍是三盏（key 灯兼职投影，castShadow 不改灯自己的贡献），
+  // 机身背后一块只吃阴影的接影面；验收要能读到这一层，并且影子真的落到画布上。
+  const shadow = shell.shadow || {};
+  if (!shadow.mapEnabled) problems.push('主页面没开阴影贴图（ADR-0006 真投影）');
+  if (shadow.mapTypeName !== 'VSM') problems.push(`主页面阴影类型不是 VSM：${shadow.mapTypeName}`);
+  if (shadow.caster !== 'key') problems.push(`投影灯不是兼职的 key 灯：${shadow.caster}`);
+  if (!shadow.backdrop) problems.push('主页面没有接影面');
+  if (!(shadow.casters > 0)) problems.push(`机身上没有开投影的 mesh：${shadow.casters}`);
+  if (!(shadow.radius > 0) || !(shadow.opacity > 0)) {
+    problems.push(`阴影参数不成立：radius=${shadow.radius} opacity=${shadow.opacity}`);
+  }
+  // 影子是画布上真画出来的：机下条带被压暗，而机身左下的空场不该被涂满（影子偏右下，有方向）。
+  const band = await page.evaluate(async () => {
+    const c = document.getElementById('scene');
+    const ctx = c.getContext('webgl2') || c.getContext('webgl');
+    const px = new Uint8Array(c.width * c.height * 4);
+    ctx.readPixels(0, 0, c.width, c.height, ctx.RGBA, ctx.UNSIGNED_BYTE, px);
+    const dpr = c.width / c.clientWidth;
+    const alphaAt = (x, y) => {
+      const X = Math.round(x * dpr), Y = Math.round(y * dpr);
+      if (X < 0 || Y < 0 || X >= c.width || Y >= c.height) return -1;
+      return px[((c.height - 1 - Y) * c.width + X) * 4 + 3];
+    };
+    const r = (await import('/app/machine.js')).machineStatus().tablet;
+    let peak = 0, left = 0, n = 0;
+    for (const dy of [6, 12, 20, 30]) for (let i = 0; i <= 12; i++) {
+      const x = r.x + r.w * (0.06 + 0.08 * i), y = r.y + r.h + dy;
+      peak = Math.max(peak, alphaAt(x, y));
+      if (i <= 1) { left += alphaAt(x, y); n++; }
+    }
+    return { peak, left: n ? left / n : -1, corner: [alphaAt(4, 4), alphaAt(c.clientWidth - 4, 6)] };
+  });
+  if (!(band.peak >= 60)) problems.push(`机下没有影子：条带 alpha 峰值只有 ${band.peak}`);
+  if (!(band.left <= 25)) problems.push(`机身左下的影子铺满了整条（${band.left}），影子没有方向`);
+  for (const a of band.corner) if (a !== 0) problems.push(`机身外空场被涂了东西：alpha=${a}`);
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
   // 10 颗机身按键 + 副屏右侧那颗实体返回键（切机顶屏模式）= 11 个可量热区

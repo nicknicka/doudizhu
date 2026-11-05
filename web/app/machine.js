@@ -11,6 +11,16 @@ const MODEL_SCALE = 1 / 20;                 // 建模单位是 mm；20mm = 1 thr
 const FOV = 30;
 const TILT = -0.055;
 
+// ADR-0006：真投影软阴影。key 灯兼职投影灯（castShadow 不改灯自己的贡献，只多一遍深度图），
+// 机身背后立一块只吃阴影的接影面；机壳把 key 灯的光挡在它上面，落下的影子随姿态实时重算。
+const SHADOW_MAP = 1024;             // 深度图边长
+const SHADOW_SPAN = 12;              // 投影相机正交半宽：机身 |x|≤5.02 × 最大 1.6 倍缩放
+const SHADOW_BACKDROP_Z = -1.30;     // 接影面的 z：机身最后沿 z≈-0.52，贴在它后面
+const SHADOW_OPACITY = 0.24;
+const SHADOW_COLOR = 0x241f2e;        // 暖底上的影子偏冷紫，比纯黑自然
+const SHADOW_RADIUS = 18;            // VSM 半径（texel）：影子的软边就靠它
+const SHADOW_BLUR_SAMPLES = 16;
+
 const CARD_W = 0.74, CARD_H = 1.04, CARD_T = 0.05;
 const FLAT = -Math.PI / 2;
 const HAND_TILT = FLAT + 0.25;
@@ -51,7 +61,7 @@ const ZOOM_MIN = 0.75, ZOOM_MAX = 1.6, ZOOM_STEP = 0.12;
 let dragSpringFrom = 0, dragSpringStart = 0;
 let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
-let nodes = [], buttonsVisible = false, contactShadow = null;
+let nodes = [], buttonsVisible = false, contactShadow = null, backdrop = null;
 let frameCount = 0, renderQueued = false, dirty = true;
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -667,6 +677,19 @@ function makeContactShadow(){
   mesh.visible = false;
   return mesh;
 }
+// ADR-0006：只吃阴影的接影面。ShadowMaterial 不参与光照，所以它不改变机身亮度，
+// 只在被 key 灯挡住的像素上压一层暗 —— 保真色块不受影响。
+function makeShadowBackdrop(){
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(SHADOW_SPAN * 2, SHADOW_SPAN * 2),
+    new THREE.ShadowMaterial({ color: SHADOW_COLOR, opacity: SHADOW_OPACITY, depthWrite: false }),
+  );
+  mesh.name = 'ShadowBackdrop';
+  mesh.position.z = SHADOW_BACKDROP_Z;
+  mesh.receiveShadow = true;
+  mesh.visible = false;
+  return mesh;
+}
 function placeContactShadow(box){
   if (!contactShadow) return;
   const size = box.getSize(new THREE.Vector3());
@@ -746,6 +769,8 @@ function installModel(gltf){
   subFace = { w: subSize.x, h: subSize.y, z: nextSubGroup.position.z };
   modelSize = nextModelSize;
   placeContactShadow(bb);
+  body.traverse(o => { if (o.isMesh) o.castShadow = true; });   // ADR-0006：机壳全件投影
+  if (backdrop) backdrop.visible = true;
   ready = true; status = 'ready'; error = '';
   resize(stageW, stageH);
   // installModel 时画布尺寸通常没变，resize 会提前返回；这里必须立即布局，
@@ -762,6 +787,7 @@ function loadModel(){
   ready = false; status = 'loading'; error = '';
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
   if (contactShadow) contactShadow.visible = false;
+  if (backdrop) backdrop.visible = false;
   if (body && rig){ rig.remove(body); body = null; screenGroup = null; screenMesh = null;
     subGroup = null; subMesh = null; subFace = null; }
   emit();
@@ -808,7 +834,8 @@ export function init(canvasEl, hook){
   renderer.toneMapping = THREE.NoToneMapping;   // ADR-0004：与 /glb 一致，不套 ACES
   renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.VSMShadowMap;   // ADR-0006：要的是软影，不是硬边
 
   scene = new THREE.Scene();   // 背景交给 DOM 桌面层，机身自己浮在桌面上
   camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 0.1, 400);
@@ -817,9 +844,25 @@ export function init(canvasEl, hook){
   scene.add(rig);
   contactShadow = makeContactShadow();
   rig.add(contactShadow);
-  // ADR-0004：沿用 /glb 的三盏基础灯，不开环境贴图、不加 rim 光。
+  // ADR-0006：接影面挂在 scene 上（不是 rig），它就是「机身背后的那面墙」——
+  // 机身转动/缩放时墙不动，影子跟着几何重算，这才是投影该有的样子。
+  backdrop = makeShadowBackdrop();
+  scene.add(backdrop);
+  // ADR-0004/0006：沿用 /glb 的三盏基础灯，不开环境贴图、不加 rim 光、灯光参数一个不动；
+  // key 灯兼职投影灯 —— castShadow 只多渲一遍深度图，不改它对材质的贡献。
   scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-4, 6, 8); scene.add(key);
+  const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-4, 6, 8);
+  key.castShadow = true;
+  key.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+  const shadowCam = key.shadow.camera;
+  shadowCam.left = -SHADOW_SPAN; shadowCam.right = SHADOW_SPAN;
+  shadowCam.top = SHADOW_SPAN; shadowCam.bottom = -SHADOW_SPAN;
+  shadowCam.near = 0.5; shadowCam.far = 40;
+  shadowCam.updateProjectionMatrix();
+  key.shadow.bias = 0;                 // VSM 不吃 bias，留 0 防重影
+  key.shadow.radius = SHADOW_RADIUS;
+  key.shadow.blurSamples = SHADOW_BLUR_SAMPLES;
+  scene.add(key);
   const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5); fill.position.set(6, 2, 6); scene.add(fill);
 
   tableScene = new THREE.Scene();
@@ -1198,6 +1241,7 @@ export function isOnBody(clientX, clientY){
 }
 
 const TONE_MAPPING_NAMES = ['None', 'Linear', 'Reinhard', 'Cineon', 'ACESFilmic'];
+const SHADOW_TYPE_NAMES = ['Basic', 'PCF', 'PCFSoft', 'VSM'];
 export function machineStatus(){
   // ADR-0004：验收要能直接读到环境贴图、色调映射、曝光和三盏灯的参数。
   const lights = [];
@@ -1207,6 +1251,9 @@ export function machineStatus(){
                   position: [o.position.x, o.position.y, o.position.z] });
   });
   const tablet = bodyRect();
+  // ADR-0006：验收要能直接读到投影层 —— 阴影贴图开关、投影灯、接影面、机身里开了投影的 mesh 数。
+  let shadowCasters = 0;
+  if (body) body.traverse(o => { if (o.isMesh && o.castShadow) shadowCasters++; });
   return {
     source: 'glb', status, ready, error, nodes, buttonsVisible,
     environment: !!(scene && scene.environment),
@@ -1216,6 +1263,17 @@ export function machineStatus(){
     toneMappingExposure: renderer ? renderer.toneMappingExposure : null,
     lights,
     contactShadow: !!(contactShadow && contactShadow.visible),
+    shadow: renderer ? {
+      mapEnabled: !!renderer.shadowMap.enabled,
+      mapType: renderer.shadowMap.type,
+      mapTypeName: SHADOW_TYPE_NAMES[renderer.shadowMap.type] ?? String(renderer.shadowMap.type),
+      caster: 'key',                       // 兼职投影的那盏 key 灯
+      backdrop: !!(backdrop && backdrop.visible),
+      map: SHADOW_MAP, span: SHADOW_SPAN, z: SHADOW_BACKDROP_Z,
+      opacity: SHADOW_OPACITY, radius: SHADOW_RADIUS, blurSamples: SHADOW_BLUR_SAMPLES,
+      // 机身上真正开了 castShadow 的 mesh 数：0 就说明影子根本没东西可投
+      casters: shadowCasters,
+    } : { mapEnabled: false, backdrop: false, casters: 0 },
     subDisplay: (subMesh && subFace) ? {
       ready: true,
       w: subFace.w, h: subFace.h, z: subFace.z,
