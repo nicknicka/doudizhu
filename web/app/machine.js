@@ -4,7 +4,8 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { GLTFLoader } from '../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { reduce } from './state.js';
-import { NAME } from './labels.js';
+import { NAME, SUIT_GLYPH } from './labels.js';
+import { handCards, trickCards, isMyTrick, rankCounts, isRedSuit } from './virtual-cards.js';
 
 const MODEL_URL = new URL('../assets/console-b.glb', import.meta.url);
 const MODEL_SCALE = 1 / 20;                 // 建模单位是 mm；20mm = 1 three.js 单位
@@ -97,7 +98,7 @@ function asTexture(c, crisp = false){
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-function faceTexture(rank){
+function faceTexture(rank, suit){
   const c = makeCanvas(52, 74), g = c.getContext('2d');
   // 参考图质感：贴纸白 + 硬黑描边 + 切角 + 角上红点
   g.fillStyle = '#201a26'; g.fillRect(0, 0, 52, 74);          // 切角露出的桌色
@@ -107,16 +108,20 @@ function faceTexture(rank){
   g.lineTo(52, 68); g.lineTo(46, 74); g.lineTo(6, 74); g.lineTo(0, 68);
   g.closePath(); g.fill();
   g.strokeStyle = cssVar('--ink'); g.lineWidth = 2; g.stroke();
-  // 手牌叠扇后只露出左侧约半张牌。点数必须落在这条可见带里，
+  // 手牌叠扇后只露出左侧约半张牌。角标（点数在上、花色在下）必须落在这条可见带里，
   // 并且把 10 缩成两字符宽、王缩成小/大，避免只露出半个字。
   const label = { T: '10', B: '小', R: '大' }[rank] || NAME[rank] || rank;
-  g.fillStyle = cssVar('--ink');
+  // 红色只给红桃方片，其余走墨色 —— 花色只在这两处用色，不新增调色板
+  g.fillStyle = isRedSuit(suit) ? cssVar('--accent') : cssVar('--ink');
   g.textAlign = 'left'; g.textBaseline = 'top';
   g.font = `${label.length > 1 ? 19 : 26}px Pixel, monospace`;
   g.fillText(label, 3, 2);
-  if (rank !== 'B' && rank !== 'R'){
+  if (suit){
+    g.font = '22px Pixel, monospace';
+    g.fillText(SUIT_GLYPH[suit], 5, 25);
+    // 牌心再放一个大花色：手牌里被邻牌压住看不见，出牌区那张完整露着
     g.textAlign = 'center'; g.font = '26px Pixel, monospace';
-    g.fillText('♠', 28, 40);
+    g.fillText(SUIT_GLYPH[suit], 28, 40);
     g.textAlign = 'left';
   }
   g.fillStyle = cssVar('--accent');
@@ -237,10 +242,11 @@ function buildTable(){
   deck.position.set(0, 0.13, CZ - 2.60);
   tableScene.add(deck);
 }
-function cardMesh(rank, faceUp){
+function cardMesh(rank, suit, faceUp){
+  const key = suit ? `${rank}${suit}` : rank;   // 同点数的四张牌各画各的花色
   const mats = faceUp
     ? [edgeMat, edgeMat, edgeMat, edgeMat,
-       frontMats[rank] || (frontMats[rank] = new THREE.MeshBasicMaterial({ map: faceTexture(rank), depthTest: false })),
+       frontMats[key] || (frontMats[key] = new THREE.MeshBasicMaterial({ map: faceTexture(rank, suit), depthTest: false })),
        backMat]
     : [edgeMat, edgeMat, edgeMat, edgeMat, backMat, backMat];
   const m = new THREE.Mesh(cardGeo, mats);
@@ -272,12 +278,13 @@ function clampHandCenter(px, lift, pz){
   cardGroup.worldToLocal(_hcC);
   return _hcC;
 }
-function layRow(ranks, x, z, faceUp, tilt, spacing, scale = 1, track = false,
+function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
                 offset = 0, fan = 0, yaw = 0, arc = 0, surf = 0.18, order = 0){
-  const n = ranks.length;
+  const n = cards.length;
   if (!n) return;
   const mid = (n - 1) / 2, rowHits = [];
-  ranks.forEach((rank, i) => {
+  cards.forEach((card, i) => {
+    const { rank, suit } = card;
     const off = i - mid;
     const roll = fan * off;
     let lift = surf + (CARD_H * scale / 2) * Math.cos(tilt) + 0.02 - arc * off * off;
@@ -286,7 +293,7 @@ function layRow(ranks, x, z, faceUp, tilt, spacing, scale = 1, track = false,
       const c = clampHandCenter(px, lift, pz);
       if (c){ px = c.x; lift = c.y; pz = c.z; }
     }
-    const m = cardMesh(rank, faceUp);
+    const m = cardMesh(rank, suit, faceUp);
     m.renderOrder = order + i * 2;
     m.children[0].renderOrder = order + i * 2 - 1;
     m.position.set(px, lift, pz);
@@ -331,11 +338,16 @@ function drawCards(){
   narrowHand = isNarrow(); tinyHand = isTiny();
   while (cardGroup.children.length) cardGroup.remove(cardGroup.children[0]);
   anchors = {};
+  // 虚拟牌身份（ADR-0007）：花色按 record_id 确定性合成，只为了让牌面像一副真扑克，
+  // 不参与任何斗地主判断。我已打出的张数决定手牌从第几个花色接着发。
+  const recordId = lastMeta.record_id;
+  const myPlayed = (lastSnap.played || {})[lastSnap.me] || [];
+  const myCounts = rankCounts(myPlayed);
   Object.keys(lastMeta.seats).forEach(player => {
     const rel = lastMeta.seats[player].relative;
     const place = SEAT_3D[rel] || SEAT_3D.down;
     if (rel === 'me'){
-      const hand = lastSnap.my_hand || [];
+      const hand = handCards(recordId, lastSnap.my_hand || [], myCounts);
       handMeshes = []; handHits = []; handRows = [];
       if (tinyHand && hand.length > 9){
         // 420px 下 17 张牌塞单排时每张只露约 11px，点数必然糊成一条。
@@ -367,18 +379,21 @@ function drawCards(){
     } else {
       const back = Math.min(lastSnap.remaining[player], MAX_BACKS);
       const dir = rel === 'up' ? 1 : -1;
-      layRow(Array(back).fill('T'), place.x, place.z, false, BACK_TILT, 0.17,
+      // 牌背不露牌面，塞个占位点数走同一条 layRow
+      layRow(Array.from({ length: back }, () => ({ rank: 'T', suit: null })),
+             place.x, place.z, false, BACK_TILT, 0.17,
              1.25, false, 0, dir * 0.06, -dir * 0.55, 0, 0.32, 100);
     }
     anchors[player] = new THREE.Vector3(place.x, 0.06, place.labelZ);
   });
   const trick = lastSnap.last_move || [];
+  const trickRow = trickCards(recordId, trick, myCounts, isMyTrick(myPlayed, trick));
   const trickScale = tinyHand ? 2.10 : (narrowHand ? 1.30 : 1.42);
   const cardW = CARD_W * trickScale;
   const want = 0.86 * trickScale;
   const fit = trick.length > 1 ? 13.0 / (trick.length - 1) : want;
   const trickGap = Math.max(cardW * 0.46, Math.min(want, fit));
-  layRow(trick, 0, tinyHand ? -1.10 : (narrowHand ? 0.55 : 0.95),
+  layRow(trickRow, 0, tinyHand ? -1.10 : (narrowHand ? 0.55 : 0.95),
          true, TRICK_TILT, trickGap, trickScale, false, 0, -0.02, 0, 0, 0.32, 300);
 }
 
