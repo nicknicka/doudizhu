@@ -57,6 +57,19 @@ function watchPage(page, label, isAllowed = () => false) {
   });
 }
 const text = async (page, sel) => ((await page.locator(sel).textContent()) ?? '').trim();
+// 页面的反馈文案是异步落下来的（提交 → 分析 → 写文案）。慢机器上固定等待会误报，
+// 所以需要什么就轮询到什么为止，只有超时才算失败。
+const waitUntil = async (page, cond, timeout = 15000) => {
+  const t0 = Date.now();
+  for (;;){
+    if (await cond()) return true;
+    if (Date.now() - t0 > timeout) return false;
+    await page.waitForTimeout(100);
+  }
+};
+const waitText = (page, sel, needle, timeout = 15000) =>
+  waitUntil(page, async () => (((await page.locator(sel).textContent()) || '').includes(needle)), timeout);
+const waitBanner = (page, needle, timeout = 15000) => waitText(page, '#banner', needle, timeout);
 // 手牌在画布上的中心点：直接问 3D 场景，脚本据此点"真牌"
 const handPts = page => page.evaluate(async () => (await import('/app/machine.js')).handPoints());
 // 在屏幕里点第 k 张手牌：先把鼠标移过去让视差收敛，再按收敛后的真实落点点击
@@ -789,8 +802,7 @@ try {
 
   // 交互 2b：终局 —— 跳到最后那一手，操作台必须收手，不再提示"该谁出牌"
   await page.click('#play-latest');
-  await page.waitForTimeout(1200);
-  if (!(await text(page, '#play-who')).includes('牌局已结束')) {
+  if (!(await waitText(page, '#play-who', '牌局已结束'))) {
     problems.push('终局时操作台没报「牌局已结束」');
   }
   if (!(await page.locator('#play-go').isDisabled())
@@ -833,8 +845,7 @@ try {
   await tapNew(['T','J','Q']);
   if (!(await text(page, '#new-count')).includes('20/20')) problems.push('牌盘没数对手牌张数');
   await page.click('#new-go');
-  await page.waitForTimeout(1600);
-  if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
+  if (!(await waitBanner(page, '已开局'))) problems.push('开新局没有反馈');
   if (!(await text(page, '#board')).includes('该你出')) problems.push('开新局后第一手不是我方');
 
   // 20 张满手牌也必须每一张都能从屏里点中；扇面外缘不能跑出可拾取区域。
@@ -863,7 +874,9 @@ try {
       if (picked !== 2) problems.push(`想选两张不同点数的牌，实际选上 ${picked} 张`);
       expectReject = true;
       await page.click('#play-go');
-      await page.waitForTimeout(900);
+      // 拒绝是异步回来的；固定 900ms 在慢机器上会漏掉那条控制台消息
+      await waitUntil(page, async () =>
+        (await page.locator('#banner').getAttribute('data-kind')) === 'error', 8000);
       expectReject = false;
       const afterReject = await page.locator('#play-chips i.c').count();
       if (afterReject !== picked) {
@@ -934,8 +947,7 @@ try {
     await page.waitForTimeout(220);
   }
   await page.click('#play-go');
-  await page.waitForTimeout(1400);
-  if (!(await text(page, '#banner')).includes('已录')) problems.push('录我方的牌没有反馈');
+  if (!(await waitBanner(page, '已录'))) problems.push('录我方的牌没有反馈');
   if (faceCheck.k >= 0) {
     const got = await page.evaluate(async rank => {
       const { S } = await import('/app/state.js');
@@ -996,20 +1008,21 @@ try {
     await page.waitForTimeout(250);
     // 这一手按"不要"记下去（对手的牌是背面，实际牌型由服务端裁定）
     await page.click('#play-pass');
-    await page.waitForTimeout(1400);
-    if (!(await text(page, '#banner')).includes('已录')) problems.push('录对手不要没有反馈');
+    if (!(await waitBanner(page, '已录'))) problems.push('录对手不要没有反馈');
   }
 
   await page.screenshot({ path: '/tmp/ddz-web-2.png', fullPage: true });
 
   // 交互 7：撤销
   await page.click('#undo');
-  await page.waitForTimeout(1000);
-  if (!(await text(page, '#banner')).includes('已撤销')) problems.push('撤销没有反馈');
+  if (!(await waitBanner(page, '已撤销'))) problems.push('撤销没有反馈');
 
   // 窄屏：不出横向滚动条，保留 3D 正视，数据面板在机下且不遮屏
   await page.setViewportSize({ width: 420, height: 1200 });
-  await page.waitForTimeout(700);
+  // 切窄后版式要重排（面板入机下布局、机身重新量尺）；固定等待在慢机器上会量到重排中途那一帧。
+  // 轮到"不再横向溢出"为止，只有一直溢出才算失败。
+  await waitUntil(page, async () =>
+    (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 2, 8000);
   const narrow = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth - window.innerWidth,
     panel: document.getElementById('crt').getBoundingClientRect().toJSON(),
@@ -1017,7 +1030,12 @@ try {
     panelOpen: document.getElementById('board').classList.contains('panel-open'),
     status: document.getElementById('board').classList.contains('is-stacked'),
   }));
-  if (narrow.overflow > 2) problems.push(`窄屏出现横向溢出 ${narrow.overflow}px`);
+  if (narrow.overflow > 2) {
+    const off = await page.evaluate(() => [...document.querySelectorAll('*')]
+      .filter(e => e.getBoundingClientRect().right > window.innerWidth + 2)
+      .slice(0, 8).map(e => `${e.tagName}#${e.id}.${(e.className||'').toString().slice(0,26)} r=${Math.round(e.getBoundingClientRect().right)} w=${Math.round(e.getBoundingClientRect().width)}`));
+    problems.push(`窄屏出现横向溢出 ${narrow.overflow}px :: ${off.join(' | ')}`);
+  }
   if (!narrow.panelOpen || !narrow.status) problems.push('窄屏数据面板没有进入机下布局');
   if (rectOverlap(narrow.panel, narrow.screen)) problems.push('窄屏数据面板盖住了真屏');
   if (narrow.panel.top < narrow.screen.bottom) problems.push('窄屏数据面板不在机身下方');
