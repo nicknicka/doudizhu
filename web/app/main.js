@@ -183,8 +183,10 @@ function deskPulse(clientX, clientY){
   setTimeout(() => sp.remove(), 700);
 }
 $('controls')?.addEventListener('pointerdown', e => {
-  if (!e.target.closest('.key')) return;
-  machine.pressFeedback();
+  const key = e.target.closest('.key');
+  // 灰着的键按了也没有动作（后端不认非最新/非我方的那一手），就不该给它按下反馈
+  if (!key || key.disabled) return;
+  machine.pressFeedback(key.id);
   deskPulse(e.clientX, e.clientY);
 });
 
@@ -195,18 +197,21 @@ touchbar.addEventListener('click', e => {
   if (!b) return;
   const main = $(b.dataset.control);
   if (main && !main.disabled){
-    machine.pressFeedback();
+    machine.pressFeedback(main.id);
     const r = b.getBoundingClientRect();
     deskPulse(r.left + r.width / 2, r.top + r.height / 2);
     main.click();
   }
 });
 const touchButtons = [...touchbar.querySelectorAll('button[data-control]')];
+// 机身键帽自己不会变灰：把 DOM 热区的 disabled 状态同步到 3D 键帽上（只压暗，不改材质响应）
+const keyHotspots = [...document.querySelectorAll('#controls .key')];
 const syncTouch = () => {
   for (const b of touchButtons){
     const main = $(b.dataset.control);
     b.disabled = !main || main.disabled || machine.machineStatus().status !== 'ready';
   }
+  for (const el of keyHotspots) machine.setKeyDisabled(el.id, el.disabled);
 };
 new MutationObserver(syncTouch).observe($('controls'), {
   subtree: true, attributes: true, attributeFilter: ['disabled'],

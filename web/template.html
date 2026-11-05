@@ -486,13 +486,13 @@
     transition:inset .09s ease-out,border-color .09s ease-out,box-shadow .09s ease-out}
   .controls .key:hover::after,.controls .key:focus-visible::after{
     border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--ground)}
-  /* 按下：描边往里收，键帽看上去被压下去（模型不动，机器整体会跟着弹一下） */
-  .controls .key:active::after{inset:6px 2px 1px;border-color:var(--ink);
-    box-shadow:inset 0 -1px 0 color-mix(in srgb,#fff 34%,transparent)}
   .controls .key:focus-visible{outline:none}
   .controls .key:disabled::after{border-color:transparent}
   .controls.is-unavailable .key{pointer-events:none}
   .controls .key-center::after{inset:12%}
+  /* 键帽外观全部由模型给：方键的灰标是模型上的凹刻，HTML 里再画一个只会在机身
+     旋转时和键面错位地飘着（DOM 是轴对齐的，永远跟不上模型的透视）。 */
+  .controls .key.key-round::before{display:none}
 
   .machine-error{position:absolute;inset:12% 8%;z-index:12;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;

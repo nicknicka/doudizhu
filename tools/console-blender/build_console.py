@@ -213,6 +213,7 @@ C_BEZEL = "#17161a"
 C_INNER = "#2a2036"
 C_GLASS = "#0b0f18"
 C_KEY_EDGE = "#d9d5cc"   # P0：键的描边从金改成浅灰哑光（参考图键沿是浅色阶梯）
+C_KEY_MARK = "#635e52"   # 方键键面中央的灰标（web/tokens.json 的 --muted）
 
 
 def log(msg):
@@ -1330,11 +1331,17 @@ def build_square_key(name, mats, cx, cz):
                         stepped_round_rect(SQ_W, SQ_W, 0.6, steps=1),
                         front - 0.10, front + 0.32,
                         [mats["key"]], bevel=0.18)
-    for ob in (gold, black):
+    # 键面中央的灰标必须长在模型上：HTML 伪元素画的那块是轴对齐的，
+    # 机身一转就和键面错位地飘着（键面外观只能由模型给，见 ADR-0003）。
+    mark = front_piece(name + "_mark",
+                       rounded_rect(4.2, 4.2, 0.5, seg=2),
+                       front - 0.22, front - 0.06,
+                       [mats["key_mark"]], bevel=0.04)
+    for ob in (gold, black, mark):
         ob.location = (cx, 0.0, cz)
         apply_transform(ob)
         shade_by_angle(ob, 28.0)
-    return [gold, black]
+    return [gold, black, mark]
 
 
 def parent_children(parent, children):
@@ -1631,6 +1638,7 @@ def main():
         "key": make_mat("keyMat", "#191817", 0.32, 0.08),        # 键帽：缎面黑，高光锐
         "key_center": make_mat("keyCenterMat", "#10100f", 0.28, 0.10),
         "symbol": make_mat("symbolMat", "#f4efe3", 0.50, 0.0),
+        "key_mark": make_mat("keyMarkMat", C_KEY_MARK, 0.55, 0.0),  # 方键中央灰标
         "screw": make_mat("Screw", C_KEY_EDGE, 0.50, 0.0),       # P0：螺丝环改浅灰哑光
         "screw_dark": make_mat("screwDarkMat", "#211c18", 0.50, 0.0),  # P0：凹点去金属
         "badge_line": make_mat("badgeLineMat", "#a8846b", 0.52, 0.0),  # 背面铭牌刻线：暖棕

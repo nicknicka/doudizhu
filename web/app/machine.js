@@ -52,6 +52,8 @@ let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadow
 let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
 let screenSize = new THREE.Vector2(0.001, 0.001), screenPx = null;
 let buttons = [], buttonZones = [], modelSize = new THREE.Vector3(10, 4.2, 1.0);
+// 键帽按热区拆出来的独立组：按下时只有那一颗往 -Z 沉，机身不再替它做假动作。
+let keyGroups = new Map();
 let screenCenter = new THREE.Vector3();
 let stageW = 0, stageH = 0, dpr = 1, observedW = 0, observedH = 0;
 // 渲染画布铺满视口（比 .stage 设计盒大）；热区/叠加层仍按设计盒坐标算
@@ -580,6 +582,86 @@ function measureButtons(root){
   return zones;
 }
 
+// 键面材质：按下去时往 -Z 沉的是这几款；键沿/台阶（keyEdgeMat）留在原地当键井，
+// 于是能看到"键帽陷进井里"，而不是整块（含井圈）一起平移。
+const FACE_MATERIALS = new Set(['keyMat', 'keyCenterMat', 'symbolMat', 'keyMarkMat', 'keyEdgeMat']);
+
+// 把一个合并键网格按量出的热区拆成"每个键一组"：几何只在内存里重排成非索引三角，
+// 顶点数据逐个照抄，静止时与原网格逐像素一致。每组再分 root（键沿，静止）/ face
+// （键面，可位移）两层，按下的那颗键帽才能单独往 -Z 沉一点再弹回来。
+function splitKeyNode(keyNode, zones, rootName){
+  const meshes = [];
+  keyNode.traverse(m => { if (m.isMesh && m.geometry) meshes.push(m); });
+  const parent = keyNode.parent;
+  const root = new THREE.Group();
+  root.name = rootName;                   // 节点名得留着：节点清单与验收都按它找
+  parent.add(root);
+  const groups = new Map();
+  zones.forEach(([id]) => {
+    const g = new THREE.Group();
+    g.name = `Key_${id}`;
+    const face = new THREE.Group();
+    face.name = `Key_${id}_face`;
+    g.add(face);
+    root.add(g);
+    groups.set(id, { root: g, face });
+  });
+  // 热区盒子拼不出键帽的全部边角（D-pad 连体裙边、菱形键的斜角），所以取"落在盒内
+  // 优先、否则最近"，保证每一片三角都有归属。
+  const nearest = (x, y) => {
+    let best = 0, bestD = Infinity;
+    zones.forEach(([, z], i) => {
+      const dx = Math.max(z.minX - x, 0, x - z.maxX);
+      const dy = Math.max(z.minY - y, 0, y - z.maxY);
+      const d = dx * dx + dy * dy;
+      if (d < bestD){ bestD = d; best = i; }
+    });
+    return best;
+  };
+  for (const mesh of meshes){
+    const geo = mesh.geometry, pos = geo.getAttribute('position');
+    const nor = geo.getAttribute('normal'), uv = geo.getAttribute('uv');
+    const index = geo.index;
+    const count = index ? index.count : pos.count;
+    const buckets = new Map();             // 热区序号 → 摊平的顶点序号
+    for (let i = 0; i < count; i += 3){
+      const ia = index ? index.getX(i) : i;
+      const ib = index ? index.getX(i + 1) : i + 1;
+      const ic = index ? index.getX(i + 2) : i + 2;
+      const cx = (pos.getX(ia) + pos.getX(ib) + pos.getX(ic)) / 3;
+      const cy = (pos.getY(ia) + pos.getY(ib) + pos.getY(ic)) / 3;
+      const zi = nearest(cx, cy);
+      let list = buckets.get(zi);
+      if (!list){ list = []; buckets.set(zi, list); }
+      list.push(ia, ib, ic);
+    }
+    for (const [zi, list] of buckets){
+      const n = list.length;
+      const np = new Float32Array(n * 3);
+      const nn = nor ? new Float32Array(n * 3) : null;
+      const nu = uv ? new Float32Array(n * 2) : null;
+      for (let k = 0; k < n; k++){
+        const src = list[k];
+        np[k * 3] = pos.getX(src); np[k * 3 + 1] = pos.getY(src); np[k * 3 + 2] = pos.getZ(src);
+        if (nn){ nn[k * 3] = nor.getX(src); nn[k * 3 + 1] = nor.getY(src); nn[k * 3 + 2] = nor.getZ(src); }
+        if (nu){ nu[k * 2] = uv.getX(src); nu[k * 2 + 1] = uv.getY(src); }
+      }
+      const ng = new THREE.BufferGeometry();
+      ng.setAttribute('position', new THREE.BufferAttribute(np, 3));
+      if (nn) ng.setAttribute('normal', new THREE.BufferAttribute(nn, 3));
+      if (nu) ng.setAttribute('uv', new THREE.BufferAttribute(nu, 2));
+      ng.computeBoundingBox(); ng.computeBoundingSphere();
+      const nm = new THREE.Mesh(ng, mesh.material);
+      nm.name = `${mesh.name}__${zones[zi][0]}`;
+      nm.castShadow = mesh.castShadow; nm.receiveShadow = mesh.receiveShadow;
+      const g = groups.get(zones[zi][0]);
+      (FACE_MATERIALS.has(mesh.material.name) ? g.face : g.root).add(nm);
+    }
+  }
+  parent.remove(keyNode);
+  return groups;
+}
+
 /* ---------- 布局 / 投影 ---------- */
 function projectScreenLocal(lx, ly){
   const v = new THREE.Vector3(lx, ly, 0);
@@ -738,14 +820,19 @@ function installModel(gltf){
   const buttonsNode = body.getObjectByName('Buttons');
   if (!buttonsNode.visible) throw new Error('GLB 的 Buttons 节点不可见');
   const measuredZones = measureButtons(buttonsNode);
+  // 拆成每键一组，给「按下的那颗键帽自己回弹」留出可独立位移的对象。
+  keyGroups = splitKeyNode(buttonsNode, measuredZones, 'Buttons');
   // 副屏右侧那颗实体返回键：机顶屏「记牌 ↔ 出牌概率」的切换点。
-  // 它不是 Buttons 连通块里的键，所以单独量一次几何。
-  const backBox = modelLocalBox(body.getObjectByName('BackKey'));
+  // 它不是 Buttons 连通块里的键，所以单独量一次几何，也单独拆一次。
+  const backNode = body.getObjectByName('BackKey');
+  const backBox = modelLocalBox(backNode);
   if (!backBox) throw new Error('BackKey 节点没有可量的几何');
-  measuredZones.push(['bar-mode', {
+  const backZone = ['bar-mode', {
     minX: backBox.min.x, maxX: backBox.max.x,
     minY: backBox.min.y, maxY: backBox.max.y, maxZ: backBox.max.z,
-  }, '']);
+  }, ''];
+  measuredZones.push(backZone);
+  for (const [id, g] of splitKeyNode(backNode, [backZone], 'BackKey')) keyGroups.set(id, g);
   const screenNode = body.getObjectByName('Screen');
   const sb = nodeGeometryBoxLocal(screenNode, body);
   if (!sb) throw new Error('Screen 节点没有可量的几何');
@@ -809,6 +896,7 @@ function installModel(gltf){
 function loadModel(){
   ready = false; status = 'loading'; error = '';
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
+  keyGroups = new Map(); pressKey = '';
   if (contactShadow) contactShadow.visible = false;
   if (backdrop) backdrop.visible = false;
   if (body && rig){ rig.remove(body); body = null; screenGroup = null; screenMesh = null;
@@ -996,32 +1084,74 @@ function applyRigPose(){
   // 视差平移 + 拖拽旋转 + 缩放；保留原 TILT 作为基准
   // 按键冲量：机身被按下去一点、轻微后仰，松手弹回（pressKick 是 0→1→0 的脉冲）
   const kick = pressKick;
-  rig.position.set(view.x + panX, view.y + panY - kick * 0.045, -kick * 0.06);
+  // 机身只跟着轻轻一顿：真正的"按下去了"由键帽自己的行程给，机子不用大幅回弹。
+  rig.position.set(view.x + panX, view.y + panY - kick * 0.012, -kick * 0.015);
   const baseTilt = isNarrow() ? 0 : TILT;
-  rig.rotation.x = baseTilt + dragTilt + kick * 0.02;
+  rig.rotation.x = baseTilt + dragTilt + kick * 0.006;
   rig.rotation.y = dragYaw;
   rig.scale.setScalar(rigZoom);
 }
-/* 按一次键：整机往后沉一下再弹回，和键帽的下压描边一起构成"真机器"的手感 */
-let pressKick = 0, pressRunning = false, pressStart = 0;
-export function pressFeedback(){
+/* 按一次键：那颗键帽自己往 -Z 沉下去再带一次过冲弹回来，机身只跟着轻轻一顿。
+   pressFeedback(id) 收的是热区 id（= 热区按钮的 id），不传就只做机身那一顿。 */
+let pressKick = 0, pressRunning = false, pressStart = 0, pressKey = '';
+const KEY_TRAVEL = 1.8;      // 键帽下压行程（模型 mm；机身 1/20 缩放 ≈ 0.09 世界单位）
+const KEY_PRESS_MS = 220;
+export function pressFeedback(id = ''){
   if (reduce || !renderer) return;
   pressStart = performance.now();
+  // 上一颗还没回位就又按了另一颗：先把旧键复位，免得两颗一起卡在下面
+  if (pressKey && pressKey !== id && keyGroups.has(pressKey)) keyGroups.get(pressKey).face.position.z = 0;
+  pressKey = (id && keyGroups.has(id)) ? id : '';
   if (pressRunning) return;
   pressRunning = true;
   requestAnimationFrame(stepPress);
 }
+// 键帽行程曲线：前 30% 快下，之后是带一次过冲的弹簧回位 ——"按下去"和"弹回来"都看得见
+function keyTravel(t){
+  if (t < 0.3){ const u = t / 0.3; return 1 - Math.pow(1 - u, 3); }
+  const u = (t - 0.3) / 0.7;
+  return Math.cos(Math.PI * 2.2 * u) * Math.exp(-4.2 * u);
+}
 function stepPress(now){
-  const t = Math.min(1, (now - pressStart) / 200);
-  // 0→1→0 的单峰 + 尾部一次轻微回弹过冲
+  const t = Math.min(1, (now - pressStart) / KEY_PRESS_MS);
+  // 0→1→0 的单峰 + 尾部一次轻微回弹过冲（幅度已被 applyRigPose 压到很小）
   pressKick = Math.sin(Math.PI * Math.pow(t, 0.8)) * (1 - 0.22 * Math.sin(Math.PI * 2 * t));
+  const g = keyGroups.get(pressKey);
+  if (g) g.face.position.z = -KEY_TRAVEL * keyTravel(t);
   applyRigPose(); relayout(); requestRender();
   if (t >= 1){
     pressKick = 0; pressRunning = false;
+    if (g) g.face.position.z = 0;
+    pressKey = '';
     applyRigPose(); relayout(); requestRender();
     return;
   }
   requestAnimationFrame(stepPress);
+}
+// TEMP-PROBE
+export function __probeSetTravel(id, z){ const g = keyGroups.get(id); if (g){ g.face.position.z = z; requestRender(); } }
+// END TEMP-PROBE
+// 灰键：把这组键帽换成同款但压暗的材质（只压暗、不改模型材质响应），旋转时跟着
+// 键帽一起转，不像 DOM 覆盖层那样飘在键面外面。
+export function setKeyDisabled(id, disabled){
+  const g = keyGroups.get(id);
+  if (!g) return;
+  let changed = false;
+  g.root.traverse(m => {
+    if (!m.isMesh) return;
+    if (!m.userData.baseMat) m.userData.baseMat = m.material;
+    if (disabled){
+      if (!m.userData.dimMat){
+        const dim = m.userData.baseMat.clone();
+        dim.color.multiplyScalar(0.42);
+        m.userData.dimMat = dim;
+      }
+      if (m.material !== m.userData.dimMat){ m.material = m.userData.dimMat; changed = true; }
+    } else if (m.material !== m.userData.baseMat){
+      m.material = m.userData.baseMat; changed = true;
+    }
+  });
+  if (changed) requestRender();
 }
 export function startDrag(clientX, clientY){
   if (!ready) return;
@@ -1340,6 +1470,10 @@ export function machineStatus(){
     tablet,
     screen: screenPx, screenSize: { w: screenSize.x, h: screenSize.y },
     buttons: buttons.map(b => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h })),
+    // 按键反馈：验收要能直接读到"哪颗键在动、键帽沉了多少、机身顿了多少"
+    press: { key: pressKey, kick: pressKick,
+             travel: keyGroups.get(pressKey) ? keyGroups.get(pressKey).face.position.z : 0,
+             count: keyGroups.size, keys: [...keyGroups.keys()] },
     handRows,
   };
 }
