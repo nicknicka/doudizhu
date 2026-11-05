@@ -210,8 +210,11 @@ new MutationObserver(syncTouch).observe($('controls'), {
 });
 setInterval(syncTouch, 300);
 
-/* ---------- 屏幕里点牌 / 拖牌 = 选牌 ---------- */
-let draggingCard = false;
+/* ---------- 屏幕里点牌 / 拖牌 = 选牌 ----------
+   拖拽语义：**进入一张牌的区域就反转它**。所以滑过几张已选中的牌会逐张取消，
+   滑出去再滑回同一张牌会再反转一次。用 lastCard 记住"当前正压着哪张"，
+   指针落在牌之外（或两张牌之间）时清空，重新进入就重新反转。 */
+let draggingCard = false, lastCard = null;
 const cardAt = e => {
   const r = $('scene').getBoundingClientRect();
   return machine.pickCardAt(e.clientX - r.left, e.clientY - r.top);
@@ -221,6 +224,7 @@ $('stage').addEventListener('pointerdown', e => {
   const i = cardAt(e);
   if (i === null) return;
   draggingCard = true;
+  lastCard = i;
   consolePanel.toggleCard(i);
   e.preventDefault();
   // 牌上按下只做选牌，不能再启动机身拖拽并抢走 pointer capture。
@@ -229,10 +233,13 @@ $('stage').addEventListener('pointerdown', e => {
 $('stage').addEventListener('pointermove', e => {
   if (!draggingCard) return;
   const i = cardAt(e);
-  if (i !== null) consolePanel.addCard(i);
+  if (i === lastCard) return;      // 同一张牌里移动不算重新进入
+  lastCard = i;
+  if (i !== null) consolePanel.toggleCard(i);
 });
-addEventListener('pointerup', () => { draggingCard = false; });
-addEventListener('pointercancel', () => { draggingCard = false; });
+const endCardDrag = () => { draggingCard = false; lastCard = null; };
+addEventListener('pointerup', endCardDrag);
+addEventListener('pointercancel', endCardDrag);
 addEventListener('keydown', e => {
   const t = document.activeElement.tagName;
   if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;

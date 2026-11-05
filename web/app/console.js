@@ -50,37 +50,38 @@ const chosenRole = () => $('new-role').querySelector('.seg.is-on').dataset.role;
 const chosenPos = () => $('new-pos').querySelector('.seg.is-on').dataset.pos;
 const currentMe = () => (chosenRole() === 'landlord' ? 'landlord' : chosenPos());
 
-/** 把 SEL.play 同步到 3D 手牌的选中态（抬牌）。 */
-export function syncPicked(){
-  const counts = {};
-  for (const r of SEL.play) counts[r] = (counts[r] || 0) + 1;
-  machine.setSelected(counts);
-}
+/* ---------- 选中的是「哪几张牌」 ----------
+   SEL.play 是按点数记的序列（发给后端、画在操作台），但屏幕上的点/滑必须
+   记住「具体哪一张」，否则同点数的几张牌没法各自反转 —— 滑过三张已选中的 5
+   只会取消第一张。所以这里额外用下标集合记身份，再回填 SEL.play。 */
+const pickedIdx = new Set();
 
-/** 拖动经过某张牌时只加不删（避免来回滑时反复切换）。 */
-export function addCard(index){
+/** 外部直接改了 SEL.play（推荐 / 十字键 / 回放 / 清空）后，把身份对齐到前几张同点数牌。 */
+export function adoptPlay(){
   const hand = (S.snap && S.snap.my_hand) || [];
-  const rank = hand[index];
-  if (!rank) return;
-  const before = hand.slice(0, index).filter(r => r === rank).length;
-  if (countIn(SEL.play, rank) > before) { /* 这张已经选中了 */ }
-  else SEL.play.push(rank);
-  syncPicked(); renderPlay();
+  const left = {};
+  for (const r of SEL.play) left[r] = (left[r] || 0) + 1;
+  pickedIdx.clear();
+  for (let i = 0; i < hand.length; i++){
+    const r = hand[i];
+    if (left[r] > 0){ left[r] -= 1; pickedIdx.add(i); }
+  }
 }
+/** 以身份集合为准重建 SEL.play（按手牌顺序，等价于按点数从小到大）。 */
+function commitPlay(){
+  const hand = (S.snap && S.snap.my_hand) || [];
+  SEL.play = [...pickedIdx].sort((a, b) => a - b).map(i => hand[i]).filter(Boolean);
+}
+/** 把选中的那几张牌在 3D 里抬起来。 */
+export function syncPicked(){ machine.setSelected(pickedIdx); }
 
-/** 屏幕里点到了我的第 index 张牌：切换它的选中状态。 */
+/** 屏幕里点到了我的第 index 张牌：反转它的选中状态。 */
 export function toggleCard(index){
   const hand = (S.snap && S.snap.my_hand) || [];
-  const rank = hand[index];
-  if (!rank) return;
-  const before = hand.slice(0, index).filter(r => r === rank).length;
-  if (countIn(SEL.play, rank) > before){
-    const i = SEL.play.lastIndexOf(rank);
-    if (i >= 0) SEL.play.splice(i, 1);
-  } else {
-    SEL.play.push(rank);
-  }
-  syncPicked(); renderPlay();
+  if (!hand[index]) return;
+  if (pickedIdx.has(index)) pickedIdx.delete(index);
+  else pickedIdx.add(index);
+  commitPlay(); syncPicked(); renderPlay();
 }
 
 const cardSuitOrder = r => RANKS.indexOf(r);
@@ -185,7 +186,7 @@ function keypadStub(){
 
 export function resetHint(){ hintIndex = -1; }
 
-export function render(){ renderNew(); renderPlay(); syncPicked(); }
+export function render(){ adoptPlay(); renderNew(); renderPlay(); syncPicked(); }
 
 export function showNewPanel(){ $('newgame').classList.add('is-open'); renderNew(); }
 export function hideNewPanel(){ $('newgame').classList.remove('is-open'); }
@@ -265,27 +266,27 @@ export function init(dependencies){
         : `牌池里 ${NAME[r]} 只剩 ${cap} 张。`, 'error');
       return;
     }
-    SEL.play.push(r); renderPlay();
+    SEL.play.push(r); adoptPlay(); renderPlay();
   });
   $('play-chips').addEventListener('click', e => {
     const s = e.target.closest('[data-drop]'); if (!s) return;
-    SEL.play.splice(Number(s.dataset.drop), 1); syncPicked(); renderPlay();
+    SEL.play.splice(Number(s.dataset.drop), 1); adoptPlay(); syncPicked(); renderPlay();
   });
-  $('play-clear').addEventListener('click', () => { SEL.play = []; syncPicked(); renderPlay(); });
+  $('play-clear').addEventListener('click', () => { SEL.play = []; adoptPlay(); syncPicked(); renderPlay(); });
   $('play-latest').addEventListener('click', () => deps.refresh(S.meta.total_steps));
 
   $('play-go').addEventListener('click', async () => {
     const player = S.snap.acting, cards = sortPicked().join('');
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards},
                           `已录：${actorName(player)} ${cards}。`)){
-      SEL.play = []; syncPicked();
+      SEL.play = []; adoptPlay(); syncPicked();
     }
   });
   $('play-pass').addEventListener('click', async () => {
     const player = S.snap.acting;
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards:''},
                           `已录：${actorName(player)} 不要。`)){
-      SEL.play = []; syncPicked();
+      SEL.play = []; adoptPlay(); syncPicked();
     }
   });
   // 推荐键：每按一次换到下一个候选，并把那一手选到桌上。
@@ -305,7 +306,7 @@ export function init(dependencies){
     hintIndex = ((hintIndex + 1) % n + n) % n;
     const a = acts[hintIndex];
     SEL.play = a.cards.slice();
-    syncPicked(); renderPlay();
+    adoptPlay(); syncPicked(); renderPlay();
     const rec = `推荐 ${hintIndex + 1}/${n}：${a.label}`
               + `（模型动作选择概率 ${Math.round(a.probability * 100)}%）`;
     $('play-hint').className = 'hint';
@@ -321,7 +322,7 @@ export function init(dependencies){
     const player = S.snap.acting;
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards:a.cards.join('')},
                           `已录：${actorName(player)} ${a.cards.length ? a.cards.join('') : '不要'}。`)){
-      SEL.play = []; syncPicked();
+      SEL.play = []; adoptPlay(); syncPicked();
     }
   });
 

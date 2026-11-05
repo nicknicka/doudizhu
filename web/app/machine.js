@@ -1123,13 +1123,14 @@ export function pickCardAt(px, py){
   }
   return best ? best.object.userData.handIndex : null;
 }
-export function setSelected(rankCounts){
-  const left = Object.assign({}, rankCounts || {});
+export function setSelected(indices){
+  // 抬哪几张按「手牌下标」定，不再按点数。同点数的牌要能各自反转，
+  // 按点数记的话滑过三张 5 只抬得起第一张。
+  const on = new Set(indices || []);
   const ordered = handMeshes.slice().sort((a, b) => a.userData.handIndex - b.userData.handIndex);
   for (const m of ordered){
-    const base = m.userData.baseY, r = m.userData.rank;
-    if (left[r] > 0){ left[r] -= 1; m.position.y = base + 0.46; }
-    else m.position.y = base;
+    const base = m.userData.baseY;
+    m.position.y = on.has(m.userData.handIndex) ? base + 0.46 : base;
   }
   requestRender();
 }

@@ -612,8 +612,8 @@ try {
   await openDeck(page);
   await checkPanelLayout(page, '宽屏');
     // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
-  // 选中模型是"按点数计数、从左往右抬起"的，所以要点那张真正会被抬起的牌
-  // （它自己的点数在它左边没出现过），否则点在重复点数的第二/三张上是"再加一张"。
+  // 选中的是「具体哪一张」（按下标记身份），所以点同一张两次能反转，
+  // 同点数的第二、三张也各自独立。
   const hand = await page.evaluate(async () => (await import('/app/state.js')).S.snap.my_hand);
   let first = hand.length - 1;
   while (first > 0 && hand.indexOf(hand[first]) !== first) first--;
@@ -630,6 +630,49 @@ try {
     if (await page.locator('#play-chips i.c').count()) {
       await page.click('#play-clear'); await page.waitForTimeout(150);
       if ((await page.locator('#play-chips i.c').count()) !== 0) problems.push('清空没有清掉选中的牌');
+    }
+  }
+
+  // 滑动选牌：进入一张牌的区域就反转它。滑过去再滑回来必须回到原状态，
+  // 而且同点数的第 2/3 张也要能各自反转（历史上会残留一张取消不掉）。
+  {
+    if (await page.locator('#play-clear').isEnabled()) { await page.click('#play-clear'); await page.waitForTimeout(120); }
+    const seq = await page.evaluate(async () => {
+      const c = await import('/app/console.js');
+      const { S, SEL } = await import('/app/state.js');
+      const hand = S.snap.my_hand;
+      let g = -1;
+      for (let i = 0; i + 2 < hand.length; i++)
+        if (hand[i] === hand[i + 1] && hand[i + 1] === hand[i + 2]) { g = i; break; }
+      const got = [];
+      for (const k of [g, g + 1, g + 2, g, g + 1, g + 2]) { c.toggleCard(k); got.push(SEL.play.length); }
+      return { g, rank: hand[g], got, leftover: SEL.play.length };
+    });
+    if (seq.g < 0) problems.push('手牌里没有同点数三张，滑动选牌的身份用例没法跑');
+    else if (seq.got.join(',') !== '1,2,3,2,1,0' || seq.leftover !== 0) {
+      problems.push(`同点数三张没能各自反转：${seq.rank}×3 → ${seq.got.join('→')}（末态 ${seq.leftover}）`);
+    }
+    if (seq.g >= 0) {
+      const chipN = () => page.locator('#play-chips i.c').count();
+      const n0 = await chipN();
+      const slideAcross = async () => {
+        const box = await page.locator('#scene').boundingBox();
+        await page.mouse.move(box.x + (await handPts(page))[seq.g].x, box.y + (await handPts(page))[seq.g].y);
+        await page.waitForTimeout(600);
+        const P = await handPts(page);
+        await page.mouse.down();
+        await page.mouse.move(box.x + P[seq.g + 1].x, box.y + P[seq.g + 1].y, { steps: 8 });
+        await page.mouse.move(box.x + P[seq.g + 2].x, box.y + P[seq.g + 2].y, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(150);
+      };
+      await slideAcross();
+      const n1 = await chipN();
+      await slideAcross();
+      const n2 = await chipN();
+      if (n1 - n0 < 2) problems.push(`鼠标滑过 3 张牌只反转了 ${n1 - n0} 张（每滑到一张就该反转一张）`);
+      if (n2 !== n0) problems.push(`鼠标沿同一路径滑两次没有回到起点：${n0} → ${n1} → ${n2}`);
+      if (n2 !== 0) { await page.click('#play-clear'); await page.waitForTimeout(120); }
     }
   }
 
