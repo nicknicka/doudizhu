@@ -163,9 +163,10 @@ $('machine-retry').addEventListener('click', () => machine.retry());
 
 /* ---------- 按键反馈：机身沉一下弹回，桌面光池亮一下、从按压点荡出一圈 ---------- */
 const desk = $('desk');
-initDeskPixels($('bg-pixels'));
+const bgpix = initDeskPixels($('bg-pixels'));
 let deskPulseTimer = null;
 function deskPulse(clientX, clientY){
+  bgpix.pulse(clientX, clientY);
   if (!desk) return;
   desk.classList.add('is-pulsing');
   clearTimeout(deskPulseTimer);

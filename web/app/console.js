@@ -6,9 +6,17 @@ import { S, SEL, PAD, $ } from './state.js';
 import { RANKS, NAME, card, countIn, actorName, identityLabel, turnText, overText } from './labels.js';
 import { setBanner } from './api.js';
 import * as machine from './machine.js';
+import { pulseDesk } from './deskbg.js';
 
 let deps = { refresh: async () => {}, mutate: async () => false, renderBar: () => {} };
 let hintIndex = -1;   // 推荐键在候选里循环
+
+// 点候选出牌时背景也掀一圈涟漪：鼠标/触摸用真实点，键盘激活退回按钮中心
+function rippleAt(el, e){
+  if (e.clientX || e.clientY) return pulseDesk(e.clientX, e.clientY);
+  const r = el.getBoundingClientRect();
+  pulseDesk(r.left + r.width / 2, r.top + r.height / 2);
+}
 
 /** 牌池里每个点数还剩几张。数据来自后端，页面不自己数。 */
 const poolCounts = () => (S.snap && S.snap.pool_counts) || {};
@@ -319,6 +327,7 @@ export function init(dependencies){
     const b = e.target.closest('button[data-pick]'); if (!b) return;
     const a = JSON.parse($('play-picks').dataset.json || '[]')[Number(b.dataset.pick)];
     if (!a) return;
+    rippleAt(b, e);
     const player = S.snap.acting;
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards:a.cards.join('')},
                           `已录：${actorName(player)} ${a.cards.length ? a.cards.join('') : '不要'}。`)){
