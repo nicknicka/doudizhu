@@ -61,7 +61,9 @@ const text = async (page, sel) => ((await page.locator(sel).textContent()) ?? ''
 const handPts = page => page.evaluate(async () => (await import('/app/machine.js')).handPoints());
 // 在屏幕里点第 k 张手牌：先把鼠标移过去让视差收敛，再按收敛后的真实落点点击
 const clickCard = async (page, k) => {
-  const box = await page.locator('#scene').boundingBox();
+  // machine.js 投影出来的手牌坐标是 .stage 局部坐标；机身铺满视口渲染后画布比 .stage 大，
+  // 所以点击基准必须取 .stage 而不是画布本身。
+  const box = await page.locator('#stage').boundingBox();
   let pt = (await handPts(page))[k];
   if (!pt) throw new Error(`没有第 ${k} 张手牌坐标`);
   await page.mouse.move(box.x + pt.x, box.y + pt.y);
@@ -294,10 +296,15 @@ const sampleFidelity = (page, sel) => page.evaluate(async ({ sel, probes }) => {
   const frame = typeof window.__glbFrame === 'function'
     ? window.__glbFrame()
     : (await import('/app/machine.js')).machineStatus().tablet;
+  // 主页机身铺满视口渲染，画布比 .stage 大：frame 是 .stage 局部坐标，
+  // 取像素前先补上 .stage 左上角到画布左上角的偏移。/glb 页画布就是视口，偏移为 0。
+  const stageEl = document.getElementById('stage');
+  const cr = c.getBoundingClientRect(), sr = stageEl ? stageEl.getBoundingClientRect() : cr;
+  const ox = sr.left - cr.left, oy = sr.top - cr.top;
   if (!frame || !(frame.w > 0)) return { frame: null, out: [] };
   const out = [];
   for (const s of probes) {
-    const x0 = frame.x + frame.w * s.fx, y0 = frame.y + frame.h * s.fy;
+    const x0 = ox + frame.x + frame.w * s.fx, y0 = oy + frame.y + frame.h * s.fy;
     const wx = Math.max(0, Math.round(frame.w * (s.wx || 0)));
     const wy = Math.max(0, Math.round(frame.h * (s.wy || 0)));
     let best = null;
@@ -467,9 +474,12 @@ try {
       return px[((c.height - 1 - Y) * c.width + X) * 4 + 3];
     };
     const r = (await import('/app/machine.js')).machineStatus().tablet;
+    // 同保真探针：tablet 是 .stage 局部坐标，画布铺满视口后要补偏移才能取到对像素。
+    const sr = document.getElementById('stage').getBoundingClientRect();
+    const cr = c.getBoundingClientRect(), ox = sr.left - cr.left, oy = sr.top - cr.top;
     let peak = 0, left = 0, n = 0;
     for (const dy of [6, 12, 20, 30]) for (let i = 0; i <= 12; i++) {
-      const x = r.x + r.w * (0.06 + 0.08 * i), y = r.y + r.h + dy;
+      const x = ox + r.x + r.w * (0.06 + 0.08 * i), y = oy + r.y + r.h + dy;
       peak = Math.max(peak, alphaAt(x, y));
       if (i <= 1) { left += alphaAt(x, y); n++; }
     }
@@ -555,7 +565,7 @@ try {
   if (idleB.dpr > 2) problems.push(`DPR 超过 2：${idleB.dpr}`);
 
   // 视差动画也必须有明确终点：鼠标停住后 500ms 不再续帧
-  const stageBox = await page.locator('#scene').boundingBox();
+  const stageBox = await page.locator('#stage').boundingBox();
   await page.mouse.move(stageBox.x + stageBox.width * 0.18, stageBox.y + stageBox.height * 0.28);
   await page.mouse.move(stageBox.x + stageBox.width * 0.72, stageBox.y + stageBox.height * 0.62);
   await page.waitForTimeout(400);
@@ -611,7 +621,7 @@ try {
     problems.push(`机顶条没走四边形映射（回落到固定矩形）：${restQuad.inline}`);
   }
   const bodyPoint = await page.evaluate(async () => {
-    const r = document.getElementById('scene').getBoundingClientRect();
+    const r = document.getElementById('stage').getBoundingClientRect();
     const scr = document.getElementById('screen-hud').getBoundingClientRect();
     const m = await import('/app/machine.js');
     for (let fy = 0.06; fy <= 0.92; fy += 0.04) {
@@ -724,7 +734,7 @@ try {
       const chipN = () => page.locator('#play-chips i.c').count();
       const n0 = await chipN();
       const slideAcross = async () => {
-        const box = await page.locator('#scene').boundingBox();
+        const box = await page.locator('#stage').boundingBox();
         await page.mouse.move(box.x + (await handPts(page))[seq.g].x, box.y + (await handPts(page))[seq.g].y);
         await page.waitForTimeout(600);
         const P = await handPts(page);

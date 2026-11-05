@@ -216,8 +216,10 @@ setInterval(syncTouch, 300);
    滑出去再滑回同一张牌会再反转一次。用 lastCard 记住"当前正压着哪张"，
    指针落在牌之外（或两张牌之间）时清空，重新进入就重新反转。 */
 let draggingCard = false, lastCard = null;
+// pickCardAt 吃的是 .stage 局部坐标（屏热区、手牌落点都在这个坐标系里）。
+// 画布铺满视口后画布比 .stage 大，所以基准必须取 .stage 而不是画布。
 const cardAt = e => {
-  const r = $('scene').getBoundingClientRect();
+  const r = $('stage').getBoundingClientRect();
   return machine.pickCardAt(e.clientX - r.left, e.clientY - r.top);
 };
 $('stage').addEventListener('pointerdown', e => {

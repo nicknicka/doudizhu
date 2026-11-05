@@ -53,6 +53,8 @@ let screenSize = new THREE.Vector2(0.001, 0.001), screenPx = null;
 let buttons = [], buttonZones = [], modelSize = new THREE.Vector3(10, 4.2, 1.0);
 let screenCenter = new THREE.Vector3();
 let stageW = 0, stageH = 0, dpr = 1, observedW = 0, observedH = 0;
+// 渲染画布铺满视口（比 .stage 设计盒大）；热区/叠加层仍按设计盒坐标算
+let canvasW = 0, canvasH = 0, observedCW = 0, observedCH = 0;
 let lastSnap = null, lastMeta = null, narrowHand = false, tinyHand = false;
 let pointerTarget = { x: 0, y: 0 }, view = { x: 0, y: 0 };
 let parallaxRunning = false, parallaxStart = 0;
@@ -476,9 +478,13 @@ function clusterTriangles(tris, gap = 0.02){
              cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, parts: parts.length };
   }).filter(c => c.w > 0.25 && c.h > 0.25);
 }
+// 画布比设计盒大，但两者中心重合：先映射到画布像素，再减掉偏移，
+// 输出的仍是 .stage 局部坐标，叠加层和 isOnBody 的口径完全不用改。
 function projectPoint(x, y, z){
   tmp.set(x, y, z).project(camera);
-  return { x: (tmp.x * 0.5 + 0.5) * stageW, y: (-tmp.y * 0.5 + 0.5) * stageH };
+  const cw = canvasW || stageW, ch = canvasH || stageH;
+  return { x: (tmp.x * 0.5 + 0.5) * cw - (cw - stageW) / 2,
+           y: (-tmp.y * 0.5 + 0.5) * ch - (ch - stageH) / 2 };
 }
 function projectModelPoint(x, y, z){
   tmp.set(x, y, z).applyMatrix4(body.matrixWorld);
@@ -655,18 +661,28 @@ function emit(extra = {}){
 }
 function resize(w, h){
   if (!renderer || !w || !h) return;
-  if (w === observedW && h === observedH) return;
-  observedW = w; observedH = h;
+  // w/h 是设计盒（.stage）尺寸，决定机身画多大、热区落在哪；
+  // 画布本身铺满视口，只负责别把拖出去的机身切掉。
+  const cw = Math.max(1, Math.round(canvas.clientWidth || w));
+  const ch = Math.max(1, Math.round(canvas.clientHeight || h));
+  if (w === observedW && h === observedH && cw === observedCW && ch === observedCH) return;
+  observedW = w; observedH = h; observedCW = cw; observedCH = ch;
   stageW = w; stageH = h;
-  camera.aspect = w / h;
+  canvasW = cw; canvasH = ch;
+  camera.aspect = cw / ch;
   rig.rotation.x = isNarrow() ? 0 : TILT;
-  const fitH = Math.max(modelSize.y * 1.18, modelSize.x * 1.10 / camera.aspect);
-  const dist = (fitH / 2) / Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
+  // 取景（机身多大、热区落在哪）仍按设计盒 .stage 定，画布变大只把竖向视锥撑开：
+  // 相机位置不动、z=0 平面上的「世界→像素」比不动，机身投影才和改动前逐像素一致
+  // （拉远相机去凑视锥会改透视，机身会缩水几个百分点）。
+  const fitH = Math.max(modelSize.y * 1.18, modelSize.x * 1.10 / (w / h));
+  const halfTan = Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
+  const dist = (fitH / 2) / halfTan;
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(halfTan * (ch / h)));
   panScale = fitH / h;                   // z=0 平面上 1 CSS px 对应的世界单位
   camera.position.set(0, 0.05, dist);
   camera.lookAt(0, 0, 0);
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h, false);
+  renderer.setSize(cw, ch, false);
   if (ready && lastSnap && (isNarrow() !== narrowHand || isTiny() !== tinyHand)) drawCards();
   relayout();
   requestRender();
@@ -1091,14 +1107,12 @@ export function startPan(clientX, clientY){
 }
 export function movePan(clientX, clientY){
   if (!panDragging) return;
-  const r = stage.getBoundingClientRect();
-  // 屏幕上是 1:1：拖多少像素机身就走多少像素（俯仰把竖直方向拉回一点）
+  // 屏幕上是 1:1：拖多少像素机身就走多少像素（俯仰把竖直方向拉回一点）。
+  // 不做范围夹取：机身跟手，可以一直拖到视口外，松手由弹簧送回原位。
   const dx = clientX - panStartX, dy = clientY - panStartY;
   panX = panFromX + dx * panScale;
   // 世界 y 向上、屏幕 y 向下：往下拖要往上减，机身才会跟着手走而不是反着跑。
   panY = panFromY - dy * panScale / Math.cos(TILT);
-  panX = Math.max(-r.width * 0.35 * panScale, Math.min(r.width * 0.35 * panScale, panX));
-  panY = Math.max(-r.height * 0.30 * panScale, Math.min(r.height * 0.30 * panScale, panY));
   applyRigPose(); relayout(); requestRender();
 }
 export function endPan(){

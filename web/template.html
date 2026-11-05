@@ -655,6 +655,11 @@
     width:min(96vw,1600px,calc((100vh - var(--stage-reserve,210px)) * 2.03));
     transition:transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
   body.is-minimal .stage{aspect-ratio:2.03;max-height:calc(100vh - var(--stage-reserve,210px))}
+  /* 画布铺满视口：机身被拖出设计盒时不再被画布边缘切一刀，只剩视口本身是边界。
+     画布中心与 .stage 中心重合，所以投影出来的热区仍是 .stage 局部坐标。 */
+  body.is-minimal #scene{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:100vw;height:100vh}
   /* 操作台已脱离机身，成为 dock 上沿的浮层；极简态机身只留 3D 主屏 +
      座位覆盖层（窄屏再留一条计分板）。展开时整机轻轻上浮给浮层让位 ——
      机身位置只由自身几何决定，不会被浮层内容挤压。 */
