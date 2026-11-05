@@ -1128,9 +1128,6 @@ function stepPress(now){
   }
   requestAnimationFrame(stepPress);
 }
-// TEMP-PROBE
-export function __probeSetTravel(id, z){ const g = keyGroups.get(id); if (g){ g.face.position.z = z; requestRender(); } }
-// END TEMP-PROBE
 // 灰键：把这组键帽换成同款但压暗的材质（只压暗、不改模型材质响应），旋转时跟着
 // 键帽一起转，不像 DOM 覆盖层那样飘在键面外面。
 export function setKeyDisabled(id, disabled){
