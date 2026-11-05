@@ -973,7 +973,8 @@ export function movePan(clientX, clientY){
   // 屏幕上是 1:1：拖多少像素机身就走多少像素（俯仰把竖直方向拉回一点）
   const dx = clientX - panStartX, dy = clientY - panStartY;
   panX = panFromX + dx * panScale;
-  panY = panFromY + dy * panScale / Math.cos(TILT);
+  // 世界 y 向上、屏幕 y 向下：往下拖要往上减，机身才会跟着手走而不是反着跑。
+  panY = panFromY - dy * panScale / Math.cos(TILT);
   panX = Math.max(-r.width * 0.35 * panScale, Math.min(r.width * 0.35 * panScale, panX));
   panY = Math.max(-r.height * 0.30 * panScale, Math.min(r.height * 0.30 * panScale, panY));
   applyRigPose(); relayout(); requestRender();
