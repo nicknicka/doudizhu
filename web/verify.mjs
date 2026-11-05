@@ -496,7 +496,8 @@ try {
   if (!mainHud.texture || !(mainHud.texture.w > 0) || !(mainHud.texture.h > 0)) {
     problems.push(`主屏 HUD 纹理尺寸无效：${JSON.stringify(mainHud.texture)}`);
   }
-  if (!(mainHud.ink > 0)) problems.push(`主屏 HUD 画布是空的（ink=${mainHud.ink}），徽章没画进去`);
+  const hudInk = await page.evaluate(async () => (await import('/app/machine.js')).mainHudInk());
+  if (!(hudInk > 0)) problems.push(`主屏 HUD 画布是空的（ink=${hudInk}），徽章没画进去`);
   if (!(await page.locator('#screen-hud').evaluate(el => el.classList.contains('is-3d')))) {
     problems.push('#screen-hud 没标成 is-3d：DOM 圆点还压在机身上');
   } else {

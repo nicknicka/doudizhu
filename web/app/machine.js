@@ -60,7 +60,7 @@ let pointerTarget = { x: 0, y: 0 }, view = { x: 0, y: 0 };
 let parallaxRunning = false, parallaxStart = 0;
 let dragYaw = 0, dragTilt = 0, dragFromYaw = 0, dragFromTilt = 0;
 let dragStartX = 0, dragStartY = 0, isDraggingRig = false, dragSpringRunning = false;
-let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringFrom = 1;
+let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringFrom = 1, zoomSpringStart = 0;
 // 拖空白背景的平移偏移（rig 单位），和视差 view 叠加，松手弹回 0
 let panX = 0, panY = 0, panScale = 0.01;
 let panDragging = false, panSpringRunning = false;
@@ -642,7 +642,8 @@ function relayout(){
     // 屏内按实际像素渲染：RT 与真屏 1:1，画面不再被放大成马赛克
     const rtW = Math.max(160, Math.min(2048, Math.round(screen.w * dpr)));
     const rtH = Math.max(100, Math.min(2048, Math.round(rtW / aspect)));
-    if (rt.width !== rtW || rt.height !== rtH) rt.setSize(rtW, rtH);
+    // 旋转时屏的投影宽高每帧都抖零点几像素；差得不多就别重建 render target
+    if (Math.abs(rt.width - rtW) > 2 || Math.abs(rt.height - rtH) > 2) rt.setSize(rtW, rtH);
   }
   emit({ seats, rects: { screen, left, right, top, topQuad, tablet }, buttons });
   requestRender();
@@ -1065,6 +1066,7 @@ export function endDrag(){
   document.body.classList.remove('is-dragging');
   // 弹簧回弹到默认角度（dragYaw=0, dragTilt=0）
   startDragSpring();
+  animateParallax();
 }
 function startDragSpring(){
   if (Math.abs(dragYaw) < 0.001 && Math.abs(dragTilt) < 0.001) return;
@@ -1120,6 +1122,7 @@ export function endPan(){
   panDragging = false;
   document.body.classList.remove('is-panning');
   startPanSpring();
+  animateParallax();
 }
 export function resetPan(){
   panSpringRunning = false;
@@ -1200,6 +1203,9 @@ function springOut(t){
 
 function animateParallax(){
   if (isNarrow()) return;
+  // 拖动旋转 / 拖空白平移期间冻结视差：视差弹簧每帧都会 applyRigPose + relayout，
+  // 和拖动弹簧抢同一帧的姿态写入，是拖动中抖动的主因。松手后由 end* 重新启动。
+  if (isDraggingRig || panDragging) return;
   const tx = -pointerTarget.x * 0.16, ty = pointerTarget.y * 0.10;
   if (parallaxRunning){
     if (Math.abs(tx - parallaxTo.x) > 0.001 || Math.abs(ty - parallaxTo.y) > 0.001){
@@ -1217,6 +1223,7 @@ function animateParallax(){
 }
 function stepParallax(now){
   if (!parallaxRunning) return;
+  if (isDraggingRig || panDragging){ parallaxRunning = false; return; }
   const t = Math.min(1, (now - parallaxStart) / 220);
   const e = 1 - Math.pow(1 - t, 3);
   view.x = parallaxFrom.x + (parallaxTo.x - parallaxFrom.x) * e;
@@ -1339,14 +1346,11 @@ export function machineStatus(){
       depthTest: subMesh.material.depthTest,
       depthWrite: subMesh.material.depthWrite,
       texture: { w: subCanvas.width, h: subCanvas.height },
-      // 画布不是空的才算内容真的贴上去了
-      ink: subDisplayInk(),
     } : { ready: false },
     // 主屏 HUD：座位徽章画在屏的纹理里（与副屏同一个做法），DOM 那层只留锚点。
     mainHud: hudCanvas ? {
       ready: ready && !!screenMesh,
       texture: { w: hudCanvas.width, h: hudCanvas.height },
-      ink: mainHudInk(),
     } : { ready: false },
     tablet,
     screen: screenPx, screenSize: { w: screenSize.x, h: screenSize.y },
@@ -1361,7 +1365,8 @@ export function commitSubDisplay(){
   requestRender();
 }
 // 画布上非背景像素的比例：给验收一个"确实画了东西"的硬指标。
-function subDisplayInk(){
+// 单独导出：getImageData 是全量回读，不能挂在 300ms 轮询的 machineStatus 上。
+export function subDisplayInk(){
   if (!subCanvas) return 0;
   const g = subCanvas.getContext('2d');
   const d = g.getImageData(0, 0, subCanvas.width, subCanvas.height).data;
@@ -1379,7 +1384,8 @@ export function commitMainHud(){
   requestRender();
 }
 // 画布上有多少非透明像素：给验收一个"徽章确实画进屏里了"的硬指标。
-function mainHudInk(){
+// 单独导出，理由同 subDisplayInk。
+export function mainHudInk(){
   if (!hudCanvas) return 0;
   const g = hudCanvas.getContext('2d');
   const d = g.getImageData(0, 0, hudCanvas.width, hudCanvas.height).data;
