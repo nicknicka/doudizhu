@@ -381,6 +381,7 @@
   .ng .seg-group .seg{border-radius:0;box-shadow:none;margin-left:-2px}
   .ng .seg-group .seg:first-child{margin-left:0}
   .ng .seg.is-on{background:var(--ink);color:var(--ground)}
+  .ng .seg-group[hidden]{display:none}   /* [hidden] 的 UA 样式打不过 .seg-group 的 display */
   @media (max-width:620px){ .ng-body{grid-template-columns:1fr;gap:10px} }
 
   /* ---------- 开局面板 ---------- */
@@ -644,11 +645,14 @@
         <section class="ng" id="newgame" hidden>
           <div class="ng-head">
             <span class="k">开新一轮</span>
-            <select id="new-me">
-              <option value="landlord">我当地主</option>
-              <option value="landlord_down">我当下家</option>
-              <option value="landlord_up" selected>我当上家</option>
-            </select>
+            <span class="seg-group" id="new-role">
+              <button class="seg" type="button" data-role="landlord">地主</button>
+              <button class="seg is-on" type="button" data-role="peasant">农民</button>
+            </span>
+            <span class="seg-group" id="new-pos">
+              <button class="seg" type="button" data-pos="landlord_down">地主是我上家</button>
+              <button class="seg is-on" type="button" data-pos="landlord_up">地主是我下家</button>
+            </span>
             <span class="seg-group">
               <button class="seg is-on" type="button" id="tgt-hand">手牌</button>
               <button class="seg" type="button" id="tgt-cards">底牌</button>

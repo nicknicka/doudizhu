@@ -568,13 +568,20 @@ try {
   await page.click('#new-round');
   await page.waitForTimeout(300);
   if (!(await page.locator('#newgame').isVisible())) problems.push('开新一轮的浮层没打开');
-  for (const [me, size] of [['landlord', 20], ['landlord_down', 17], ['landlord_up', 17]]) {
-    await page.selectOption('#new-me', me);
+  // 身份只有「地主 / 农民」；是农民时再指定地主在我上家还是下家
+  const pickSeat = async (role, pos) => {
+    await page.click(`#new-role button[data-role="${role}"]`);
+    if (pos) await page.click(`#new-pos button[data-pos="${pos}"]`);
+  };
+  for (const [role, pos, size] of [['landlord', null, 20],
+                                   ['peasant', 'landlord_down', 17],
+                                   ['peasant', 'landlord_up', 17]]) {
+    await pickSeat(role, pos);
     if (!(await text(page, '#new-count')).includes(`0/${size}`)) {
-      problems.push(`${me} 的手牌进度没有使用服务端张数 ${size}`);
+      problems.push(`${pos || role} 的手牌进度没有使用服务端张数 ${size}`);
     }
   }
-  await page.selectOption('#new-me', 'landlord');
+  await pickSeat('landlord', null);
   const tapNew = async keys => { for (const k of keys) await page.click(`#new-keys button[data-key="${k}"]`); };
   // ① 粘贴牌串这一条路：地主的底牌必须在自己手上，所以 T/J/Q 既算手牌也算底牌
   await page.fill('#new-paste', '33344455566677889TJQ');

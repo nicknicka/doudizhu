@@ -44,6 +44,12 @@ const latestView = () => S.snap.step === S.meta.total_steps;
 const openingHandSizes = () => (S.config && S.config.opening_hand_sizes) || {};
 const needFor = me => openingHandSizes()[me];
 
+/* 身份只有「地主 / 农民」；是农民时还要指定地主在我上家还是下家。
+   两者合起来才是记录层的座位名 —— 出手顺序是领域知识，别在页面里推。 */
+const chosenRole = () => $('new-role').querySelector('.seg.is-on').dataset.role;
+const chosenPos = () => $('new-pos').querySelector('.seg.is-on').dataset.pos;
+const currentMe = () => (chosenRole() === 'landlord' ? 'landlord' : chosenPos());
+
 /** 把 SEL.play 同步到 3D 手牌的选中态（抬牌）。 */
 export function syncPicked(){
   const counts = {};
@@ -82,7 +88,8 @@ const sortPicked = () => SEL.play.slice().sort((a, b) => cardSuitOrder(a) - card
 
 /* ---------- 开局面板（保留原来的牌盘） ---------- */
 function renderNew(){
-  const need = needFor($('new-me').value);
+  $('new-pos').hidden = chosenRole() === 'landlord';
+  const need = needFor(currentMe());
   $('new-count').textContent = need === undefined
     ? '手牌 ? · 底牌 ?/3'
     : `手牌 ${SEL.hand.length}/${need} · 底牌 ${SEL.cards.length}/3`;
@@ -189,7 +196,16 @@ export function init(dependencies){
   deps = Object.assign({}, deps, dependencies);
 
   /* ---------- 开局 ---------- */
-  $('new-me').addEventListener('change', () => { SEL.hand = []; renderNew(); });
+  $('new-role').addEventListener('click', e => {
+    const b = e.target.closest('button[data-role]'); if (!b) return;
+    $('new-role').querySelectorAll('.seg').forEach(el => el.classList.toggle('is-on', el === b));
+    SEL.hand = []; renderNew();
+  });
+  $('new-pos').addEventListener('click', e => {
+    const b = e.target.closest('button[data-pos]'); if (!b) return;
+    $('new-pos').querySelectorAll('.seg').forEach(el => el.classList.toggle('is-on', el === b));
+    renderNew();
+  });
   $('tgt-hand').addEventListener('click', () => { PAD.target = 'hand'; renderNew(); });
   $('tgt-cards').addEventListener('click', () => { PAD.target = 'cards'; renderNew(); });
   $('new-clear').addEventListener('click', () => {
@@ -202,7 +218,7 @@ export function init(dependencies){
       setBanner(`${NAME[r]} 一副牌只有 4 张。`, 'error'); return;
     }
     SEL[PAD.target].push(r);
-    const need = needFor($('new-me').value);
+    const need = needFor(currentMe());
     if (PAD.target === 'hand' && need !== undefined && SEL.hand.length >= need) PAD.target = 'cards';
     renderNew();
   });
@@ -212,7 +228,7 @@ export function init(dependencies){
     renderNew();
   });
   $('new-go').addEventListener('click', async () => {
-    const me = $('new-me').value;
+    const me = currentMe();
     const ok = await deps.mutate('/api/game/new',
       {me, my_hand: SEL.hand.join(''), landlord_cards: SEL.cards.join('')},
       `已开局：我方是${identityLabel(me)}。`);
@@ -223,7 +239,7 @@ export function init(dependencies){
     const res = parseCards($('new-paste').value);
     if (res.error){ setBanner(res.error, 'error'); $('new-hint').className = 'hint warn';
       $('new-hint').textContent = res.error; return; }
-    const need = PAD.target === 'hand' ? needFor($('new-me').value) : 3;
+    const need = PAD.target === 'hand' ? needFor(currentMe()) : 3;
     if (need === undefined || res.cards.length > need){
       const msg = `${PAD.target === 'hand' ? '手牌' : '底牌'}只需要 ${need} 张，你粘了 ${res.cards.length} 张。`;
       setBanner(msg, 'error'); $('new-hint').className = 'hint warn'; $('new-hint').textContent = msg;
