@@ -561,9 +561,7 @@
     .counter .cc i.long{gap:2px}
     .counter .cc i.long s{width:3px;height:3px;min-width:0;min-height:0}
     .counter[data-mode="prob"] .cells{padding:1px 2px;gap:1px}
-    /* 420px 机顶屏不再塞切换键：记牌 ↔ 概率已挪到机身方向键（↑ 记牌 / ↓ 概率），
-       让出整格宽度给 15 个点数。实体返回键的热区也收起，免得盖子比米粒还小。 */
-    .controls .key-back{display:none}
+    /* 420px 仍保留机身右侧的实体返回键：它是记牌 ↔ 概率的唯一切换入口。 */
     .machine.is-stacked .chassis{gap:4px;padding:5px 7px 6px}
     .machine.is-stacked .grip-rail{top:-13px;width:11px}
     .machine.is-stacked .scoreboard{gap:0;padding:1px 0 3px}

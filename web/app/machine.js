@@ -584,12 +584,7 @@ function relayout(){
     const n = v.clone().project(tableCam);
     seats[player] = projectScreenLocal(n.x * screenSize.x / 2, n.y * screenSize.y / 2);
   }
-  const backKey = body.getObjectByName('BackKey');
-  const backKeyRect = backKey ? projectFrontBox(modelBox(backKey)) : null;
-  buttons = [
-    ...buttonZones.map(([id, z, clip]) => ({ id, ...projectZone(z, clip) })),
-    ...(backKeyRect ? [{ id: 'bar-mode', ...backKeyRect }] : []),
-  ];
+  buttons = buttonZones.map(([id, z, clip]) => ({ id, ...projectZone(z, clip) }));
   const topNode = body.getObjectByName('SubDisplay');
   const topBox = topNode ? modelLocalBox(topNode) : null;
   const topQuad = topBox ? projectFrontQuad(topBox) : null;
