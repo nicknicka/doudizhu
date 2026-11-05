@@ -25,6 +25,11 @@ const SEAT_3D = {
 
 let canvas, stage, overlayHook;
 let renderer, scene, camera, rig, body, screenGroup, screenMesh, screenMat;
+// 副屏是**真 3D 面**：内容画进一张 canvas，再当纹理贴到玻璃面前沿。
+// DOM 那层 #counter 退化成「量尺寸 + 断言锚点」，不再往画布上面盖。
+let subGroup = null, subMesh = null, subMat = null, subTex = null, subCanvas = null;
+let subFace = null;   // { w, h, z }：玻璃面在机身坐标系里的尺寸与前沿
+const SUB_TEX = { w: 1216, h: 80 };   // 1216×80 ≈ 玻璃面 113.90×7.50 的长宽比
 let tableScene, tableCam, rt;
 let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadowGeo, cardGeo;
 let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
@@ -585,8 +590,9 @@ function relayout(){
     seats[player] = projectScreenLocal(n.x * screenSize.x / 2, n.y * screenSize.y / 2);
   }
   buttons = buttonZones.map(([id, z, clip]) => ({ id, ...projectZone(z, clip) }));
-  const topNode = body.getObjectByName('SubDisplay');
-  const topBox = topNode ? modelLocalBox(topNode) : null;
+  // 量玻璃面本身：整组盒子含凸边框，投影会往外多出一圈。
+  const topNode = body.getObjectByName('SubDisplay_1') || body.getObjectByName('SubDisplay');
+  const topBox = topNode ? (topNode.isMesh ? nodeGeometryBoxLocal(topNode, body) : modelLocalBox(topNode)) : null;
   const topQuad = topBox ? projectFrontQuad(topBox) : null;
   const top = topQuad ? rectFromPoints([topQuad.tl, topQuad.tr, topQuad.br, topQuad.bl]) : null;
   const tablet = projectFrontBox(modelBox(body));
@@ -613,6 +619,7 @@ function emit(extra = {}){
     seats: extra.seats || {},
     rects: extra.rects || {},
     buttons: extra.buttons || buttons,
+    sub3d: ready && !!subMesh,
   });
 }
 function resize(w, h){
@@ -707,6 +714,22 @@ function installModel(gltf){
   body.add(nextScreenGroup);
   nextScreenGroup.updateWorldMatrix(true, true);
 
+  // 副屏照抄主屏：量玻璃面（SubDisplay_1）本身的盒子，平面贴到它的前沿。
+  // 整组 SubDisplay 的最前面是凸边框（z=9.82），玻璃面只到 9.47；贴边框会浮出来。
+  const subNode = body.getObjectByName('SubDisplay_1') || body.getObjectByName('SubDisplay');
+  const subBox = subNode ? (subNode.isMesh ? nodeGeometryBoxLocal(subNode, body) : modelLocalBox(subNode)) : null;
+  if (!subBox) throw new Error('SubDisplay 节点没有可量的几何');
+  const subSize = subBox.getSize(new THREE.Vector3());
+  const subCenter = subBox.getCenter(new THREE.Vector3());
+  const nextSubGroup = new THREE.Group();
+  nextSubGroup.name = 'MachineSubDisplay';
+  nextSubGroup.position.set(subCenter.x, subCenter.y, subBox.max.z + 0.02);
+  const nextSubMesh = new THREE.Mesh(new THREE.PlaneGeometry(subSize.x, subSize.y), subMat);
+  nextSubMesh.name = 'MachineSubDisplaySurface';
+  nextSubGroup.add(nextSubMesh);
+  body.add(nextSubGroup);
+  nextSubGroup.updateWorldMatrix(true, true);
+
   const bb = modelBox(body);
   const nextModelSize = bb.getSize(new THREE.Vector3());
 
@@ -718,6 +741,9 @@ function installModel(gltf){
   screenCenter.copy(center);
   screenGroup = nextScreenGroup;
   screenMesh = nextScreenMesh;
+  subGroup = nextSubGroup;
+  subMesh = nextSubMesh;
+  subFace = { w: subSize.x, h: subSize.y, z: nextSubGroup.position.z };
   modelSize = nextModelSize;
   placeContactShadow(bb);
   ready = true; status = 'ready'; error = '';
@@ -736,7 +762,8 @@ function loadModel(){
   ready = false; status = 'loading'; error = '';
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
   if (contactShadow) contactShadow.visible = false;
-  if (body && rig){ rig.remove(body); body = null; screenGroup = null; screenMesh = null; }
+  if (body && rig){ rig.remove(body); body = null; screenGroup = null; screenMesh = null;
+    subGroup = null; subMesh = null; subFace = null; }
   emit();
   requestRender();
   new GLTFLoader().load(MODEL_URL.href, gltf => {
@@ -820,6 +847,15 @@ export function init(canvasEl, hook){
   rt.texture.minFilter = THREE.LinearFilter;
   rt.texture.generateMipmaps = false;
   screenMat.map = rt.texture;
+  // 副屏纹理：分辨率按玻璃面长宽比固定，不随视口重画；颜色走 sRGB，与页面底色一致。
+  subCanvas = document.createElement('canvas');
+  subCanvas.width = SUB_TEX.w; subCanvas.height = SUB_TEX.h;
+  subTex = new THREE.CanvasTexture(subCanvas);
+  subTex.colorSpace = THREE.SRGBColorSpace;
+  subTex.magFilter = THREE.LinearFilter;
+  subTex.minFilter = THREE.LinearFilter;
+  subTex.generateMipmaps = false;
+  subMat = new THREE.MeshBasicMaterial({ map: subTex, toneMapped: false });
 
   started = true;
   resize(stage.clientWidth || window.innerWidth, stage.clientHeight || 400);
@@ -1180,11 +1216,40 @@ export function machineStatus(){
     toneMappingExposure: renderer ? renderer.toneMappingExposure : null,
     lights,
     contactShadow: !!(contactShadow && contactShadow.visible),
+    subDisplay: (subMesh && subFace) ? {
+      ready: true,
+      w: subFace.w, h: subFace.h, z: subFace.z,
+      side: subMesh.material.side === THREE.FrontSide ? 'front'
+        : subMesh.material.side === THREE.BackSide ? 'back' : 'double',
+      depthTest: subMesh.material.depthTest,
+      depthWrite: subMesh.material.depthWrite,
+      texture: { w: subCanvas.width, h: subCanvas.height },
+      // 画布不是空的才算内容真的贴上去了
+      ink: subDisplayInk(),
+    } : { ready: false },
     tablet,
     screen: screenPx, screenSize: { w: screenSize.x, h: screenSize.y },
     buttons: buttons.map(b => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h })),
     handRows,
   };
+}
+/* ---------- 副屏画布（板层往里画，画完 commit 一次） ---------- */
+export function subDisplayCanvas(){ return subCanvas; }
+export function commitSubDisplay(){
+  if (subTex) subTex.needsUpdate = true;
+  requestRender();
+}
+// 画布上非背景像素的比例：给验收一个"确实画了东西"的硬指标。
+function subDisplayInk(){
+  if (!subCanvas) return 0;
+  const g = subCanvas.getContext('2d');
+  const d = g.getImageData(0, 0, subCanvas.width, subCanvas.height).data;
+  const bg = [d[0], d[1], d[2]];
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4){
+    if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 24) n++;
+  }
+  return n / (d.length / 4);
 }
 export function frameStats(){
   return { frameCount, dpr };

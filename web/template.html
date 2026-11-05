@@ -108,9 +108,12 @@
   .overlay > *{pointer-events:none}
   .overlay button,.overlay .clickable{pointer-events:auto}
 
-  /* 机顶记牌条：一行 15 格，均分；点数一排居中、红点贴格子下沿；屏内没有切换键 */
+  /* 机顶记牌条：一行 15 格，均分；点数一排居中、红点贴格子下沿；屏内没有切换键。
+     内容已经画进副屏的 3D 面（machine.js），这层 DOM 只当几何锚点与断言源。 */
   .counter{position:absolute;display:grid;grid-template-columns:1fr;
            background:var(--ground);border:2px solid var(--ink);overflow:hidden}
+  /* 副屏进 3D 后 DOM 不再往上盖：否则它永远画在机身顶层，凸边框挡不住它 */
+  .counter.is-3d{opacity:0}
   .counter .cells{min-width:0;display:grid;grid-template-columns:repeat(15,1fr);
            align-items:stretch;justify-items:stretch}
   .counter .cc{position:relative;min-width:0;display:flex;flex-direction:column;align-items:center;
@@ -727,6 +730,8 @@
   body.is-minimal .counter{
     opacity:.92;transition:opacity .28s ease}
   body.is-minimal .counter:hover{opacity:1}
+  /* 副屏已是 3D 贴图；DOM 只留几何/断言，别在模型上方再画一遍 */
+  body.is-minimal .counter.is-3d{opacity:0}
 
   /* ---------- 操作台浮层：从 dock 上沿拉起 ---------- */
   .panel{
@@ -886,7 +891,8 @@
         </div>
         <canvas id="scene"></canvas>
         <div class="overlay" id="overlay">
-          <!-- 机顶窄屏：记牌或我方 Top-3 模型动作概率；模式只由机身右侧 BackKey 切换 -->
+          <!-- 机顶窄屏：记牌或我方 Top-3 模型动作概率；模式只由机身右侧 BackKey 切换。
+               内容与上面这块 DOM 同源，但真正显示的是副屏上的 3D 面；这里就绪后隐身。 -->
           <div class="counter" id="counter">
             <div class="cells" id="counter-cells"></div>
           </div>
