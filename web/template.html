@@ -646,9 +646,12 @@
     position:fixed;top:12px;right:12px;opacity:0;pointer-events:auto;z-index:50;
     width:40px;height:40px;font-size:0;padding:0;border:none;background:transparent;box-shadow:none;z-index:9999}
   body.is-minimal #data-toggle:hover{background:transparent}
-  body.is-minimal .machine{width:min(92vw,1100px);
+  /* 铺满可用宽度：宽度同时受视口高度约束（--stage-reserve 留给 dock 与顶部提示），
+     机身再大也不会把操作台挤出视口。max-height 用同一个公式，避免 aspect-ratio 被压变形。 */
+  body.is-minimal .machine{
+    width:min(96vw,1600px,calc((100vh - var(--stage-reserve,210px)) * 2.03));
     transition:transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
-  body.is-minimal .stage{aspect-ratio:2.03;max-height:78vh}
+  body.is-minimal .stage{aspect-ratio:2.03;max-height:calc(100vh - var(--stage-reserve,210px))}
   /* 操作台已脱离机身，成为 dock 上沿的浮层；极简态机身只留 3D 主屏 +
      座位覆盖层（窄屏再留一条计分板）。展开时整机轻轻上浮给浮层让位 ——
      机身位置只由自身几何决定，不会被浮层内容挤压。 */
