@@ -344,12 +344,15 @@ const rectOverlap = (a, b) =>
   !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
 async function waitForFramesToSettle(page, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
+  let quiet = 0;
   let last = (await frameStats(page)).frameCount;
   while (Date.now() < deadline) {
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(400);
     const now = (await frameStats(page)).frameCount;
-    if (now === last) return;
+    // 连续两次采样都没有新帧才算稳定，单次空闲可能只是恰好落在两帧之间的停顿。
+    quiet = now === last ? quiet + 1 : 0;
     last = now;
+    if (quiet >= 2) return;
   }
   throw new Error('渲染在 20 秒内没有稳定');
 }
@@ -540,11 +543,15 @@ try {
       const p = m.transformPoint(new DOMPoint(x, y));
       return { x: p.x + box.left, y: p.y + box.top };
     };
-    return { transform: cs.transform, W, tl: at(0, 0), tr: at(W, 0), bl: at(0, H), br: at(W, H) };
+    return { transform: cs.transform, inline: el.style.transform, W, tl: at(0, 0), tr: at(W, 0), bl: at(0, H), br: at(W, H) };
   });
+  // 上面的点击会把鼠标带进舞台，触发悬停视差让机身歪着——先移出去等它回正再取基准。
+  await page.mouse.move(stageBox.x - 5, stageBox.y - 5);
+  await waitForFramesToSettle(page);
   const restQuad = await counterQuad();
-  if (!/^matrix3d/.test(restQuad.transform)) {
-    problems.push(`机顶条没走四边形映射（回落到固定矩形）：${restQuad.transform}`);
+  // 内联 style 才是 board.js 实际写入的值：计算样式在透视分量极小时会被序列化成 matrix()，不可靠。
+  if (!/^matrix3d\(/.test(restQuad.inline)) {
+    problems.push(`机顶条没走四边形映射（回落到固定矩形）：${restQuad.inline}`);
   }
   const bodyPoint = await page.evaluate(async () => {
     const r = document.getElementById('scene').getBoundingClientRect();
@@ -568,11 +575,15 @@ try {
     await page.waitForTimeout(80);
     const turned = await counterQuad();
     await page.mouse.up();
+    // 松手后旋转/视差弹簧约 900ms 才收敛，先等它停稳再采样，否则会读到回弹中途的角度。
+    await page.waitForTimeout(1200);
     const tilt = Math.abs(turned.tr.y - turned.tl.y);
     if (tilt < 1) problems.push(`转机身后机顶条没跟着斜：顶边高差 ${tilt.toFixed(2)}px`);
     if (turned.W >= restQuad.W) {
       problems.push(`转机身后机顶条没有随副屏收窄：${restQuad.W.toFixed(1)} → ${turned.W.toFixed(1)}px`);
     }
+    // 先移出舞台，避免悬停视差让机身停在与初始不同的角度。
+    await page.mouse.move(stageBox.x - 5, stageBox.y - 5);
     await waitForFramesToSettle(page);
     const backQuad = await counterQuad();
     if (Math.abs(backQuad.tl.y - restQuad.tl.y) > 1.5) {
