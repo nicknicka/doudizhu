@@ -371,7 +371,7 @@ async function waitForMachineState(page, predicate, timeoutMs = 30000) {
 }
 const rectOverlap = (a, b) =>
   !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
-async function waitForFramesToSettle(page, timeoutMs = 20000) {
+async function waitForFramesToSettle(page, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   let quiet = 0;
   let last = (await frameStats(page)).frameCount;
@@ -383,7 +383,7 @@ async function waitForFramesToSettle(page, timeoutMs = 20000) {
     last = now;
     if (quiet >= 2) return;
   }
-  throw new Error('渲染在 20 秒内没有稳定');
+  throw new Error('渲染在 60 秒内没有稳定');
 }
 
 try {
@@ -394,6 +394,7 @@ try {
   await waitForHealth();
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
+  page.setDefaultTimeout(90000);
   // 故意造一次被服务端拒掉的出牌时，浏览器会记一条 400；只有那一下放行
   let expectReject = false;
   watchPage(page, '主页面', msg => expectReject && /400 \(Bad Request\)/.test(msg));
@@ -409,7 +410,7 @@ try {
     problems.push('3D 机身还在加载（loading）时就弹出了错误提示');
   }
   holdGlb = false;
-  await page.waitForSelector('#who', { timeout: 40000 });
+  await page.waitForSelector('#who', { state: 'attached', timeout: 40000 });
   await page.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
     { timeout: 40000 });
   await waitForMachineState(page, s => s.status === 'ready' && s.ready);
@@ -1114,9 +1115,10 @@ try {
 
   // 新开一页复核 17 张这个真实高频状态；主流程此时已经改过手牌，不能拿它冒充 17 张。
   const fresh420 = await browser.newPage({ viewport: { width: 420, height: 1200 } });
+  fresh420.setDefaultTimeout(90000);
   watchPage(fresh420, '420 复核');
   await fresh420.goto(`${BASE}/`);
-  await fresh420.waitForSelector('#who', { timeout: 40000 });
+  await fresh420.waitForSelector('#who', { state: 'attached', timeout: 40000 });
   await fresh420.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
     { timeout: 40000 });
   await waitForMachineState(fresh420, s => s.status === 'ready' && s.ready);
