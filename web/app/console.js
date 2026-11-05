@@ -288,18 +288,31 @@ export function init(dependencies){
       SEL.play = []; syncPicked();
     }
   });
-  // 推荐键：每按一次换到下一个候选，并把那一手选到桌上
+  // 推荐键：每按一次换到下一个候选，并把那一手选到桌上。
+  // 每一次按下去都要有看得见的反馈 —— 尤其是推荐「不出」时桌上什么都不变，
+  // 只改提示文字会被当成"按钮坏了"。
   $('play-hint-btn').addEventListener('click', () => {
-    const acts = (S.point && S.point.mine && S.point.actions) || [];
-    if (!acts.length) return;
-    hintIndex = (hintIndex + 1) % Math.min(acts.length, 6);
+    // 推荐只对我方回合有意义：轮到对手出牌时点它，会把对手的一手记成我的
+    const acts = (S.snap.acting === S.snap.me && S.point && S.point.actions) || [];
+    if (!acts.length){
+      const note = '现在还没有轮到我方出牌，暂时没有可推荐的出法。';
+      $('play-hint').className = 'hint warn';
+      $('play-hint').textContent = note;
+      setBanner(note, 'error');
+      return;
+    }
+    const n = Math.min(acts.length, 6);
+    hintIndex = ((hintIndex + 1) % n + n) % n;
     const a = acts[hintIndex];
     SEL.play = a.cards.slice();
     syncPicked(); renderPlay();
+    const rec = `推荐 ${hintIndex + 1}/${n}：${a.label}`
+              + `（模型动作选择概率 ${Math.round(a.probability * 100)}%）`;
     $('play-hint').className = 'hint';
-    $('play-hint').textContent =
-      `推荐 ${hintIndex + 1}/${Math.min(acts.length, 6)}：${a.label}`
-      + `（模型动作选择概率 ${Math.round(a.probability * 100)}%）`;
+    $('play-hint').textContent = rec;
+    setBanner(a.cards.length
+      ? `${rec}。已经选到桌上，按「出牌」记下这一手。`
+      : `${rec}。这一手模型建议不出，按「不要」记下。`, 'hint');
   });
   $('play-picks').addEventListener('click', async e => {
     const b = e.target.closest('button[data-pick]'); if (!b) return;

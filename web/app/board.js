@@ -48,7 +48,7 @@ function paintLabels(){
       `<span class="who"><b>${label(player)}</b>`
       + `<span class="badge ${seat.identity}">${identityLabel(player)}</span>`
       + (acting ? `<span class="turn-flag">▶ ${mine ? '该你出' : '该他出'}</span>` : '')
-      + `<span class="cnt">${v.remaining[player]} 张</span></span>`
+      + `<span class="cnt"><span class="n">${v.remaining[player]}</span><span class="u"> 张</span></span></span>`
       + `<span class="played">已出：${played.length ? played.map(x => NAME[x] || x).join(' ') : '—'}</span>`;
   }
 }
@@ -84,8 +84,10 @@ function renderCounter(){
   cells.innerHTML = RANKS.map(r => {
     const n = pool[r] || 0;
     const dots = Array.from({ length: Math.min(4, n) }, () => '<s></s>').join('');
+    // 双字点数（小王/大王）的红点按字排：一个字底下一个点
+    const iw = nm(r).length > 1 ? ' class="i long"' : ' class="i"';
     return `<span class="cc${n ? '' : ' is-out'}" title="${NAME[r]} 还剩 ${n} 张">`
-      + `<b class="${cls(r)}">${nm(r)}</b><i>${dots}</i></span>`;
+      + `<b class="${cls(r)}">${nm(r)}</b><i${iw}>${dots}</i></span>`;
   }).join('');
 }
 
