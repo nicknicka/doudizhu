@@ -669,6 +669,10 @@
 
   /* 极简态座位圆点可悬停/点击（overlay 默认穿透） */
   body.is-minimal .overlay .seat-label{pointer-events:auto;cursor:pointer}
+  /* 圆点已经画进主屏纹理（ADR-0008）：DOM 那层默认隐身——它永远压在画布最上层，
+     机身一转就会跑到屏外面去。悬停仍浮出完整卡片，那是「要读的字」不是屏内标记。 */
+  body.is-minimal .screen-hud.is-3d .seat-label{opacity:0}
+  body.is-minimal .screen-hud.is-3d .seat-label:hover{opacity:1}
   /* 默认：只剩张数圆点 */
   body.is-minimal .seat-label{
     padding:0;border:none;background:transparent;box-shadow:none;

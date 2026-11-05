@@ -480,6 +480,19 @@ try {
   for (const a of band.corner) if (a !== 0) problems.push(`机身外空场被涂了东西：alpha=${a}`);
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
+  // ADR-0008：座位徽章内嵌进主屏纹理，DOM 只留锚点；否则机身一转圆点就浮到屏外。
+  const mainHud = shell.mainHud || {};
+  if (!mainHud.ready) problems.push('主屏 HUD 没就绪：座位徽章没画进真屏');
+  if (!mainHud.texture || !(mainHud.texture.w > 0) || !(mainHud.texture.h > 0)) {
+    problems.push(`主屏 HUD 纹理尺寸无效：${JSON.stringify(mainHud.texture)}`);
+  }
+  if (!(mainHud.ink > 0)) problems.push(`主屏 HUD 画布是空的（ink=${mainHud.ink}），徽章没画进去`);
+  if (!(await page.locator('#screen-hud').evaluate(el => el.classList.contains('is-3d')))) {
+    problems.push('#screen-hud 没标成 is-3d：DOM 圆点还压在机身上');
+  } else {
+    const domOpacity = await page.locator('#board .seat-label').first().evaluate(el => getComputedStyle(el).opacity);
+    if (domOpacity !== '0') problems.push(`is-3d 下 DOM 座位圆点没隐身：opacity=${domOpacity}`);
+  }
   // 10 颗机身按键 + 副屏右侧那颗实体返回键（切机顶屏模式）= 11 个可量热区
   if (shell.buttons.length !== 11) problems.push(`透明键热区数量不是 11：${shell.buttons.length}`);
   for (const id of ['bar-mode', 'dpad-up', 'dpad-left', 'play-clear', 'dpad-right',

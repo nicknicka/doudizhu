@@ -152,6 +152,54 @@ function paintCounter(){
   machine.commitSubDisplay();
 }
 
+/* ---------- 主屏 HUD：座位圆点画进真屏纹理 ---------- */
+// 槽位就是 template.html 里 .seat-label 的百分比定位：上家左上、下家右上、我方下缘居中。
+const HUD_SLOTS = {
+  up:   { x: 0.05, y: 0.07, sx:  1, sy:  1 },
+  down: { x: 0.95, y: 0.07, sx: -1, sy:  1 },
+  me:   { x: 0.50, y: 0.98, sx:  0, sy: -1 },
+};
+
+/**
+ * 把三个座位张数圆点画进主屏纹理。DOM 那层退成锚点：机身一转，圆点跟着屏一起转、
+ * 被凸边框挡住、翻到背面就看不见；盖在画布上的 HTML 永远压在最上层，做不到这一点。
+ */
+function paintScreenHud(){
+  const c = machine.mainHudCanvas();
+  if (!c) return;
+  const v = S.snap;
+  const g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const ink = cssVar('--ink') || '#201a26';
+  const ground = cssVar('--ground') || '#efe7d8';
+  const accent = cssVar('--accent') || '#e0442a';
+  g.clearRect(0, 0, W, H);
+  // 圆点大小照 DOM 那颗 28px 圆点折算：CSS 一改，纹理跟着走，不各写一个常量。
+  const box = $('screen-hud').getBoundingClientRect();
+  const domDot = Object.values(labels)[0]?.getBoundingClientRect().width || 0;
+  const r = box.width > 0 && domDot > 0 ? (domDot / 2) * (W / box.width) : W * 0.02;
+  const edge = Math.max(2, r * 0.16);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  for (const [player, el] of Object.entries(labels)){
+    if (!el || el.style.display === 'none') continue;      // board.place 会把缺席的座位藏掉
+    const slot = HUD_SLOTS[S.meta.seats[player].relative] || HUD_SLOTS.up;
+    const cx = slot.x * W + slot.sx * r, cy = slot.y * H + slot.sy * r;
+    if (!v.finished && v.acting === player){               // DOM 版用脉冲，纹理里用一圈静态光环
+      g.beginPath(); g.arc(cx, cy, r + edge, 0, Math.PI * 2);
+      g.lineWidth = edge * 1.2; g.strokeStyle = accent; g.stroke();
+    }
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.fillStyle = isMe(player) ? accent : ink; g.fill();
+    g.beginPath(); g.arc(cx, cy, r - edge / 2, 0, Math.PI * 2);
+    g.lineWidth = edge; g.strokeStyle = ground; g.stroke();   // 底色描边（CSS 的 border 也在盒内）
+    g.fillStyle = ground;
+    g.font = `600 ${Math.round(r * 0.79)}px Pixel, monospace`;
+    g.fillText(String(v.remaining[player]), cx, cy);
+  }
+  machine.commitMainHud();
+}
+
 /** 副屏 DOM：仍是记牌/概率的内容源与几何锚点，真 3D 面就绪后它隐身不再压住机身。 */
 function renderCounterDom(){
   const counter = $('counter');
@@ -282,7 +330,7 @@ function placeHotspots(items){
 }
 
 function place(payload){
-  const { status, error, seats = {}, rects = {}, buttons = [], sub3d = false } = payload;
+  const { status, error, seats = {}, rects = {}, buttons = [], sub3d = false, screen3d = false } = payload;
   const machineEl = $('board');
   const stage = $('stage');
   const stacked = window.innerWidth < 950;
@@ -297,6 +345,8 @@ function place(payload){
   ov.style.fontSize = `${Math.max(7, Math.min(13, s.w * 0.025)).toFixed(1)}px`;
 
   const sh = $('screen-hud');
+  // 座位圆点已经画进主屏纹理：DOM 只留悬停展开的完整卡片，别再压一层盖在模型上。
+  sh.classList.toggle('is-3d', Boolean(screen3d));
   sh.style.left = `${s.x}px`; sh.style.top = `${s.y}px`;
   sh.style.width = `${s.w}px`; sh.style.height = `${s.h}px`;
   for (const [player, el] of Object.entries(labels)) el.style.display = seats[player] ? '' : 'none';
@@ -361,6 +411,7 @@ export function render(){
   renderWho();
   ensureLabels();
   paintLabels();
+  paintScreenHud();
   renderCounter();
   renderScoreboard();
   renderHandLine();

@@ -40,6 +40,11 @@ let renderer, scene, camera, rig, body, screenGroup, screenMesh, screenMat;
 let subGroup = null, subMesh = null, subMat = null, subTex = null, subCanvas = null;
 let subFace = null;   // { w, h, z }：玻璃面在机身坐标系里的尺寸与前沿
 const SUB_TEX = { w: 1216, h: 80 };   // 1216×80 ≈ 玻璃面 113.90×7.50 的长宽比
+// 主屏 HUD 同一套路数：座位徽章画进一张 canvas，再合成进主屏的离屏画面。
+// 盖在画布上的 HTML 永远压在最上层——机身一转它就浮到屏外；画进屏的纹理，
+// 才会跟着屏一块转、被凸边框挡住、翻到背面就看不见。
+let hudScene = null, hudCam = null, hudTex = null, hudCanvas = null;
+const HUD_TEX = { w: 1536, h: 804 };   // ≈ 主屏 104×54.4 的长宽比；按大屏 RT 的实际像素留够采样率
 let tableScene, tableCam, rt;
 let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadowGeo, cardGeo;
 let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
@@ -630,6 +635,7 @@ function emit(extra = {}){
     rects: extra.rects || {},
     buttons: extra.buttons || buttons,
     sub3d: ready && !!subMesh,
+    screen3d: ready && !!screenMesh,
   });
 }
 function resize(w, h){
@@ -899,6 +905,22 @@ export function init(canvasEl, hook){
   subTex.minFilter = THREE.LinearFilter;
   subTex.generateMipmaps = false;
   subMat = new THREE.MeshBasicMaterial({ map: subTex, toneMapped: false });
+  // 主屏 HUD：正交相机 + 一张铺满视口的透明平面，叠在牌桌画面之上，画进同一个 RenderTarget。
+  hudCanvas = document.createElement('canvas');
+  hudCanvas.width = HUD_TEX.w; hudCanvas.height = HUD_TEX.h;
+  hudTex = new THREE.CanvasTexture(hudCanvas);
+  hudTex.colorSpace = THREE.SRGBColorSpace;
+  hudTex.magFilter = THREE.LinearFilter;
+  hudTex.minFilter = THREE.LinearFilter;
+  hudTex.generateMipmaps = false;
+  hudCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  hudScene = new THREE.Scene();
+  const hudPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }),
+  );
+  hudPlane.position.z = -0.5;   // 正交相机 near=0，贴在 z=0 上正好落在近平面
+  hudScene.add(hudPlane);
 
   started = true;
   resize(stage.clientWidth || window.innerWidth, stage.clientHeight || 400);
@@ -925,6 +947,12 @@ function renderNow(){
     renderer.setRenderTarget(rt);
     renderer.clear();
     renderer.render(tableScene, tableCam);
+    // 座位徽章叠在牌桌之上，但同样落在屏的纹理里：不清屏，续画一遍 HUD。
+    if (hudScene){
+      renderer.autoClear = false;
+      renderer.render(hudScene, hudCam);
+      renderer.autoClear = true;
+    }
     renderer.setRenderTarget(null);
   }
   renderer.render(scene, camera);
@@ -1285,6 +1313,12 @@ export function machineStatus(){
       // 画布不是空的才算内容真的贴上去了
       ink: subDisplayInk(),
     } : { ready: false },
+    // 主屏 HUD：座位徽章画在屏的纹理里（与副屏同一个做法），DOM 那层只留锚点。
+    mainHud: hudCanvas ? {
+      ready: ready && !!screenMesh,
+      texture: { w: hudCanvas.width, h: hudCanvas.height },
+      ink: mainHudInk(),
+    } : { ready: false },
     tablet,
     screen: screenPx, screenSize: { w: screenSize.x, h: screenSize.y },
     buttons: buttons.map(b => ({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h })),
@@ -1307,6 +1341,21 @@ function subDisplayInk(){
   for (let i = 0; i < d.length; i += 4){
     if (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2]) > 24) n++;
   }
+  return n / (d.length / 4);
+}
+/* ---------- 主屏 HUD 画布（板层往里画座位徽章，画完 commit 一次） ---------- */
+export function mainHudCanvas(){ return hudCanvas; }
+export function commitMainHud(){
+  if (hudTex) hudTex.needsUpdate = true;
+  requestRender();
+}
+// 画布上有多少非透明像素：给验收一个"徽章确实画进屏里了"的硬指标。
+function mainHudInk(){
+  if (!hudCanvas) return 0;
+  const g = hudCanvas.getContext('2d');
+  const d = g.getImageData(0, 0, hudCanvas.width, hudCanvas.height).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 16) n++;
   return n / (d.length / 4);
 }
 export function frameStats(){
