@@ -1045,9 +1045,49 @@
     animation:bootK-off calc(.26s * var(--slow,1)) ease-in forwards}
   @keyframes bootK-off{to{transform:rotateX(0) translateZ(0) scale(1.6);opacity:0}}
 
+  /* L/M · SpinKit（MIT · © 2020 Tobias Ahlin · 全文在 vendor/LICENSE-spinkit.txt）：
+     下面两支是从 web/vendor/spinkit.min.css 原样抠出来的字节，一个数值都没改；
+     本项目这一侧只把 --sk-color / --sk-size 指到 accent 与尺寸。
+     整份库 sudah vendored 在 web/vendor/spinkit.min.css —— 这里内联而不是 <link>，
+     因为 <link rel=stylesheet> 会阻塞首帧，和 ADR-0009 直接冲突。 */
+  .sk-grid{width:var(--sk-size);height:var(--sk-size)}
+  .sk-grid-cube{width:33.33%;height:33.33%;background-color:var(--sk-color);float:left;animation:sk-grid 1.3s infinite ease-in-out}
+  .sk-grid-cube:nth-child(1){animation-delay:.2s}
+  .sk-grid-cube:nth-child(2){animation-delay:.3s}
+  .sk-grid-cube:nth-child(3){animation-delay:.4s}
+  .sk-grid-cube:nth-child(4){animation-delay:.1s}
+  .sk-grid-cube:nth-child(5){animation-delay:.2s}
+  .sk-grid-cube:nth-child(6){animation-delay:.3s}
+  .sk-grid-cube:nth-child(7){animation-delay:0s}
+  .sk-grid-cube:nth-child(8){animation-delay:.1s}
+  .sk-grid-cube:nth-child(9){animation-delay:.2s}
+  @keyframes sk-grid{0%,70%,100%{transform:scale3D(1,1,1)}35%{transform:scale3D(0,0,1)}}
+  .sk-fold{width:var(--sk-size);height:var(--sk-size);position:relative;transform:rotateZ(45deg)}
+  .sk-fold-cube{float:left;width:50%;height:50%;position:relative;transform:scale(1.1)}
+  .sk-fold-cube:before{content:'';position:absolute;top:0;left:0;width:100%;height:100%;background-color:var(--sk-color);animation:sk-fold 2.4s infinite linear both;transform-origin:100% 100%}
+  .sk-fold-cube:nth-child(2){transform:scale(1.1) rotateZ(90deg)}
+  .sk-fold-cube:nth-child(4){transform:scale(1.1) rotateZ(180deg)}
+  .sk-fold-cube:nth-child(3){transform:scale(1.1) rotateZ(270deg)}
+  .sk-fold-cube:nth-child(2):before{animation-delay:.3s}
+  .sk-fold-cube:nth-child(4):before{animation-delay:.6s}
+  .sk-fold-cube:nth-child(3):before{animation-delay:.9s}
+  @keyframes sk-fold{0%,10%{transform:perspective(140px) rotateX(-180deg);opacity:0}25%,75%{transform:perspective(140px) rotateX(0);opacity:1}90%,100%{transform:perspective(140px) rotateY(180deg);opacity:0}}
+
+  #boot[data-candidate="l"],#boot[data-candidate="m"]{--sk-size:56px;--sk-color:var(--accent)}
+  #boot[data-candidate="l"] .boot-lib,#boot[data-candidate="m"] .boot-lib{grid-area:1/1;align-self:center}
+  #boot[data-candidate="l"] #boot-text,#boot[data-candidate="m"] #boot-text{grid-row:2;grid-column:1}
+  #boot[data-candidate="l"] .boot-mark,#boot[data-candidate="m"] .boot-mark{display:none}
+  #boot[data-candidate="l"] #boot-text::after{content:" · 候选 L SpinKit 折叠立方体"}
+  #boot[data-candidate="m"] #boot-text::after{content:" · 候选 M SpinKit 像素格"}
+  #boot[data-candidate="l"].is-exiting .boot-lib,
+  #boot[data-candidate="m"].is-exiting .boot-lib{
+    animation:bootLibOff calc(.26s * var(--slow,1)) steps(3,end) forwards}
+  @keyframes bootLibOff{70%{transform:scaleY(.02);opacity:1}to{transform:scaleY(.002);opacity:0}}
+
   /* 评审条：只在 ?boot= 出现，切换候选 / 慢放 / 重播；选定后整块删 */
   .boot-review{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10000;
-    display:flex;gap:6px;align-items:center;padding:6px 10px;
+    display:flex;flex-wrap:wrap;justify-content:center;max-width:min(92vw,720px);
+    gap:6px;align-items:center;padding:6px 10px;
     background:var(--ground);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);
     font-size:11px;color:var(--ink)}
   .boot-review button{padding:2px 8px;font-size:11px}
@@ -1133,15 +1173,15 @@ setTimeout(function(){
   window.__bootHandoff();
 }, 8000);
 setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
-// #55 候选原型：?boot=a~k 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
+// #55 候选原型：?boot=a~m 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
 // ?nobar=1 不画评审条（录屏用）；退场播完才摘 is-booting。
 // 这是给人挑方向的临时骨架：选定后 #56 只留中标那条，评审条与本段一起删。
 (function(){
   var q = new URLSearchParams(location.search);
   var cand = q.get('boot');
-  if (!cand || 'abcdefghijk'.indexOf(cand) < 0) return;
+  if (!cand || 'abcdefghijklm'.indexOf(cand) < 0) return;
   var EXIT_MS = { a:260, b:260, c:220, d:260, e:260, f:260, g:260, h:260,
-                  i:260, j:260, k:260 }[cand];
+                  i:260, j:260, k:260, l:260, m:260 }[cand];
   var slow = q.get('slow') === '1';
   var holdMs = parseInt(q.get('hold') || '0', 10) || 0;
   var noBar = q.get('nobar') === '1';
@@ -1149,6 +1189,17 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
     var bootEl = document.getElementById('boot');
     bootEl.dataset.candidate = cand;
     if (slow) bootEl.style.setProperty('--slow', 8);
+    // L/M：SpinKit 要的 4 / 9 个子节点由这里补上（上游标记原样，只是搬进加载层）
+    if (cand === 'l' || cand === 'm') {
+      var lib = document.createElement('div');
+      lib.className = 'boot-lib';
+      var box = cand === 'l' ? 'sk-fold' : 'sk-grid';
+      var cell = cand === 'l' ? 'sk-fold-cube' : 'sk-grid-cube';
+      var n = cand === 'l' ? 4 : 9;
+      lib.innerHTML = '<div class="' + box + '">'
+        + new Array(n + 1).join('<div class="' + cell + '"></div>') + '</div>';
+      bootEl.appendChild(lib);
+    }
     var realHandoff = window.__bootHandoff;
     var going = false;
     window.__bootHandoff = function(){
@@ -1164,7 +1215,7 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
     var bar = document.createElement('div');
     bar.className = 'boot-review';
     bar.innerHTML = '<span class="cap">加载动画候选</span>'
-      + ['a','b','c','d','e','f','g','h','i','j','k'].map(function(x){
+      + ['a','b','c','d','e','f','g','h','i','j','k','l','m'].map(function(x){
           return '<button data-x="' + x + '"' + (x === cand ? ' class="is-on"' : '') + '>'
             + x.toUpperCase() + '</button>';
         }).join('')
