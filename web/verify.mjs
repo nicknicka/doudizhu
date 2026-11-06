@@ -1316,6 +1316,43 @@ try {
     await dead.close();
   }
 
+  // 加载层交接（ADR-0011）：最短停留兜住"闪屏"，收尾动画播完才摘幕布
+  {
+    const short = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
+    watchPage(short, '加载层最短停留', msg => /net::ERR_FAILED|Failed to load resource/i.test(msg));
+    // 掐掉模块入口：不会有人替它提前放行，于是能干净地量"首帧就喊交接"这一情况
+    await short.route('**/app/main.js', route => route.abort());
+    await short.goto(`${BASE}/`, { waitUntil: 'commit' });
+    await short.waitForSelector('#boot .sk-fold');
+    await short.evaluate(() => window.__bootHandoff());
+    await waitUntil(short, async () => await short.evaluate(() => !!window.__bootAt.done), 8000);
+    const at = await short.evaluate(() => ({ ...window.__bootAt }));
+    const dwell = at.done - at.shown, exit = at.done - at.exitStart;
+    if (dwell < 840) problems.push(`加载层最短停留没兜住：只停 ${Math.round(dwell)}ms（应 ≥900ms）`);
+    if (exit < 180 || exit > 600) problems.push(`收尾动画没播完就被摘掉：${Math.round(exit)}ms（应 ≈260ms）`);
+    await short.close();
+  }
+
+  // 机身的入场必须等在幕布收完之后（ADR-0011）
+  {
+    const seq = await browser.newPage({ viewport: { width: 1100, height: 720 }, deviceScaleFactor: 2 });
+    watchPage(seq, '加载层交接');
+    await seq.goto(`${BASE}/`);
+    const done = await waitUntil(seq, async () => await seq.evaluate(() => !!window.__bootAt?.done), 40000);
+    if (!done) {
+      problems.push('加载层没走完交接（__bootAt.done 没落）');
+    } else {
+      const at = await seq.evaluate(() => ({ ...window.__bootAt }));
+      const st = await machineStatus(seq);
+      if (st.entranceStartedAt == null) problems.push('机身入场没有播（entranceStartedAt 为空）');
+      else if (st.entranceStartedAt < at.done - 40) {
+        problems.push(`机身在幕布收完之前就入场了：入场 ${Math.round(st.entranceStartedAt)}ms vs 幕布 ${Math.round(at.done)}ms`);
+      }
+      if (await seq.locator('#boot').isVisible()) problems.push('幕布该摘了却还看得见');
+    }
+    await seq.close();
+  }
+
   // /glb：原样查看模型，不加环境贴图、不加色调映射
   {
     // 视口必须能把整机装进画布：这是保真比色的坐标系，被裁掉就会取不到边缘色块
