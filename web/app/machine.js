@@ -1229,7 +1229,7 @@ function stepDragSpring(now){
   requestAnimationFrame(stepDragSpring);
 }
 /* ---------- 空白背景拖拽平移 + 弹簧回弹 ---------- */
-// 视差只让机身轻轻跟鼠标；平移是用户主动把机身推走，松手要回到原位。
+// 平移是用户主动把机身推走，松手由弹簧送回原位。
 export function startPan(clientX, clientY){
   if (!ready) return;
   panDragging = true;
