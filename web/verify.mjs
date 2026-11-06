@@ -1403,7 +1403,10 @@ try {
 
   await browser.close();
 } catch (err) {
-  problems.push(`验证本身出错：${err.message}`);
+  // 出错也要能定位：只报 message 时，"mouse.move: Invalid parameters"（NaN 坐标）
+  // 这类问题完全看不出是哪一次调用 —— #60 排查时就卡在这里。
+  const where = String(err.stack || '').split('\n').slice(0, 3).join(' ⏎ ');
+  problems.push(`验证本身出错：${err.message}${where ? ' @ ' + where : ''}`);
 } finally {
   await stopServer();
 }
