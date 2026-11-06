@@ -1,0 +1,77 @@
+name: CI
+
+# 目的：让 PR 上的"绿"等于分支头的绿。
+# 此前没有任何检查，"npm run verify 全绿"的证据只能来自某个人带未提交改动的
+# 工作区 —— #57 就是这么漏过去的（合入的头在干净树上根本跑不过 verify）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: 服务端与规则（pytest）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+
+      # 页面与 verify 都硬用 .venv/bin/python（见 web/verify.mjs），CI 照同一布局装
+      - name: 装依赖（venv 布局与 README 一致）
+        run: |
+          python3.11 -m venv .venv
+          .venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
+          .venv/bin/python -m pip install --no-cache-dir -e . --no-deps
+          .venv/bin/python -m pip install --no-cache-dir pytest==9.2.0
+
+      - name: pytest
+        run: .venv/bin/python -m pytest -q
+
+  web:
+    name: 展示页真实交互（browser verify）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+
+      - name: 装后端依赖（verify 会自己起 FastAPI）
+        run: |
+          python3.11 -m venv .venv
+          .venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
+          .venv/bin/python -m pip install --no-cache-dir -e . --no-deps
+
+      - name: 取 ONNX 权重（不进 Git，约 18 MB）
+        run: .venv/bin/python scripts/download_models.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 装 Playwright 与 Chromium
+        run: |
+          npm i
+          npx playwright install --with-deps chromium
+
+      - name: 纯逻辑单测（不起浏览器）
+        run: node --test web/test
+
+      - name: 浏览器端到端 verify
+        run: npm run verify
