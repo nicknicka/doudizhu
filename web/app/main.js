@@ -198,8 +198,10 @@ function deskPulse(clientX, clientY){
 }
 $('controls')?.addEventListener('pointerdown', e => {
   const key = e.target.closest('.key');
-  // 灰着的键按了也没有动作（后端不认非最新/非我方的那一手），就不该给它按下反馈
-  if (!key || key.disabled) return;
+  if (!key) return;
+  // 灰着的键按了也要有回应：动作照旧不发（后端不认非最新 / 非我方的那一手），
+  // 但键帽原地摇一下、机身轻顿一下，让人知道"按到了，只是现在按不动"。
+  if (key.disabled){ machine.rejectFeedback(key.id); return; }
   machine.pressFeedback(key.id);
   deskPulse(e.clientX, e.clientY);
 });
@@ -210,12 +212,15 @@ touchbar.addEventListener('click', e => {
   const b = e.target.closest('button[data-control]');
   if (!b) return;
   const main = $(b.dataset.control);
-  if (main && !main.disabled){
-    machine.pressFeedback(main.id);
-    const r = b.getBoundingClientRect();
-    deskPulse(r.left + r.width / 2, r.top + r.height / 2);
-    main.click();
+  if (!main) return;
+  const r = b.getBoundingClientRect();
+  if (main.disabled){
+    machine.rejectFeedback(main.id);       // 窄屏操作条同源：灰键也是"按不动"的回应
+    return;
   }
+  machine.pressFeedback(main.id);
+  deskPulse(r.left + r.width / 2, r.top + r.height / 2);
+  main.click();
 });
 const touchButtons = [...touchbar.querySelectorAll('button[data-control]')];
 // 机身键帽自己不会变灰：把 DOM 热区的 disabled 状态同步到 3D 键帽上（只压暗，不改材质响应）

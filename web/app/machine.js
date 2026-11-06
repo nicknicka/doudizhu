@@ -617,7 +617,7 @@ function measureButtons(root){
 
 // 键面材质：按下去时往 -Z 沉的是这几款；键沿/台阶（keyEdgeMat）留在原地当键井，
 // 于是能看到"键帽陷进井里"，而不是整块（含井圈）一起平移。
-const FACE_MATERIALS = new Set(['keyMat', 'keyCenterMat', 'symbolMat', 'keyMarkMat', 'keyEdgeMat']);
+const FACE_MATERIALS = new Set(['keyMat', 'keyCenterMat', 'symbolMat', 'keyMarkMat']);
 
 // 把一个合并键网格按量出的热区拆成"每个键一组"：几何只在内存里重排成非索引三角，
 // 顶点数据逐个照抄，静止时与原网格逐像素一致。每组再分 root（键沿，静止）/ face
@@ -1133,13 +1133,18 @@ function applyRigPose(){
 /* 按一次键：那颗键帽自己往 -Z 沉下去再带一次过冲弹回来，机身只跟着轻轻一顿。
    pressFeedback(id) 收的是热区 id（= 热区按钮的 id），不传就只做机身那一顿。 */
 let pressKick = 0, pressRunning = false, pressStart = 0, pressKey = '';
-const KEY_TRAVEL = 1.8;      // 键帽下压行程（模型 mm；机身 1/20 缩放 ≈ 0.09 世界单位）
+// 键帽能看到的行程只有 0.4mm：模型里键帽正面只比它周围那圈键沿（keyEdgeMat）高出
+// 0.40mm，再往下沉就整个躲到键沿后面去了（1.8mm 时键帽整片消失，看着像键没了）。
+// 所以压到「快齐平」为止 —— 键沿不动、键帽自己沉下去再带一次过冲弹回来，就是按压感。
+const KEY_TRAVEL = 0.32;     // 键帽下压行程（模型 mm，约键沿高度的 80%）
 const KEY_PRESS_MS = 220;
 export function pressFeedback(id = ''){
   if (reduce || !renderer) return;
   pressStart = performance.now();
   // 上一颗还没回位就又按了另一颗：先把旧键复位，免得两颗一起卡在下面
-  if (pressKey && pressKey !== id && keyGroups.has(pressKey)) keyGroups.get(pressKey).face.position.z = 0;
+  if (pressKey && pressKey !== id && keyGroups.has(pressKey)){
+    const prev = keyGroups.get(pressKey); prev.face.position.z = 0; prev.face.position.x = 0;
+  }
   pressKey = (id && keyGroups.has(id)) ? id : '';
   if (pressRunning) return;
   pressRunning = true;
@@ -1166,6 +1171,38 @@ function stepPress(now){
     return;
   }
   requestAnimationFrame(stepPress);
+}
+/* 灰键被按：也要有回应，但语义是"按不动"，不是"按下了" —— 键帽原地左右轻摇两下
+   （**不下沉**）+ 机身轻轻一顿。下沉表示"记下了这一手"，灰键什么都没记下，
+   拿同一套下沉动画去回它就把"禁用"讲成了"成功"。 */
+let rejectRunning = false, rejectStart = 0, rejectKey = '';
+const REJECT_MS = 280;
+export function rejectFeedback(id = ''){
+  if (reduce || !renderer) return;
+  rejectStart = performance.now();
+  if (rejectKey && rejectKey !== id && keyGroups.has(rejectKey)){
+    const prev = keyGroups.get(rejectKey);
+    prev.face.position.x = 0; prev.face.position.z = 0;
+  }
+  rejectKey = (id && keyGroups.has(id)) ? id : '';
+  if (rejectRunning) return;
+  rejectRunning = true;
+  requestAnimationFrame(stepReject);
+}
+function stepReject(now){
+  const t = Math.min(1, (now - rejectStart) / REJECT_MS);
+  pressKick = Math.sin(Math.PI * t) * 0.35;                 // 机身只有正常按压约三分之一
+  const g = keyGroups.get(rejectKey);
+  if (g){ g.face.position.x = Math.sin(Math.PI * 6 * t) * (1 - t) * 0.9; g.face.position.z = 0; }
+  applyRigPose(); relayout(); requestRender();
+  if (t >= 1){
+    pressKick = 0; rejectRunning = false;
+    if (g){ g.face.position.x = 0; g.face.position.z = 0; }
+    rejectKey = '';
+    applyRigPose(); relayout(); requestRender();
+    return;
+  }
+  requestAnimationFrame(stepReject);
 }
 // 灰键：把这组键帽换成同款但压暗的材质（只压暗、不改模型材质响应），旋转时跟着
 // 键帽一起转，不像 DOM 覆盖层那样飘在键面外面。
@@ -1519,6 +1556,7 @@ export function machineStatus(){
     // 按键反馈：验收要能直接读到"哪颗键在动、键帽沉了多少、机身顿了多少"
     press: { key: pressKey, kick: pressKick,
              travel: keyGroups.get(pressKey) ? keyGroups.get(pressKey).face.position.z : 0,
+             reject: { key: rejectKey, running: rejectRunning },
              count: keyGroups.size, keys: [...keyGroups.keys()] },
     handRows,
   };

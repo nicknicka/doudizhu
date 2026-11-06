@@ -148,6 +148,9 @@ DIAMOND_DEPTH = 3.0
 # 方形键：只保留左侧一颗（A5），9x9，厚 3
 SQ_W = 9.0
 SQ_DEPTH = 3.0
+SQ_MARK = 4.2                          # 方键中央灰标的边长
+SQ_MARK_EDGE = 0.35                    # 灰标四周留出的坑沿宽
+SQ_MARK_SINK = 0.24                    # 灰标正面比黑键面低多少（内嵌深度）
 SQ_L_CX, SQ_L_CZ = -68.0, -18.8        # A4：D-pad 中心右 10mm、下 23.7mm
 
 # 键井（B1 已去背板）：只保留 KeyWell_L/R 命名节点，位置取原键井中心
@@ -1333,13 +1336,22 @@ def build_square_key(name, mats, cx, cz):
                         [mats["key"]], bevel=0.18)
     # 键面中央的灰标必须长在模型上：HTML 伪元素画的那块是轴对齐的，
     # 机身一转就和键面错位地飘着（键面外观只能由模型给，见 ADR-0003）。
+    # 而且灰标要**嵌进**键面：先在黑键面挖一个浅坑，再把灰标放进坑里、比键面低一档，
+    # 坑沿留一圈窄边。侧着转过来看到的是"凹进去一块"，不是一块带亮边的贴片浮在键面上。
+    mark_front = front - 0.10 + SQ_MARK_SINK          # 灰标正面：比黑键面低 SQ_MARK_SINK
+    pocket = front_piece(name + "_pocket",
+                         rounded_rect(SQ_MARK + 2 * SQ_MARK_EDGE,
+                                      SQ_MARK + 2 * SQ_MARK_EDGE, 0.5, seg=2),
+                         front - 0.60, mark_front + 0.04, [mats["key"]], bevel=0.0)
     mark = front_piece(name + "_mark",
-                       rounded_rect(4.2, 4.2, 0.5, seg=2),
-                       front - 0.22, front - 0.06,
-                       [mats["key_mark"]], bevel=0.04)
-    for ob in (gold, black, mark):
+                       rounded_rect(SQ_MARK, SQ_MARK, 0.5, seg=2),
+                       mark_front, front + 0.70,
+                       [mats["key_mark"]], bevel=0.02)
+    for ob in (gold, black, pocket, mark):
         ob.location = (cx, 0.0, cz)
         apply_transform(ob)
+    boolean(black, pocket, op="DIFFERENCE")           # 浅坑：深 0.28，比灰标再深 0.04
+    for ob in (gold, black, mark):
         shade_by_angle(ob, 28.0)
     return [gold, black, mark]
 
