@@ -649,8 +649,6 @@
     transition:transform .3s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),opacity .22s ease}
   .banner.is-show{transform:translateX(-50%) translateY(0);opacity:1}
   .banner[data-kind="error"]{background:color-mix(in srgb,var(--accent) 9%,var(--ground))}
-  /* 浮层提示在最上面时，别和一次性的拖拽提示叠在一起 */
-  body:has(.banner.is-show) .drag-hint{opacity:0}
   /* 铺满可用宽度：宽度同时受视口高度约束（--stage-reserve 留给 dock 与顶部提示），
      机身再大也不会把操作台挤出视口。max-height 用同一个公式，避免 aspect-ratio 被压变形。 */
   .machine{
@@ -771,7 +769,6 @@
   @media (max-height:520px){
     body:has(#panel.is-open) .machine:not(.panel-open){transform:none}
     #panel.is-open{max-height:44vh}
-    .drag-hint{display:none}
   }
 
   /* ---------- 底部 Dock（状态行 + 图标轨） ---------- */
@@ -835,22 +832,6 @@
   .dock-btn:hover .lbl{opacity:1;transform:translateX(-50%) translateY(0)}
   .dock-sep{width:1px;height:24px;background:color-mix(in srgb,var(--ink) 25%,transparent);margin:0 2px}
 
-  /* 拖拽提示：轻量胶囊 */
-  .drag-hint{
-    position:fixed;top:16px;left:50%;transform:translateX(-50%);
-    display:flex;align-items:center;gap:6px;
-    padding:4px 12px 4px 8px;font-size:11px;color:var(--muted);
-    background:color-mix(in srgb,var(--ground) 90%,var(--ink));
-    border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
-    border-radius:20px;z-index:90;opacity:.7;
-    pointer-events:none;
-    transition:opacity .8s ease,transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1));
-    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-  .drag-hint svg{width:14px;height:14px;stroke:currentColor;fill:none;
-                 stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;
-                 flex-shrink:0;opacity:.7}
-  .drag-hint.is-hidden{opacity:0;transform:translateX(-50%) translateY(-8px)}
-
   /* 加载层：机身与首屏数据都就绪前盖住整页（见 ADR-0009）。
      可见性只由 <body class="is-booting"> 决定 —— 这个类写在标记里，
      不等模块图；退场由 __bootHandoff 播完 0.26s 再摘掉这个类。 */
@@ -894,7 +875,6 @@
   body.is-dragging .dock{
     transform:translateX(-50%) translateY(20px) scale(.92);
     opacity:.3;pointer-events:none}
-  body.is-dragging .drag-hint{opacity:0 !important}
   body.is-dragging .seat-label .cnt{transition:transform .15s ease}
 
   @media (max-width:620px){
@@ -974,7 +954,7 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
 <canvas class="bgpix" id="bg-pixels" aria-hidden="true"></canvas>
 <div class="page">
 
-  <div class="banner" id="banner">正在向后端取数…</div>
+  <div class="banner" id="banner" hidden></div>
 
 
 
@@ -1191,9 +1171,6 @@ document.querySelector('script[type="module"]').addEventListener('error', window
     </button>
       </div>
   </nav>
-
-  <!-- 拖拽提示 -->
-  <div class="drag-hint" id="drag-hint"><svg viewBox="0 0 24 24"><path d="M12 2v6M12 22v-6M2 12h6M22 12h-6"/><circle cx="12" cy="12" r="3"/></svg>按住机身边框拖动可旋转 · 拖空白背景可平移 · 悬停座位看信息</div>
 
 </body>
 </html>

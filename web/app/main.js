@@ -18,10 +18,13 @@ function renderAll(){
   updateStatusStrip();
 }
 
+// 首屏加载期间不弹「分析中…」等浮层，入口保持干净（错误照旧报）。
+let booting = true;
+
 async function refresh(target, note){
   if (S.busy || !S.record) return false;
   S.busy = true;
-  setBanner('分析中…', '');
+  if (!booting) setBanner('分析中…', '');
   let ok = false;
   try {
     const view = await api('/api/analyze', {record: S.record, step: target ?? null});
@@ -327,30 +330,12 @@ if ($('crt')) new MutationObserver(syncDockActive).observe($('crt'), { attribute
 if (panel) new MutationObserver(syncDockActive).observe(panel, { attributes: true, attributeFilter: ['class'] });
 syncDockActive();
 
-// 拖拽提示：拖过一次就隐藏
-const dragHint = $('drag-hint');
-let hintHidden = false;
-const hideDragHint = () => {
-  if (hintHidden) return;
-  hintHidden = true;
-  dragHint?.classList.add('is-hidden');
-  setTimeout(() => { if (dragHint) dragHint.style.display = 'none'; }, 600);
-};
-
 /* ---------- stage 拖拽：机身边框 = 转，空白背景 = 平移 ---------- */
 let rigDragActive = false;
 let rigDragMoved = false;
 let panActive = false;
 const sceneEl = $('scene');
 const setCursor = c => { if (sceneEl) sceneEl.style.cursor = c; };
-// 首次悬停机身也淡化提示（用户发现了就够了）
-let hintHovered = false;
-$('stage').addEventListener('pointerenter', () => {
-  if (hintHovered) return;
-  hintHovered = true;
-  if (dragHint) dragHint.style.opacity = '.35';
-});
-
 // 屏幕范围（牌桌）：按住它是在看牌/点牌，不该转机身
 const onScreen = (x, y) => {
   const r = $('screen-hud').getBoundingClientRect();
@@ -373,7 +358,6 @@ $('stage').addEventListener('pointermove', e => {
   if (!rigDragActive) return;
   rigDragMoved = true;
   machine.moveDrag(e.clientX, e.clientY);
-  hideDragHint();
 });
 // 机身外的空白背景 = 平移；松手弹回原位
 $('stage').addEventListener('pointerdown', e => {
@@ -388,7 +372,6 @@ $('stage').addEventListener('pointerdown', e => {
 $('stage').addEventListener('pointermove', e => {
   if (panActive){
     machine.movePan(e.clientX, e.clientY);
-    hideDragHint();
     return;
   }
   if (rigDragActive) return;
@@ -432,7 +415,6 @@ document.addEventListener('wheel', e => {
     machine.zoomBy(step > 0 ? 1 : -1);
     zoomAcc -= step;
   }
-  hideDragHint();
 }, { passive: false });
 
 // 双击复位缩放 + 角度
@@ -453,9 +435,6 @@ document.querySelectorAll('.seat-label').forEach(label => {
   });
 });
 
-// 3 秒后自动淡出拖拽提示
-setTimeout(hideDragHint, 3500);
-
 
 async function boot(){
   window.__bootStarted = true;
@@ -467,12 +446,12 @@ async function boot(){
       const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
       S.config = config;
       S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-      await loadRecord(openingRecord(d.record, d.opening_step),
-        '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
-        d.opening_step);
+      await loadRecord(openingRecord(d.record, d.opening_step), '', d.opening_step);
       updateStatusStrip();
     } catch (err){
       setBanner(err.message, 'error');
+    } finally {
+      booting = false;
     }
   })();
   // 加载层退场条件（ADR-0009）：机身就绪且首屏数据落地才放行；机身明确失败时
