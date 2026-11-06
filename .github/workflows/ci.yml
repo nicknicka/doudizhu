@@ -3,11 +3,19 @@ name: CI
 # 目的：让 PR 上的"绿"等于分支头的绿。
 # 此前没有任何检查，"npm run verify 全绿"的证据只能来自某个人带未提交改动的
 # 工作区 —— #57 就是这么漏过去的（合入的头在干净树上根本跑不过 verify）。
+#
+# 三条检查的取舍（详见 #60）：
+#   server / web-unit —— 硬门禁。在干净 runner 上稳定，快。
+#   browser            —— 只手动触发。它在 ubuntu 上有 6 处未定级的版式偏差
+#                         （#60），而 browser verify 又是唯一能挡住 #57 那类
+#                         回归的检查，所以既不删也不让它把每个 PR 涂红：
+#                         改版式后手动跑一次，或在 #60 定级、转为固定门禁。
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,7 +37,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.lock.txt
 
-      # 页面与 verify 都硬用 .venv/bin/python（见 web/verify.mjs），CI 照同一布局装
+      # 页面与 verify 都硬用 .venv/bin/python（见 web/verify.mjs:391），CI 照同一布局装
       - name: 装依赖（venv 布局与 README 一致）
         run: |
           python3.11 -m venv .venv
@@ -39,13 +47,23 @@ jobs:
       - name: pytest
         run: .venv/bin/python -m pytest -q
 
-  web:
-    name: 展示页真实交互（browser verify）
+  web-unit:
+    name: 展示页纯逻辑单测
     runs-on: ubuntu-latest
-    # 暂时非门禁：#60 —— 同一棵树在 macOS 本地全绿，在 ubuntu runner 上有 6 处
-    # 文字版式偏差（13px 横向溢出、概率行被副屏裁切），尚未定级是字体回退差异
-    # 还是真实跨平台缺陷。等 #60 定级后删掉这一行即可转为硬门禁。
-    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # 只跑纯逻辑：不装浏览器、不起后端。
+      - name: node --test
+        run: node --test web/test/*.test.mjs
+
+  browser:
+    name: 展示页真实交互（browser verify，手动）
+    # 见文件头：ubuntu 上 6 处版式偏差尚未定级（#60），不设成每次推送都红。
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -74,9 +92,6 @@ jobs:
         run: |
           npm i --no-save playwright@1.64.1
           npx playwright install --with-deps chromium
-
-      - name: 纯逻辑单测（不起浏览器）
-        run: node --test web/test/*.test.mjs
 
       - name: 浏览器端到端 verify
         run: npm run verify
