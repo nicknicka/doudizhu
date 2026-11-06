@@ -35,7 +35,6 @@ jobs:
           python3.11 -m venv .venv
           .venv/bin/python -m pip install --no-cache-dir -r requirements.lock.txt
           .venv/bin/python -m pip install --no-cache-dir -e . --no-deps
-          .venv/bin/python -m pip install --no-cache-dir pytest==9.2.0
 
       - name: pytest
         run: .venv/bin/python -m pytest -q
@@ -73,7 +72,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: 纯逻辑单测（不起浏览器）
-        run: node --test web/test
+        run: node --test web/test/*.test.mjs
 
       - name: 浏览器端到端 verify
         run: npm run verify
