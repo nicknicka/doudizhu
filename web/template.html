@@ -862,8 +862,8 @@
   #boot #boot-reload{margin-top:2px}
   #boot .boot-js{display:none;margin:0}
 
-  /* —— #55 候选原型（?boot=a|b|c 时生效；选定后另外两路删掉）——
-     三个方向共享同一条退场机制：is-exiting 播完才摘 is-booting，
+  /* —— #55 候选原型（?boot=a~h 时生效；选定后其余删掉）——
+     八个方向共享同一条退场机制：is-exiting 播完才摘 is-booting，
      机身入场（0.8s gsap，已先行开跑）在退场遮住的那两百毫秒里露出后半段。 */
   #boot[data-candidate]{gap:18px}
   #boot[data-candidate] #boot-text::after{font-size:11px;color:var(--muted)}
@@ -900,6 +900,93 @@
   #boot[data-candidate="b"] #boot-text::after{content:" · 候选 B 通电扫描环"}
   #boot[data-candidate="b"].is-exiting{animation:bootB-off calc(.26s * var(--slow,1)) ease-in forwards}
   @keyframes bootB-off{to{transform:scaleX(1.6) scaleY(.01);opacity:0}}
+
+  /* D~H 共用：伪元素叠在同一个网格单元里，文字落到第二行 */
+  #boot[data-candidate="d"]::before,#boot[data-candidate="d"]::after,
+  #boot[data-candidate="e"]::before,#boot[data-candidate="e"]::after,
+  #boot[data-candidate="f"]::before,#boot[data-candidate="f"]::after,
+  #boot[data-candidate="g"]::before,#boot[data-candidate="g"]::after,
+  #boot[data-candidate="h"]::before{content:"";grid-area:1/1;align-self:center}
+  #boot[data-candidate="d"] #boot-text,#boot[data-candidate="e"] #boot-text,
+  #boot[data-candidate="f"] #boot-text,#boot[data-candidate="g"] #boot-text,
+  #boot[data-candidate="h"] #boot-text{grid-row:2;grid-column:1}
+  #boot[data-candidate="d"] .boot-mark,#boot[data-candidate="e"] .boot-mark,
+  #boot[data-candidate="f"] .boot-mark,#boot[data-candidate="g"] .boot-mark,
+  #boot[data-candidate="h"] .boot-mark{display:none}
+
+  /* D · 记牌条点亮：15 格逐格点亮（background-size + steps(15)），
+     取材于机顶那排「还没现身的牌」；退场整条收回右端。 */
+  #boot[data-candidate="d"]::before{width:212px;height:16px;box-sizing:border-box;
+    border:2px solid var(--ink);
+    background:repeating-linear-gradient(90deg,transparent 0 12px,var(--ink) 12px 14px)}
+  #boot[data-candidate="d"]::after{width:212px;height:16px;box-sizing:border-box;
+    background:repeating-linear-gradient(90deg,var(--accent) 0 12px,var(--ink) 12px 14px);
+    background-repeat:no-repeat;background-position:left center;
+    animation:bootD-fill 1.8s steps(15,end) infinite}
+  @keyframes bootD-fill{from{background-size:0 100%}to{background-size:100% 100%}}
+  #boot[data-candidate="d"] #boot-text::after{content:" · 候选 D 记牌条点亮"}
+  #boot[data-candidate="d"].is-exiting::after{
+    animation:bootD-out calc(.26s * var(--slow,1)) steps(8,end) forwards}
+  @keyframes bootD-out{to{background-size:0 100%;background-position:right center}}
+
+  /* E · 方波涟漪：两圈方环 steps(6) 逐格扩张，正好是页面自己的方波田语言；
+     退场反向收拢。 */
+  #boot[data-candidate="e"]::before,#boot[data-candidate="e"]::after{
+    width:64px;height:64px;box-sizing:border-box;border:3px solid var(--accent)}
+  #boot[data-candidate="e"]::before{animation:bootE-ring 1.6s steps(6,end) infinite}
+  #boot[data-candidate="e"]::after{animation:bootE-ring 1.6s steps(6,end) .8s infinite}
+  @keyframes bootE-ring{0%{transform:scale(.25);opacity:1}70%{opacity:.35}
+                        100%{transform:scale(2.6);opacity:0}}
+  #boot[data-candidate="e"] #boot-text::after{content:" · 候选 E 方波涟漪"}
+  #boot[data-candidate="e"].is-exiting::before{
+    animation:bootE-in calc(.26s * var(--slow,1)) ease-in forwards}
+  #boot[data-candidate="e"].is-exiting::after{animation:none;opacity:0}
+  @keyframes bootE-in{to{transform:scale(.1);opacity:0}}
+
+  /* F · 扫描自检：先给机屏轮廓，红线 steps(18) 自上而下扫一遍；
+     退场红线冲出下沿、轮廓熄掉。 */
+  #boot[data-candidate="f"]::before{width:184px;height:112px;box-sizing:border-box;
+    border:2px solid var(--ink)}
+  #boot[data-candidate="f"]::after{width:160px;height:6px;background:var(--accent);
+    animation:bootF-scan 1.7s steps(18,end) infinite}
+  @keyframes bootF-scan{from{transform:translateY(-50px)}to{transform:translateY(50px)}}
+  #boot[data-candidate="f"] #boot-text::after{content:" · 候选 F 扫描自检"}
+  #boot[data-candidate="f"].is-exiting::after{
+    animation:bootF-out calc(.26s * var(--slow,1)) ease-in forwards}
+  @keyframes bootF-out{to{transform:translateY(200px);opacity:0}}
+  #boot[data-candidate="f"].is-exiting::before{
+    animation:bootF-blink calc(.26s * var(--slow,1)) steps(4,end) forwards}
+  @keyframes bootF-blink{to{opacity:0}}
+
+  /* G · 按键自检：一排键帽被 steps(14) 的硬边从右往左擦亮；退场整排
+     齐亮一帧再熄（上电瞬间）。 */
+  #boot[data-candidate="g"]::before{width:168px;height:22px;box-sizing:border-box;
+    background:repeating-linear-gradient(90deg,
+      color-mix(in srgb,var(--ink) 32%,transparent) 0 12px,transparent 12px 24px)}
+  #boot[data-candidate="g"]::after{width:12px;height:22px;background:var(--accent);
+    animation:bootG-walk 1.4s steps(7,end) infinite}
+  @keyframes bootG-walk{from{transform:translateX(-78px)}to{transform:translateX(78px)}}
+  #boot[data-candidate="g"] #boot-text::after{content:" · 候选 G 按键自检"}
+  #boot[data-candidate="g"].is-exiting::after{
+    animation:bootG-out calc(.26s * var(--slow,1)) ease-in forwards}
+  #boot[data-candidate="g"].is-exiting::before{
+    animation:bootG-off calc(.26s * var(--slow,1)) steps(4,end) forwards}
+  @keyframes bootG-out{to{transform:translateX(120px);opacity:0}}
+  @keyframes bootG-off{to{opacity:0}}
+
+  /* H · 显像管起搏：一条横线 steps(10) 涨成整屏、再回稳；退场缩回那条线。 */
+  #boot[data-candidate="h"]::before{width:200px;height:118px;box-sizing:border-box;
+    background:color-mix(in srgb,var(--accent) 12%,transparent);
+    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
+    animation:bootH-open 1.9s steps(10,end) infinite}
+  @keyframes bootH-open{0%{transform:scaleY(.02);opacity:1}
+                        55%{transform:scaleY(1);opacity:1}
+                        72%{transform:scaleY(1);opacity:.5}
+                        100%{transform:scaleY(.02);opacity:.8}}
+  #boot[data-candidate="h"] #boot-text::after{content:" · 候选 H 显像管起搏"}
+  #boot[data-candidate="h"].is-exiting::before{
+    animation:bootH-off calc(.26s * var(--slow,1)) steps(4,end) forwards}
+  @keyframes bootH-off{to{transform:scaleY(.02);opacity:0}}
 
   /* 评审条：只在 ?boot= 出现，切换候选 / 慢放 / 重播；选定后整块删 */
   .boot-review{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10000;
@@ -989,29 +1076,37 @@ setTimeout(function(){
   window.__bootHandoff();
 }, 8000);
 setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
-// #55 候选原型：?boot=a|b|c 选一条，?slow=1 慢放 8 倍；退场播完才摘 is-booting。
+// #55 候选原型：?boot=a~h 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
+// ?nobar=1 不画评审条（录屏用）；退场播完才摘 is-booting。
 // 这是给人挑方向的临时骨架：选定后 #56 只留中标那条，评审条与本段一起删。
 (function(){
   var q = new URLSearchParams(location.search);
   var cand = q.get('boot');
-  if (!cand || 'abc'.indexOf(cand) < 0) return;
-  var EXIT_MS = { a: 260, b: 260, c: 220 }[cand];
+  if (!cand || 'abcdefgh'.indexOf(cand) < 0) return;
+  var EXIT_MS = { a:260, b:260, c:220, d:260, e:260, f:260, g:260, h:260 }[cand];
   var slow = q.get('slow') === '1';
+  var holdMs = parseInt(q.get('hold') || '0', 10) || 0;
+  var noBar = q.get('nobar') === '1';
   document.addEventListener('DOMContentLoaded', function(){
     var bootEl = document.getElementById('boot');
     bootEl.dataset.candidate = cand;
     if (slow) bootEl.style.setProperty('--slow', 8);
     var realHandoff = window.__bootHandoff;
+    var going = false;
     window.__bootHandoff = function(){
-      if (bootEl.classList.contains('is-exiting')) return;
-      bootEl.classList.add('is-exiting');
-      setTimeout(function(){ bootEl.classList.remove('is-exiting'); realHandoff(); },
-                 EXIT_MS * (slow ? 8 : 1));
+      if (going) return;
+      going = true;
+      setTimeout(function(){
+        bootEl.classList.add('is-exiting');
+        setTimeout(function(){ bootEl.classList.remove('is-exiting'); realHandoff(); },
+                   EXIT_MS * (slow ? 8 : 1));
+      }, holdMs);
     };
+    if (noBar) return;
     var bar = document.createElement('div');
     bar.className = 'boot-review';
     bar.innerHTML = '<span class="cap">加载动画候选</span>'
-      + ['a','b','c'].map(function(x){
+      + ['a','b','c','d','e','f','g','h'].map(function(x){
           return '<button data-x="' + x + '"' + (x === cand ? ' class="is-on"' : '') + '>'
             + x.toUpperCase() + '</button>';
         }).join('')
