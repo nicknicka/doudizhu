@@ -15,6 +15,7 @@ function renderAll(){
   board.render();
   consolePanel.render();
   panels.render();
+  updateStatusStrip();
 }
 
 async function refresh(target, note){
@@ -72,7 +73,9 @@ async function loadRecord(record, note, viewStep){
   resetSession();                       // 换 / 重开记录：花色回到 record_id 确定性重推（#48）
   S.record = record;
   // 不指定就看后端挑的默认局面；演示局会指定"开屏那一手"，让首页直接落在能出牌的地方
-  if (!(await refresh(viewStep ?? null, note))) S.record = previous;
+  const ok = await refresh(viewStep ?? null, note);
+  if (!ok) S.record = previous;
+  return ok;                                   // #54：boot() 要等首屏数据落地才放行加载层
 }
 
 function stepTo(delta){
@@ -85,24 +88,24 @@ function stepTo(delta){
   if (next !== undefined) refresh(next);
 }
 
-/* ---------- 工具条 ---------- */
-$('new-toggle').addEventListener('click', () => {
+/* ---------- 工具条：入口全部收在底部 dock ---------- */
+const toggleNewPanel = () => {
   if (consolePanel.isNewPanelOpen()) consolePanel.hideNewPanel();
   else consolePanel.showNewPanel();
-});
+};
 // 左握把那个方键：开新一轮（在屏幕里录入，不跳页）
 $('new-round').addEventListener('click', () => consolePanel.showNewPanel());
 $('newgame-close').addEventListener('click', () => consolePanel.hideNewPanel());
 $('undo').addEventListener('click', () =>
   mutate('/api/game/undo', {record:S.record}, '已撤销最后一手。'));
-$('export').addEventListener('click', () => {
+const exportRecord = () => {
   const blob = new Blob([JSON.stringify(S.record, null, 2) + '\n'], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${S.record.record_id || 'record'}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-});
+};
 
 /* ---------- 打开记录 ---------- */
 async function readFile(file){
@@ -114,7 +117,6 @@ async function readFile(file){
     setBanner(err instanceof SyntaxError ? `${file.name} 不是合法 JSON` : err.message, 'error');
   }
 }
-$('file').addEventListener('change', e => { readFile(e.target.files[0]); e.target.value = ''; });
 document.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
 document.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
 document.addEventListener('drop', e => {
@@ -157,11 +159,11 @@ const closeData = () => {
   crtPanel && crtPanel.classList.remove('is-open');
   machineEl && machineEl.classList.remove('panel-open');
 };
-$('data-toggle').addEventListener('click', () => {
+const toggleDataPanel = () => {
   crtPanel.classList.toggle('is-open');
   machineEl.classList.toggle('panel-open', crtPanel.classList.contains('is-open'));
   if (crtPanel.classList.contains('is-open')) panels.resize();
-});
+};
 $('data-close').addEventListener('click', closeData);
 addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -267,11 +269,7 @@ addEventListener('keydown', e => {
 });
 
 
-/* ---------- 极简模式：首屏只剩机身 + 底部 Dock ---------- */
-document.body.classList.add('is-minimal');
-// 把数据面板按钮移到 body 直接子级，脱离 .page 的 stacking context，确保可点击
-const dataToggle = $('data-toggle');
-if (dataToggle) document.body.appendChild(dataToggle);
+/* ---------- 操作台与状态带：首屏只剩机身 + 底部 dock ---------- */
 
 // 操作台：状态行常驻在 dock，deckbar 作为独立浮层从 dock 上沿拉起
 const panel = $('panel');
@@ -288,12 +286,6 @@ function updateStatusStrip(){
   stripSub.textContent = `全局第 ${v.step}/${m.total_steps} 手`
     + (k >= 0 ? ` · 我的第 ${k + 1} 次出牌机会` : '');
 }
-// 用 MutationObserver 监听 #who 的变化
-const whoEl = $('who');
-if (whoEl){
-  new MutationObserver(updateStatusStrip).observe(whoEl, { childList: true, characterData: true, subtree: true });
-}
-
 // Dock 按钮事件
 const dockMap = {
   'dock-steps': () => {
@@ -301,9 +293,9 @@ const dockMap = {
     panel?.classList.toggle('is-open');
     syncDockActive();
   },
-  'dock-data': () => { $('data-toggle')?.click(); },
-  'dock-new': () => { $('new-toggle')?.click(); },
-  'dock-export': () => { $('export')?.click(); },
+  'dock-data': toggleDataPanel,
+  'dock-new': toggleNewPanel,
+  'dock-export': exportRecord,
 };
 document.querySelectorAll('.dock-btn').forEach(btn => {
   const id = btn.id;
@@ -313,14 +305,8 @@ document.querySelectorAll('.dock-btn').forEach(btn => {
       if (e.target.tagName !== 'INPUT') fileInput?.click();
     });
     fileInput?.addEventListener('change', e => {
-      // 转发给页面原始的 file input
-      const origFile = $('file');
-      if (origFile && e.target.files?.length){
-        const dt = new DataTransfer();
-        dt.items.add(e.target.files[0]);
-        origFile.files = dt.files;
-        origFile.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      readFile(e.target.files[0]);
+      e.target.value = '';
     });
     return;
   }
@@ -424,11 +410,28 @@ $('stage').addEventListener('pointerup', endRigDrag);
 $('stage').addEventListener('pointercancel', endRigDrag);
 $('stage').addEventListener('pointerleave', e => { if (rigDragActive || panActive) endRigDrag(e); });
 
-// 滚轮缩放
-$('stage').addEventListener('wheel', e => {
+// 滚轮缩放：按手势累计位移分档，不按事件个数。
+// 鼠标滚轮一格 deltaY≈100~120px，正好一格；触控板一次滑动累计数百 px，
+// 也只走 2~3 格。事件间隔超过 120ms 视为换了手势，尾巴（惯性滚动）清零。
+const ZOOM_NOTCH = 100;        // 累计多少像素走一格（Chrome 一格滚轮 = 100px）
+const ZOOM_GESTURE_GAP = 120;  // ms；超过就当新手势
+// 行模式（Firefox 一格 3 行）与页模式折算成同一天花板：一格始终≈一步
+const pxPerDelta = d => d.deltaMode === 1 ? d.deltaY * 33 : d.deltaMode === 2 ? d.deltaY * 100 : d.deltaY;
+let zoomAcc = 0, zoomLastAt = 0;
+// 监听在文档上：机身与页面空白都能缩放（画布铺满视口，舞台盒只是投影锚点）。
+// dock、浮层、数据面板里滚轮属于界面滚动，不抢。
+document.addEventListener('wheel', e => {
+  if (e.target.closest('.dock, .panel, .crt, #newgame, .machine-error')) return;
   e.preventDefault();
-  const delta = e.deltaY > 0 ? 1 : -1;
-  machine.zoomBy(delta);
+  const now = performance.now();
+  if (now - zoomLastAt > ZOOM_GESTURE_GAP) zoomAcc = 0;
+  zoomLastAt = now;
+  zoomAcc += pxPerDelta(e);
+  while (Math.abs(zoomAcc) >= ZOOM_NOTCH){
+    const step = Math.sign(zoomAcc) * ZOOM_NOTCH;
+    machine.zoomBy(step > 0 ? 1 : -1);
+    zoomAcc -= step;
+  }
   hideDragHint();
 }, { passive: false });
 
@@ -455,20 +458,27 @@ setTimeout(hideDragHint, 3500);
 
 
 async function boot(){
+  window.__bootStarted = true;
   board.init();
   consolePanel.init({ refresh, mutate, renderBar: board.renderBar });
   syncTouch();
-  try {
-    const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
-    S.config = config;
-    S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-    await loadRecord(openingRecord(d.record, d.opening_step),
-      '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
-      d.opening_step);
-    updateStatusStrip();
-  } catch (err){
-    setBanner(err.message, 'error');
-  }
+  const dataReady = (async () => {
+    try {
+      const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
+      S.config = config;
+      S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
+      await loadRecord(openingRecord(d.record, d.opening_step),
+        '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
+        d.opening_step);
+      updateStatusStrip();
+    } catch (err){
+      setBanner(err.message, 'error');
+    }
+  })();
+  // 加载层退场条件（ADR-0009）：机身就绪且首屏数据落地才放行；机身明确失败时
+  // 不等数据，让错误面板与重试立刻可达。超时强放行由标记里的看门狗负责。
+  if (await machine.whenSettled() === 'ready') await dataReady;
+  window.__bootHandoff();
 }
 
 boot();

@@ -85,7 +85,7 @@ const clickCard = async (page, k) => {
   await page.mouse.click(box.x + pt.x, box.y + pt.y);
 };
 
-// 极简模式下操作台是 dock 上沿的浮层，默认收起；需要操作前先展开。
+// 操作台是 dock 上沿的浮层，默认收起；需要操作前先展开。
 // 展开的是 #panel（不是机身），所以机身版式不受它影响。
 const openDeck = async page => {
   const opened = await page.evaluate(() => {
@@ -417,8 +417,8 @@ try {
     problems.push('3D 机身还在加载（loading）时就弹出了错误提示');
   }
   holdGlb = false;
-  await page.waitForSelector('#who', { state: 'attached', timeout: 40000 });
-  await page.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
+  await page.waitForSelector('#strip-sub', { state: 'attached', timeout: 40000 });
+  await page.waitForFunction(() => (document.getElementById('strip-sub')?.textContent || '').includes('全局第'), null,
     { timeout: 40000 });
   await waitForMachineState(page, s => s.status === 'ready' && s.ready);
   await page.waitForTimeout(900);
@@ -573,7 +573,7 @@ try {
     problems.push('操作台浮层默认没有收起：应该只留 dock 上的「出牌机会」入口');
   }
   if (deckState.chassisTop !== 0) {
-    problems.push(`极简态宽屏不该再显示机身壳体：chassis 顶 ${deckState.chassisTop.toFixed(1)}px`);
+    problems.push(`宽屏不该再显示机身壳体：chassis 顶 ${deckState.chassisTop.toFixed(1)}px`);
   }
 
   // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
@@ -684,7 +684,7 @@ try {
   if (await page.locator('#crt').evaluate(el => el.classList.contains('is-open'))) {
     problems.push('数据面板默认就打开着（应该是点开才盖上来）');
   }
-  await page.click('#data-toggle');
+  await page.click('#dock-data');
   await page.waitForTimeout(400);
   if (!(await page.locator('#crt').evaluate(el => el.classList.contains('is-open')))) {
     problems.push('数据面板点不开');
@@ -708,7 +708,7 @@ try {
   if (panelRects.panel.left < panelRects.screen.right) problems.push('宽屏数据面板不在机身右侧');
   await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
 
-  // 极简模式下操作台默认收起，先展开才能操作内部控件
+  // 操作台默认收起，先展开才能操作内部控件
   await openDeck(page);
   await checkPanelLayout(page, '宽屏');
     // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
@@ -1162,8 +1162,8 @@ try {
   fresh420.setDefaultTimeout(90000);
   watchPage(fresh420, '420 复核');
   await fresh420.goto(`${BASE}/`);
-  await fresh420.waitForSelector('#who', { state: 'attached', timeout: 40000 });
-  await fresh420.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
+  await fresh420.waitForSelector('#strip-sub', { state: 'attached', timeout: 40000 });
+  await fresh420.waitForFunction(() => (document.getElementById('strip-sub')?.textContent || '').includes('全局第'), null,
     { timeout: 40000 });
   await waitForMachineState(fresh420, s => s.status === 'ready' && s.ready);
   await fresh420.waitForTimeout(1200);
@@ -1269,6 +1269,49 @@ try {
   }
   await page.screenshot({ path: '/tmp/ddz-web-3.png', fullPage: true });
 
+  // 加载层：常规态只有动画（说明由设计说），模块没起来才给文字与重试
+  {
+    const boot = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
+    watchPage(boot, '加载层');
+    // 把模块入口拖住，加载层就会一直停在常规态 —— 不用赌网速
+    await boot.route('**/app/main.js', async route => {
+      await new Promise(r => setTimeout(r, 3000));
+      await route.continue();
+    });
+    await boot.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+    await boot.waitForSelector('#boot .sk-fold-cube', { timeout: 10000 });
+    const quiet = await boot.evaluate(() => {
+      const t = document.getElementById('boot-text');
+      const r = t.getBoundingClientRect();
+      const fold = document.querySelector('#boot .boot-fold');
+      return {
+        textW: Math.round(r.width), textH: Math.round(r.height),
+        clip: getComputedStyle(t).clipPath, copy: t.textContent.trim(),
+        aria: document.getElementById('boot').getAttribute('aria-live'),
+        foldW: Math.round(fold.getBoundingClientRect().width),
+      };
+    });
+    if (quiet.textW > 4 || quiet.textH > 4) problems.push(`加载层常规态还显示着文字（${quiet.textW}×${quiet.textH}）`);
+    if (quiet.clip !== 'inset(50%)') problems.push(`加载层文字没沉到 sr-only（clip=${quiet.clip}）`);
+    if (!quiet.copy) problems.push('加载层没有留给读屏的文案');
+    if (quiet.aria !== 'polite') problems.push('加载层没挂 aria-live');
+    if (quiet.foldW < 40) problems.push(`加载层没画出折叠立方体（宽 ${quiet.foldW}）`);
+    await boot.close();
+  }
+
+  // 加载层兜底：模块挂了要把文字与重试入口放出来
+  {
+    const dead = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
+    watchPage(dead, '加载层兜底', msg => /net::ERR_FAILED|Failed to load resource/i.test(msg));
+    await dead.route('**/app/main.js', route => route.abort());
+    await dead.goto(`${BASE}/`);
+    const shown = await waitUntil(dead, async () =>
+      ((await dead.locator('#boot-text').boundingBox())?.width ?? 0) > 20);
+    if (!shown) problems.push('模块挂了以后加载层没把报错文字放出来');
+    if (await dead.locator('#boot-reload').isHidden()) problems.push('模块挂了以后没有「重新加载」入口');
+    await dead.close();
+  }
+
   // /glb：原样查看模型，不加环境贴图、不加色调映射
   {
     // 视口必须能把整机装进画布：这是保真比色的坐标系，被裁掉就会取不到边缘色块
@@ -1305,7 +1348,7 @@ try {
     if (await failed.locator('#machine-error').isHidden()) problems.push('GLB 失败后错误提示不可见');
     if (await failed.locator('#machine-retry').isHidden()) problems.push('GLB 失败后没有重试按钮');
     if ((status.nodes || []).length) problems.push('GLB 失败后仍报告模型节点');
-    await failed.click('#data-toggle');
+    await failed.click('#dock-data');
     await failed.waitForTimeout(250);
     if (!(await failed.locator('#crt').isVisible())) problems.push('GLB 失败后数据面板不可读');
     if ((await failed.locator('#calib tr').count()) < 2) problems.push('GLB 失败后校准表不可读');
@@ -1348,7 +1391,7 @@ try {
     if (status.status !== 'no-webgl' || !status.error) problems.push('无 WebGL 后没有明确错误状态');
     if (await noGl.locator('#machine-error').isHidden()) problems.push('无 WebGL 后错误提示不可见');
     if (await noGl.locator('#machine-retry').isHidden()) problems.push('无 WebGL 后没有重试按钮');
-    await noGl.click('#data-toggle');
+    await noGl.click('#dock-data');
     await noGl.waitForTimeout(250);
     if (!(await noGl.locator('#crt').isVisible())) problems.push('无 WebGL 后数据面板不可读');
     await noGl.close();

@@ -63,15 +63,22 @@ let pointerTarget = { x: 0, y: 0 }, view = { x: 0, y: 0 };
 let parallaxRunning = false, parallaxStart = 0;
 let dragYaw = 0, dragTilt = 0, dragFromYaw = 0, dragFromTilt = 0;
 let dragStartX = 0, dragStartY = 0, isDraggingRig = false, dragSpringRunning = false;
-let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringFrom = 1, zoomSpringStart = 0;
+let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringStart = 0;
 // 拖空白背景的平移偏移（rig 单位），和视差 view 叠加，松手弹回 0
 let panX = 0, panY = 0, panScale = 0.01;
 let panDragging = false, panSpringRunning = false;
 let panStartX = 0, panStartY = 0, panFromX = 0, panFromY = 0, panSpringStart = 0;
-const ZOOM_MIN = 0.75, ZOOM_MAX = 1.6, ZOOM_STEP = 0.12;
+const ZOOM_MIN = 0.75, ZOOM_MAX = 1.6, ZOOM_STEP = 0.04;
 let dragSpringFrom = 0, dragSpringStart = 0;
 let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
+// 入场动画占用 rig.scale；期间不接受滚轮缩放，免得两条动画抢同一根轴。
+let entranceDone = true;
+// boot 交接用：机身就绪或明确失败时兑现一次；重复装载会换新的 Promise。
+let readyResolve = null;
+let readyPromise = new Promise(res => { readyResolve = res; });
+/** 机身进入终态时兑现，值就是那个状态：'ready' | 'error' | 'no-webgl'。 */
+export function whenSettled(){ return readyPromise; }
 let nodes = [], buttonsVisible = false, contactShadow = null, backdrop = null;
 let frameCount = 0, renderQueued = false, dirty = true;
 const raycaster = new THREE.Raycaster();
@@ -882,6 +889,7 @@ function installModel(gltf){
   body.traverse(o => { if (o.isMesh) o.castShadow = true; });   // ADR-0006：机壳全件投影
   if (backdrop) backdrop.visible = true;
   ready = true; status = 'ready'; error = '';
+  settle();
   resize(stageW, stageH);
   // installModel 时画布尺寸通常没变，resize 会提前返回；这里必须立即布局，
   // 否则 ready 后到入场动画结束前，屏与键热区都会短暂读成空。
@@ -889,12 +897,20 @@ function installModel(gltf){
   if (!reduce && window.gsap){
     // 入场缩放只改变投影，不会重新 emit；结束时补一次 relayout，
     // 让座位标签/热区/机下托盘的贴合都用"落定后"的 rect，而不是动画中途的。
+    entranceDone = false;
     gsap.from(rig.scale, { x: 0.94, y: 0.94, z: 0.94, duration: 0.8,
-      ease: 'power2.out', onUpdate: requestRender, onComplete: relayout });
+      ease: 'power2.out', onUpdate: requestRender,
+      onComplete: () => { entranceDone = true; relayout(); } });
   }
+}
+function settle(){
+  const res = readyResolve; readyResolve = null;
+  if (res) res(status);
 }
 function loadModel(){
   ready = false; status = 'loading'; error = '';
+  entranceDone = true;   // 未就绪期间同样不该收缩放；装载后由入场动画自己改
+  if (!readyResolve) readyPromise = new Promise(res => { readyResolve = res; });
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
   keyGroups = new Map(); pressKey = '';
   if (contactShadow) contactShadow.visible = false;
@@ -911,12 +927,14 @@ function loadModel(){
 function fail(err){
   ready = false; status = 'error';
   error = err && err.message ? err.message : String(err || '未知错误');
+  settle();
   emit();
   requestRender();
 }
 function failNoWebGL(err){
   status = 'no-webgl'; ready = false;
   error = '浏览器没有提供 WebGL，机身无法显示。启用 WebGL 后点重试；数据面板仍可查看。';
+  settle();
   emit();
   if (window.console && console.warn) console.warn('WebGL 初始化失败', err);
 }
@@ -1271,32 +1289,41 @@ function stepPanSpring(now){
 
 // 滚轮缩放
 export function zoomBy(delta){
+  if (!ready || !entranceDone) return;   // 加载/入场期间不抢 rig.scale
   rigZoomTarget = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, rigZoomTarget - delta * ZOOM_STEP));
-  startZoomSpring();
+  startZoomGlide();
 }
 export function zoomReset(){
+  if (!ready || !entranceDone) return;
   rigZoomTarget = 1;
   resetPan();
-  startZoomSpring();
+  startZoomGlide();
 }
 export function getZoom(){ return rigZoom; }
-function startZoomSpring(){
-  if (Math.abs(rigZoom - rigZoomTarget) < 0.001) return;
-  zoomSpringFrom = rigZoom;
+// 指数逼近（时间常数 ~140ms）：中途改目标只挪终点，值保持连续 —— 连续滚动
+// 因此单调跟手、不回跳；到上下限后 target 不动，一帧就收敛，不抖不出帧。
+const ZOOM_TAU = 140;
+function startZoomGlide(){
+  if (Math.abs(rigZoom - rigZoomTarget) < 0.001){
+    rigZoom = rigZoomTarget;
+    applyRigPose(); relayout(); requestRender();
+    return;
+  }
+  if (zoomSpringRunning){ zoomSpringStart = performance.now(); return; }  // 已在滑：只改目标
   zoomSpringRunning = true;
   zoomSpringStart = performance.now();
-  requestAnimationFrame(stepZoomSpring);
+  requestAnimationFrame(stepZoomGlide);
 }
-function stepZoomSpring(now){
+function stepZoomGlide(now){
   if (!zoomSpringRunning) return;
-  const dur = 450;
-  const t = Math.min(1, (now - zoomSpringStart) / dur);
-  const s = springOut(t);
-  rigZoom = zoomSpringFrom + (rigZoomTarget - zoomSpringFrom) * s;
+  const dt = Math.max(1, now - zoomSpringStart);
+  zoomSpringStart = now;
+  const k = 1 - Math.exp(-dt / ZOOM_TAU);
+  rigZoom += (rigZoomTarget - rigZoom) * k;
   applyRigPose();
   relayout();
   requestRender();
-  if (t >= 1){
+  if (Math.abs(rigZoomTarget - rigZoom) < 0.001){
     zoomSpringRunning = false;
     rigZoom = rigZoomTarget;
     applyRigPose();
@@ -1304,7 +1331,7 @@ function stepZoomSpring(now){
     requestRender();
     return;
   }
-  requestAnimationFrame(stepZoomSpring);
+  requestAnimationFrame(stepZoomGlide);
 }
 
 function springOut(t){

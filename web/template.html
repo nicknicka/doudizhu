@@ -5,7 +5,28 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>斗地主决策助手</title>
 <link rel="icon" href="data:,">
-<script src="vendor/gsap.min.js"></script>
+<!-- defer：解析不挡在这里；它仍先于 type=module 执行，window.gsap 照常可用（#54） -->
+<script src="vendor/gsap.min.js" defer></script>
+<!-- three 的 addons（GLTFLoader）用裸名 "three" 导入，靠 importmap 指回同一份
+     vendor；importmap 必须在任何模块（含 modulepreload）解析前就位。 -->
+<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
+<!-- 首屏并行下载（#53）：模块图要等求值才暴露下一层依赖，串行是慢网下
+     "机身到达"被拖长的主因；这里把整张图提前挂成 fetch 队列。
+     不要给 3.1MB 的 GLB 做 preload：实测它跟约 1MB 的模块图抢同一条管子，
+     慢网下机身反而更晚到；总字节也不变。 -->
+<link rel="modulepreload" href="/app/main.js">
+<link rel="modulepreload" href="/app/state.js">
+<link rel="modulepreload" href="/app/api.js">
+<link rel="modulepreload" href="/app/board.js">
+<link rel="modulepreload" href="/app/panels.js">
+<link rel="modulepreload" href="/app/console.js">
+<link rel="modulepreload" href="/app/machine.js">
+<link rel="modulepreload" href="/app/deskbg.js">
+<link rel="modulepreload" href="/app/labels.js">
+<link rel="modulepreload" href="/app/virtual-cards.js">
+<link rel="modulepreload" href="/app/card-face.js">
+<link rel="modulepreload" href="/vendor/three.module.min.js">
+<link rel="modulepreload" href="/vendor/three/examples/jsm/loaders/GLTFLoader.js">
 <style>
   /* 配色 / 字体来自 web/tokens.json，后端渲染时注入 */
   @font-face{
@@ -28,31 +49,26 @@
   *{box-sizing:border-box}
   /* 点阵字要"点"出来：关掉浏览器的字体平滑，中文才不会糊成普通网页字 */
   html{-webkit-font-smoothing:none;-moz-osx-font-smoothing:grayscale;text-rendering:geometricPrecision}
-  body{margin:0;background:var(--ground);color:var(--ink);
+  body{margin:0;color:var(--ink);
        font-family:var(--display);font-size:12px;line-height:1.75;
-       background-image:repeating-linear-gradient(0deg,
-         color-mix(in srgb,var(--ink) 2.5%,transparent) 0 1px, transparent 1px 4px)}
+       background:radial-gradient(ellipse 90% 70% at 50% 42%,
+         color-mix(in srgb,var(--ground) 96%,#fff 4%) 0%, var(--ground) 45%,
+         color-mix(in srgb,var(--ground) 86%,#000 14%) 100%) fixed}
   .page{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:56px 32px 88px}
 
-  header{margin-bottom:28px;padding-bottom:16px;border-bottom:var(--px) solid var(--ink)}
-  h1{margin:0;font-size:24px;font-weight:400;line-height:1.2}
-  h1::before{content:"◆ ";color:var(--accent)}
+  /* .who 是座位牌与计分板里的那层文字（抬头那种整页信息已经没有了） */
   .who{font-size:13px;line-height:1.6;color:var(--muted);margin-top:8px}
   .who b{font-weight:400;color:var(--ink)}   /* 决策点（我的第 N 次出牌机会）要看得清 */
-  .tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;font-size:12px}
-  .tools .note{color:var(--muted);margin-left:2px}
 
-  button,.file{font:inherit;font-size:12px;cursor:pointer;padding:3px 12px;
+  button{font:inherit;font-size:12px;cursor:pointer;padding:3px 12px;
     color:var(--ink);background:var(--ground);
     border:var(--px) solid var(--ink);border-radius:1px;
     box-shadow:2px 2px 0 var(--ink)}
-  button:hover:enabled,.file:hover{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
-  button:active:enabled,.file:active{transform:translate(2px,2px);box-shadow:none}
+  button:hover:enabled{background:color-mix(in srgb,var(--accent) 16%,var(--ground))}
+  button:active:enabled{transform:translate(2px,2px);box-shadow:none}
   button:disabled{opacity:.35;cursor:default;box-shadow:none}
   button.go{background:var(--accent);color:var(--ground)}
   button.go:hover:enabled{opacity:.9}
-  .file{display:inline-flex;align-items:center}
-  .file input{display:none}
   body.dragging .page{outline:var(--px) dashed var(--accent);outline-offset:-20px}
 
   .banner{margin:0 0 24px;padding:8px 12px;font-size:12px;
@@ -610,29 +626,20 @@
 
 
   /* ================================================================
-     极简舞台模式（minimal stage）：
-     砍掉 header / banner / 操作台常驻，
-     信息全部按需浮出；模型是首屏唯一主角。
+     舞台：机身是首屏唯一主角。
+     标题 / 工具条 / 机壳下沿都不常驻，信息全部按需浮出，
+     操作入口收进底部 dock。
      ================================================================ */
-  body.is-minimal{
-    background:
-      radial-gradient(ellipse 90% 70% at 50% 42%, color-mix(in srgb,var(--ground) 96%,#fff 4%) 0%, var(--ground) 45%, color-mix(in srgb,var(--ground) 86%,#000 14%) 100%) fixed}
-  body.is-minimal .page{max-width:none;padding:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  .page{max-width:none;padding:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
     position:relative}
-  body.is-minimal .page::after{
+  .page::after{
     content:"";position:fixed;inset:0;pointer-events:none;z-index:1;
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.03 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
     opacity:.5;mix-blend-mode:multiply}
-  body.is-minimal header{
-    position:fixed;top:-200px;left:0;right:0;opacity:0;pointer-events:none;z-index:-1;
-    margin:0;padding:0;border:none;height:0;overflow:visible}
-  body.is-minimal header .who,
-  body.is-minimal header .tools,
-  body.is-minimal header h1{opacity:0}
-  /* 反馈横幅在极简态是底部浮层提示：默认收着，setBanner 时亮起再自己退场
+  /* 反馈横幅是顶部浮层提示：默认收着，setBanner 时亮起再自己退场
      —— 推荐键、报错都得看得见，不能悄悄写在页面上方看不见的地方 */
   /* 锚在顶部：操作台浮层和 dock 都在下方，顶部这条谁都不挡 */
-  body.is-minimal .banner{
+  .banner{
     position:fixed;top:14px;left:50%;z-index:98;margin:0;pointer-events:none;
     width:max-content;max-width:min(92vw,560px);
     border-radius:10px;
@@ -640,56 +647,51 @@
                0 14px 28px color-mix(in srgb,var(--ink) 16%,transparent);
     transform:translateX(-50%) translateY(-12px);opacity:0;
     transition:transform .3s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),opacity .22s ease}
-  body.is-minimal .banner.is-show{transform:translateX(-50%) translateY(0);opacity:1}
-  body.is-minimal .banner[data-kind="error"]{background:color-mix(in srgb,var(--accent) 9%,var(--ground))}
+  .banner.is-show{transform:translateX(-50%) translateY(0);opacity:1}
+  .banner[data-kind="error"]{background:color-mix(in srgb,var(--accent) 9%,var(--ground))}
   /* 浮层提示在最上面时，别和一次性的拖拽提示叠在一起 */
-  body.is-minimal:has(.banner.is-show) .drag-hint{opacity:0}
-  /* verify 会点 #data-toggle，保留在视口内但透明不可见 */
-  body.is-minimal #data-toggle{
-    position:fixed;top:12px;right:12px;opacity:0;pointer-events:auto;z-index:50;
-    width:40px;height:40px;font-size:0;padding:0;border:none;background:transparent;box-shadow:none;z-index:9999}
-  body.is-minimal #data-toggle:hover{background:transparent}
+  body:has(.banner.is-show) .drag-hint{opacity:0}
   /* 铺满可用宽度：宽度同时受视口高度约束（--stage-reserve 留给 dock 与顶部提示），
      机身再大也不会把操作台挤出视口。max-height 用同一个公式，避免 aspect-ratio 被压变形。 */
-  body.is-minimal .machine{
+  .machine{
     width:min(96vw,1600px,calc((100vh - var(--stage-reserve,210px)) * 2.03));
     transition:transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
-  body.is-minimal .stage{aspect-ratio:2.03;max-height:calc(100vh - var(--stage-reserve,210px))}
+  .stage{aspect-ratio:2.03;max-height:calc(100vh - var(--stage-reserve,210px))}
   /* 画布铺满视口：机身被拖出设计盒时不再被画布边缘切一刀，只剩视口本身是边界。
      画布中心与 .stage 中心重合，所以投影出来的热区仍是 .stage 局部坐标。 */
-  body.is-minimal #scene{
+  #scene{
     position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
     width:100vw;height:100vh}
-  /* 操作台已脱离机身，成为 dock 上沿的浮层；极简态机身只留 3D 主屏 +
+  /* 操作台已脱离机身，成为 dock 上沿的浮层；机身只留 3D 主屏 +
      座位覆盖层（窄屏再留一条计分板）。展开时整机轻轻上浮给浮层让位 ——
      机身位置只由自身几何决定，不会被浮层内容挤压。 */
-  body.is-minimal .chassis{display:none}
-  body.is-minimal .machine.is-stacked .chassis{display:flex}
-  body.is-minimal .machine.is-stacked .seat-label{display:flex}
+  .chassis{display:none}
+  .machine.is-stacked .chassis{display:flex}
+  .machine.is-stacked .seat-label{display:flex}
   /* 展开：整机退半步（纯平移，不改缩放，保证 canvas 投影 1:1 可测），
      浮层浮在机身下沿之上。数据面板打开时机身本身就很高，不再额外抬升，
      免得实体按键被推出屏幕。 */
-  body.is-minimal:has(#panel.is-open) .machine:not(.panel-open){
+  body:has(#panel.is-open) .machine:not(.panel-open){
     transform:translateY(var(--stage-shift,-30%))}
 
-  /* 极简态座位圆点可悬停/点击（overlay 默认穿透） */
-  body.is-minimal .overlay .seat-label{pointer-events:auto;cursor:pointer}
+  /* 座位圆点可悬停/点击（overlay 默认穿透） */
+  .overlay .seat-label{pointer-events:auto;cursor:pointer}
   /* 圆点已经画进主屏纹理（ADR-0008）：DOM 那层默认隐身——它永远压在画布最上层，
      机身一转就会跑到屏外面去。悬停仍浮出完整卡片，那是「要读的字」不是屏内标记。 */
-  body.is-minimal .screen-hud.is-3d .seat-label{opacity:0}
-  body.is-minimal .screen-hud.is-3d .seat-label:hover{opacity:1}
+  .screen-hud.is-3d .seat-label{opacity:0}
+  .screen-hud.is-3d .seat-label:hover{opacity:1}
   /* 默认：只剩张数圆点 */
-  body.is-minimal .seat-label{
+  .seat-label{
     padding:0;border:none;background:transparent;box-shadow:none;
     max-width:none;font-size:0;line-height:0;
     transition:transform .25s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
-  body.is-minimal .seat-label .who{display:inline}
-  body.is-minimal .seat-label .who > b,
-  body.is-minimal .seat-label .badge,
-  body.is-minimal .seat-label .turn-flag,
-  body.is-minimal .seat-label .played,
-  body.is-minimal .seat-label .cnt .u{display:none}
-  body.is-minimal .seat-label .cnt{
+  .seat-label .who{display:inline}
+  .seat-label .who > b,
+  .seat-label .badge,
+  .seat-label .turn-flag,
+  .seat-label .played,
+  .seat-label .cnt .u{display:none}
+  .seat-label .cnt{
     margin:0;font-size:11px;font-weight:600;line-height:1;
     color:var(--ground);background:var(--ink);
     border:2px solid var(--ground);border-radius:50%;
@@ -697,36 +699,36 @@
     box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),
                0 0 0 1px color-mix(in srgb,var(--ink) 30%,transparent);
     transition:transform .22s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
-  body.is-minimal .seat-label .cnt .n{display:block}
-  body.is-minimal .seat-label:hover .cnt{transform:scale(1.12)}
-  body.is-minimal .seat-label.is-me .cnt{background:var(--accent)}
-  body.is-minimal .seat-label.is-acting .cnt{
+  .seat-label .cnt .n{display:block}
+  .seat-label:hover .cnt{transform:scale(1.12)}
+  .seat-label.is-me .cnt{background:var(--accent)}
+  .seat-label.is-acting .cnt{
     animation:cnt-pulse 1.3s ease-in-out infinite}
   @keyframes cnt-pulse{0%,100%{box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),0 0 0 0 color-mix(in srgb,var(--accent) 55%,transparent)}
                        50%{box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),0 0 0 6px color-mix(in srgb,var(--accent) 0%,transparent)}}
-  body.is-minimal .seat-label[data-seat="up"]{left:5%;top:7%}
-  body.is-minimal .seat-label[data-seat="down"]{right:5%;top:7%;align-items:flex-start}
-  body.is-minimal .seat-label[data-seat="me"]{left:50%;bottom:2%;transform:translateX(-50%)}
+  .seat-label[data-seat="up"]{left:5%;top:7%}
+  .seat-label[data-seat="down"]{right:5%;top:7%;align-items:flex-start}
+  .seat-label[data-seat="me"]{left:50%;bottom:2%;transform:translateX(-50%)}
   /* 悬停：浮出完整标签 */
-  body.is-minimal .seat-label:hover{
+  .seat-label:hover{
     padding:3px 8px;background:var(--ground);border:var(--px) solid var(--ink);
     border-radius:2px;font-size:12px;line-height:1.45;max-width:62%;
     box-shadow:3px 3px 0 color-mix(in srgb,var(--ink) 85%,transparent);z-index:30}
-  body.is-minimal .seat-label[data-seat="me"]:hover{transform:translateX(-50%) translateY(-2px)}
-  body.is-minimal .seat-label:hover .who{display:inline-flex;align-items:center;gap:5px}
-  body.is-minimal .seat-label:hover .who > b,
-  body.is-minimal .seat-label:hover .badge,
-  body.is-minimal .seat-label:hover .turn-flag,
-  body.is-minimal .seat-label:hover .cnt .u{display:inline}
-  body.is-minimal .seat-label:hover .played{
+  .seat-label[data-seat="me"]:hover{transform:translateX(-50%) translateY(-2px)}
+  .seat-label:hover .who{display:inline-flex;align-items:center;gap:5px}
+  .seat-label:hover .who > b,
+  .seat-label:hover .badge,
+  .seat-label:hover .turn-flag,
+  .seat-label:hover .cnt .u{display:inline}
+  .seat-label:hover .played{
     display:block;width:100%;font-size:11px;color:var(--muted);line-height:1.4}
-  body.is-minimal .seat-label:hover .cnt{
+  .seat-label:hover .cnt{
     width:auto;height:auto;border-radius:2px;background:transparent;color:var(--muted);
     border:none;box-shadow:none;font-size:11px;font-weight:400;animation:none;
     margin:0;display:inline-flex;transform:none}
-  body.is-minimal .seat-label.is-me:hover .cnt{color:var(--muted)}
+  .seat-label.is-me:hover .cnt{color:var(--muted)}
   /* 点击 ripple（label 本身 absolute，即定位上下文） */
-  body.is-minimal .seat-label .ripple{
+  .seat-label .ripple{
     position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0);
     width:34px;height:34px;border-radius:50%;
     border:2px solid var(--accent);opacity:0;pointer-events:none;
@@ -735,12 +737,12 @@
     0%{transform:translate(-50%,-50%) scale(.8);opacity:.8}
     100%{transform:translate(-50%,-50%) scale(2.2);opacity:0}}
 
-  /* 机顶记牌条：极简态下视觉降级，别抢主角 */
-  body.is-minimal .counter{
+  /* 机顶记牌条：视觉降级，别抢主角 */
+  .counter{
     opacity:.92;transition:opacity .28s ease}
-  body.is-minimal .counter:hover{opacity:1}
+  .counter:hover{opacity:1}
   /* 副屏已是 3D 贴图；DOM 只留几何/断言，别在模型上方再画一遍 */
-  body.is-minimal .counter.is-3d{opacity:0}
+  .counter.is-3d{opacity:0}
 
   /* ---------- 操作台浮层：从 dock 上沿拉起 ---------- */
   .panel{
@@ -767,9 +769,9 @@
 
   /* 高倍缩放/很矮的视口：不再抬升机身，压低浮层并保留机身按键可点 */
   @media (max-height:520px){
-    body.is-minimal:has(#panel.is-open) .machine:not(.panel-open){transform:none}
-    body.is-minimal #panel.is-open{max-height:44vh}
-    body.is-minimal .drag-hint{display:none}
+    body:has(#panel.is-open) .machine:not(.panel-open){transform:none}
+    #panel.is-open{max-height:44vh}
+    .drag-hint{display:none}
   }
 
   /* ---------- 底部 Dock（状态行 + 图标轨） ---------- */
@@ -848,6 +850,43 @@
                  stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;
                  flex-shrink:0;opacity:.7}
   .drag-hint.is-hidden{opacity:0;transform:translateX(-50%) translateY(-8px)}
+
+  /* 加载层：机身与首屏数据都就绪前盖住整页（见 ADR-0009）。
+     可见性只由 <body class="is-booting"> 决定 —— 这个类写在标记里，
+     不等模块图；退场由 __bootHandoff 播完 0.26s 再摘掉这个类。 */
+  #boot{position:fixed;inset:0;z-index:9999;display:none;
+    place-content:center;justify-items:center;gap:14px;
+    background:var(--ground);color:var(--muted);font-size:13px}
+  body.is-booting #boot{display:grid}
+  #boot #boot-reload{margin-top:2px}
+  #boot .boot-js{display:none;margin:0}
+  /* 常规态只留动画 —— 说明由设计来说，不写字。文字没被删掉：它沉到 sr-only，
+     读屏与 aria-live 照旧读得到「正在加载」。模块没起来时兜底脚本把它放回来
+     （还要给「重新加载」按钮）；8 秒强放行走的是顶部横幅。报错是信息，不是装饰。 */
+  #boot #boot-text.boot-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+    overflow:hidden;white-space:nowrap;border:0;clip-path:inset(50%)}
+
+  /* 加载层的动画 = SpinKit 的 .sk-fold（MIT · © 2020 Tobias Ahlin）。
+     全文在 web/vendor/LICENSE-spinkit.txt，整份库 vendored 在 web/vendor/spinkit.min.css。
+     下面这些是从上游抠出来的原样字节，一个数值都没改；本项目这一侧只给尺寸与颜色。
+     内联而不用 <link>：样式表会阻塞首帧，与 ADR-0009 冲突。
+     选它是因为它用设计说话 —— 四个方块在透视里折叠，不需要一个字解释"在加载"。 */
+  .sk-fold{width:var(--sk-size);height:var(--sk-size);position:relative;transform:rotateZ(45deg)}
+  .sk-fold-cube{float:left;width:50%;height:50%;position:relative;transform:scale(1.1)}
+  .sk-fold-cube:before{content:'';position:absolute;top:0;left:0;width:100%;height:100%;background-color:var(--sk-color);animation:sk-fold 2.4s infinite linear both;transform-origin:100% 100%}
+  .sk-fold-cube:nth-child(2){transform:scale(1.1) rotateZ(90deg)}
+  .sk-fold-cube:nth-child(4){transform:scale(1.1) rotateZ(180deg)}
+  .sk-fold-cube:nth-child(3){transform:scale(1.1) rotateZ(270deg)}
+  .sk-fold-cube:nth-child(2):before{animation-delay:.3s}
+  .sk-fold-cube:nth-child(4):before{animation-delay:.6s}
+  .sk-fold-cube:nth-child(3):before{animation-delay:.9s}
+  @keyframes sk-fold{0%,10%{transform:perspective(140px) rotateX(-180deg);opacity:0}25%,75%{transform:perspective(140px) rotateX(0);opacity:1}90%,100%{transform:perspective(140px) rotateY(180deg);opacity:0}}
+
+  #boot .boot-fold{--sk-size:56px;--sk-color:var(--accent);align-self:center}
+  /* 退场：收成一条线，然后才摘 is-booting 把机身露出来 */
+  #boot.is-exiting .boot-fold{animation:bootFoldOff .26s steps(3,end) forwards}
+  @keyframes bootFoldOff{70%{transform:scaleY(.02);opacity:1}to{transform:scaleY(.002);opacity:0}}
+
   body.is-dragging{cursor:grabbing}
   body.is-dragging #scene{cursor:grabbing}
   body.is-panning{cursor:grabbing}
@@ -872,7 +911,7 @@
     .dock-btn{width:36px;height:36px}
     .dock-btn svg{width:16px;height:16px}
     .dock-btn .lbl{display:none}
-    body.is-minimal .machine{width:100%}
+    .machine{width:100%}
   }
 
   @media (max-width:380px){
@@ -883,21 +922,57 @@
 
 </style>
 </head>
-<body>
+<body class="is-booting">
+<!-- 加载层：不依赖任何模块脚本；见 ADR-0009 -->
+<div id="boot" aria-live="polite" aria-busy="true">
+  <div class="boot-fold" aria-hidden="true">
+    <div class="sk-fold">
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+    </div>
+  </div>
+  <p id="boot-text" class="boot-sr" style="margin:0">正在加载…</p>
+  <button id="boot-reload" type="button" hidden onclick="location.reload()">重新加载</button>
+  <noscript><style>#boot .boot-js{display:block}#boot #boot-text,#boot .boot-fold{display:none}</style>
+    <p class="boot-js">这个页面需要 JavaScript —— 启用后刷新。</p></noscript>
+</div>
+<script>
+// 唯一职责：模块图慢或挂时别让人卡在无限加载上（所以它内联，不走模块）。
+// 计时从 HTML 解析起算 —— 模块下载多久，页头不该跟着瞎等多久。
+window.__bootStarted = false;   // boot() 一跑就置真，"没加载起来"的指控随之作废
+window.__bootFailed = false;
+window.__bootFallback = function(){
+  if (!document.body.classList.contains('is-booting')
+      || window.__bootStarted || window.__bootFailed) return;
+  window.__bootFailed = true;
+  document.getElementById('boot-text').classList.remove('boot-sr');
+  document.getElementById('boot-text').textContent =
+    '页面模块没加载起来 —— 确认后端在跑（ddz serve），然后';
+  document.getElementById('boot-reload').hidden = false;
+};
+window.__bootHandoff = function(){
+  var boot = document.getElementById('boot');
+  if (boot.classList.contains('is-exiting')) return;   // 8s 强放行与 boot() 都调它
+  boot.classList.add('is-exiting');
+  setTimeout(function(){
+    boot.classList.remove('is-exiting');
+    document.body.classList.remove('is-booting');
+  }, 260);                                            // 与 bootFoldOff 的时长对齐
+};
+setTimeout(function(){
+  // 8 秒强放行：宁可先露半成品，也不把人锁在加载层里；到齐后照常补上。
+  if (window.__bootFailed || !document.body.classList.contains('is-booting')) return;
+  var b = document.getElementById('banner');
+  if (b){ b.textContent = '机身还没加载好 —— 到齐了会自动补上。'; b.classList.add('is-show'); }
+  window.__bootHandoff();
+}, 8000);
+setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
+</script>
 <!-- 方波田：整页背景，铺满视口（像素格、光池、浮尘都由它垫底） -->
 <canvas class="bgpix" id="bg-pixels" aria-hidden="true"></canvas>
 <div class="page">
-  <header>
-    <h1>斗地主决策助手</h1>
-    <div class="who" id="who"></div>
-    <div class="tools">
-      <label class="file" for="file">打开记录<input type="file" id="file" accept="application/json,.json"></label>
-      <button type="button" id="new-toggle">开新局</button>
-      <button type="button" id="export">导出</button>
-      <button type="button" id="data-toggle">数据面板</button>
-      <span class="note" id="tool-note"></span>
-    </div>
-  </header>
 
   <div class="banner" id="banner">正在向后端取数…</div>
 
@@ -1036,10 +1111,11 @@
   </section>
 </div>
 
-<!-- three 的 addons（GLTFLoader）用裸名 "three" 导入，
-     靠 importmap 指回同一份 vendor，避免 GLTFLoader 取到第二份 three -->
-<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
 <script type="module" src="app/main.js"></script>
+<script>
+// 模块图挂了是事件，不用猜网速：fetch/依赖失败直接在 script 元素上冒 error。
+document.querySelector('script[type="module"]').addEventListener('error', window.__bootFallback);
+</script>
 
   <!-- 操作台浮层：脱离机身，从 dock 上沿拉起（窄屏再加一条触控回退条） -->
   <div class="panel" id="panel">
@@ -1083,7 +1159,7 @@
       </div>
   </div>
 
-  <!-- 底部图标轨（极简模式） -->
+  <!-- 底部图标轨 -->
   <nav class="dock" id="dock" aria-label="操作">
     <div class="status-strip" id="status-strip">
       <span class="dot" aria-hidden="true"></span>

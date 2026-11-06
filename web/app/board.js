@@ -8,18 +8,6 @@ import * as machine from './machine.js';
 let labels = {};
 let labelsKey = '';
 
-/** 抬头：说明"现在看的是哪一手、我方是谁"。 */
-function renderWho(){
-  const m = S.meta, v = S.snap;
-  const latest = v.step === m.total_steps;
-  const k = m.my_steps.indexOf(v.step);
-  $('who').innerHTML = `${m.record_id} · ${m.source} · 全局第 ${v.step}/${m.total_steps} 手`
-    + (k >= 0 ? ` · <b>我的第 ${k + 1} 次出牌机会</b>` : '')
-    + ` · 我方是${identityLabel(m.me)}`
-    + (v.finished ? ` · <b>${overText(v.winner)}</b>` : '');
-  $('tool-note').textContent = latest ? '' : '· 看历史局面时不能续录';
-}
-
 function ensureLabels(){
   const key = Object.keys(S.meta.seats).join(',');
   if (key === labelsKey) return;
@@ -413,7 +401,6 @@ export function init(){
 }
 
 export function render(){
-  renderWho();
   ensureLabels();
   paintLabels();
   renderCounter();
