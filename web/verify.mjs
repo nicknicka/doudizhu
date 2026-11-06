@@ -164,6 +164,9 @@ const probabilityScreen = page => page.evaluate(async () => {
       pct: row.querySelector('.prob-pct')?.textContent.trim() || '',
       clipped: r.left < box.left - 1 || r.right > box.right + 1
         || r.top < box.top - 1 || r.bottom > box.bottom + 1,
+      // 出了裁切要能直接从日志判断是哪条边、越了多少，不用再猜
+      rect: { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom) },
+      box: { l: Math.round(box.left), r: Math.round(box.right), t: Math.round(box.top), b: Math.round(box.bottom) },
     };
   });
   return {
@@ -208,7 +211,11 @@ async function checkProbabilityTop3(page, label, expectedMine = true){
       problems.push(`${label} 第 ${i + 1} 行与后端动作不一致：`
         + `${row.label}/${row.type}/${row.pct}，应为 ${want.label}/${want.type}/${pct}`);
     }
-    if (row.clipped) problems.push(`${label} 第 ${i + 1} 行被副屏裁切`);
+    if (row.clipped) {
+      problems.push(`${label} 第 ${i + 1} 行被副屏裁切`
+        + `（行 l/r/t/b=${row.rect.l}/${row.rect.r}/${row.rect.t}/${row.rect.b}`
+        + ` vs 副屏 ${row.box.l}/${row.box.r}/${row.box.t}/${row.box.b}）`);
+    }
   }
   for (let i = 1; i < got.predictions.length; i++){
     if (got.predictions[i - 1].probability < got.predictions[i].probability) {
@@ -1046,10 +1053,29 @@ try {
     status: document.getElementById('board').classList.contains('is-stacked'),
   }));
   if (narrow.overflow > 2) {
-    const off = await page.evaluate(() => [...document.querySelectorAll('*')]
-      .filter(e => e.getBoundingClientRect().right > window.innerWidth + 2)
-      .slice(0, 8).map(e => `${e.tagName}#${e.id}.${(e.className||'').toString().slice(0,26)} r=${Math.round(e.getBoundingClientRect().right)} w=${Math.round(e.getBoundingClientRect().width)}`));
-    problems.push(`窄屏出现横向溢出 ${narrow.overflow}px :: ${off.join(' | ')}`);
+    // 上一版按 innerWidth 找越界元素，CI 上给出了空列表 —— innerWidth 含滚动条宽度，
+    // 而元素是撑在 clientWidth 的内容盒里。改成按 clientWidth 找，并报出滚动条宽度，
+    // 一眼就能区分"经典滚动条吃宽"和"真·100vw 撑破"。
+    const diag = await page.evaluate(() => {
+      const de = document.documentElement;
+      const cw = de.clientWidth;
+      const off = [...document.querySelectorAll('*')]
+        .map(e => ({ e, r: e.getBoundingClientRect() }))
+        .filter(({ r }) => r.right > cw + 2 || r.width > cw + 2)
+        .sort((a, b) => b.r.right - a.r.right)
+        .slice(0, 8)
+        .map(({ e, r }) => `${e.tagName}#${e.id}.${(e.className||'').toString().slice(0,26)}`
+          + ` r=${Math.round(r.right)} w=${Math.round(r.width)}`
+          + ` w:${getComputedStyle(e).width} min:${getComputedStyle(e).minWidth}`);
+      return {
+        inner: window.innerWidth, client: cw, scroll: de.scrollWidth,
+        body: document.body.scrollWidth, scrollbar: window.innerWidth - cw, off,
+      };
+    });
+    problems.push(`窄屏出现横向溢出 ${narrow.overflow}px`
+      + `［inner=${diag.inner} client=${diag.client} scroll=${diag.scroll}`
+      + ` body=${diag.body} 滚动条=${diag.scrollbar}］`
+      + ` :: ${diag.off.join(' | ') || '(没有元素超过 clientWidth)'}`);
   }
   if (!narrow.panelOpen || !narrow.status) problems.push('窄屏数据面板没有进入机下布局');
   if (rectOverlap(narrow.panel, narrow.screen)) problems.push('窄屏数据面板盖住了真屏');
@@ -1091,6 +1117,9 @@ try {
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
       counterButtons,
       docOverflow: document.documentElement.scrollWidth - innerWidth,
+      innerW: innerWidth,
+      clientW: document.documentElement.clientWidth,
+      scrollbarW: innerWidth - document.documentElement.clientWidth,
       bodyOverflow: document.body.scrollWidth - innerWidth,
     };
   });
@@ -1118,7 +1147,8 @@ try {
   }
   await checkPanelLayout(page, '窄屏');
   if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
-    problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`);
+    problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`
+      + `［inner=${narrowLayout.innerW} client=${narrowLayout.clientW} 滚动条=${narrowLayout.scrollbarW}］`);
   }
   await goToMyTurn(page, '窄屏我方回合');
   await page.click('#bar-mode');
@@ -1141,16 +1171,28 @@ try {
     const m = await import('/app/machine.js');
     const { S } = await import('/app/state.js');
     const pts = m.handPoints();
-    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y) }));
+    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y), x: p.x, y: p.y }));
+    const miss = hits.filter(p => p.i !== p.pick);
+    const byIndex = new Map(pts.map(p => [p.i, p]));
+    const missDetail = miss.map(h => {
+      const target = byIndex.get(h.pick);
+      const d = target ? Math.hypot(target.x - h.x, target.y - h.y) : NaN;
+      const card = S.snap.my_hand[h.i];
+      return `牌#${h.i}(${card || '?'}) 落点 ${Math.round(h.x)},${Math.round(h.y)}`
+        + ` → 拾到 #${h.pick}，两心距 ${Number.isFinite(d) ? d.toFixed(1) : '?'}px`;
+    });
     return { n: S.snap.my_hand.length, rows: m.machineStatus().handRows,
-             pts: hits.length, miss: hits.filter(p => p.i !== p.pick) };
+             pts: hits.length, miss, missDetail };
   });
   if (freshHand.n !== 17) problems.push(`420px 复核样本不是 17 张：${freshHand.n}`);
   if (freshHand.rows.length !== 2 || freshHand.rows[0]?.count !== 9 || freshHand.rows[1]?.count !== 8) {
     problems.push(`420px 17 张手牌不是 9+8 双排：${freshHand.rows.map(r => r.count).join('+')}`);
   }
   if (freshHand.pts !== freshHand.n || freshHand.miss.length) {
-    problems.push(`420px 手牌拾取错位：${freshHand.pts}/${freshHand.n} 个点，错 ${freshHand.miss.length} 张`);
+    // 只报"错 N 张"在 CI 上没法定位：到底是哪张牌的落点被邻牌盖住了、差多少。
+    // 报出每张错牌自己的投影点、实际拾取到谁，以及它到邻牌中心的距离。
+    problems.push(`420px 手牌拾取错位：${freshHand.pts}/${freshHand.n} 个点，`
+      + `错 ${freshHand.miss.length} 张 :: ${(freshHand.missDetail || []).join(' | ')}`);
   }
   await fresh420.close();
 
