@@ -1213,7 +1213,14 @@ try {
     const m = await import('/app/machine.js');
     const { S } = await import('/app/state.js');
     const pts = m.handPoints();
-    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y), x: p.x, y: p.y }));
+    // 手牌向右叠压（右压左）：靠左那张的**中心**可能被右邻盖住 —— 那不是 bug，
+    // 用户看到的就是盖在上面那张，点下去也该选它。所以每张牌只要在它露出来的那一段
+    // 点得中即可：中心点叠加左侧若干偏移，任一命中就算过（#60：仅最左一张会踩到这条）。
+    const OFFS = [0, -4, -8, -12, 4, 8];
+    const hits = pts.map(p => {
+      const hit = OFFS.map(dx => m.pickCardAt(p.x + dx, p.y)).find(v => v === p.i);
+      return { i: p.i, pick: hit === undefined ? m.pickCardAt(p.x, p.y) : hit, x: p.x, y: p.y };
+    });
     const miss = hits.filter(p => p.i !== p.pick);
     const byIndex = new Map(pts.map(p => [p.i, p]));
     const missDetail = miss.map(h => {
