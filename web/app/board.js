@@ -48,29 +48,178 @@ function paintLabels(){
       `<span class="who"><b>${label(player)}</b>`
       + `<span class="badge ${seat.identity}">${identityLabel(player)}</span>`
       + (acting ? `<span class="turn-flag">▶ ${mine ? '该你出' : '该他出'}</span>` : '')
-      + `<span class="cnt">${v.remaining[player]} 张</span></span>`
+      + `<span class="cnt"><span class="n">${v.remaining[player]}</span><span class="u"> 张</span></span></span>`
       + `<span class="played">已出：${played.length ? played.map(x => NAME[x] || x).join(' ') : '—'}</span>`;
   }
 }
 
-/** 副屏：记牌模式显示剩余张数；概率模式显示当前行动者 Top-3 完整动作。 */
-function renderCounter(){
-  const counter = $('counter');
-  counter.dataset.mode = S.barMode;
-  const cells = $('counter-cells');
-
+/** 副屏要显示什么：DOM 锚点和 3D 贴图共用这一份数据，两边不各算一次。 */
+function counterModel(){
   if (S.barMode === 'prob'){
     const point = S.point;
     if (!point){
-      const message = S.snap.finished ? '本局已结束' : '当前不是你的出牌机会';
-      cells.innerHTML = `<p class="prob-empty">${message}</p>`;
+      return { mode: 'prob', empty: S.snap.finished ? '本局已结束' : '当前不是你的出牌机会',
+               title: '', rows: [] };
+    }
+    return { mode: 'prob', empty: '',
+             title: `${label(point.actor)} · 模型动作选择概率`,
+             rows: (point.predictions || []).slice(0, 3) };
+  }
+  const pool = S.snap.pool_counts || {};
+  return { mode: 'count', empty: '', title: '', rows: [],
+           cells: RANKS.map(r => ({
+             rank: r, text: NAME[r], n: pool[r] || 0,
+             // 小王/大王挤不进一格要缩字号；『10』不缩，但它下面的红点按两个字排
+             labelLong: NAME[r].length > 1 && !/^[0-9]+$/.test(NAME[r]),
+             dotsLong: NAME[r].length > 1,
+           })) };
+}
+
+const cssVar = name =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const PIX = px => `${Math.round(px)}px Pixel, monospace`;
+
+/** 把同一份数据画进 3D 副屏的纹理。 */
+function paintCounter(){
+  const c = machine.subDisplayCanvas();
+  if (!c) return;
+  const g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const ink = cssVar('--ink') || '#201a26';
+  const ground = cssVar('--ground') || '#efe7d8';
+  const muted = cssVar('--muted') || '#6b6357';
+  const accent = cssVar('--accent') || '#e0442a';
+  const m = counterModel();
+
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = ground;
+  g.fillRect(0, 0, W, H);
+  g.textBaseline = 'middle';
+
+  if (m.mode === 'prob'){
+    if (m.empty){
+      g.fillStyle = muted; g.font = PIX(H * 0.30); g.textAlign = 'center';
+      g.fillText(m.empty, W / 2, H / 2);
+      machine.commitSubDisplay();
       return;
     }
-    const predictions = (point.predictions || []).slice(0, 3);
-    const title = `${label(point.actor)} · 模型动作选择概率`;
-    cells.innerHTML = `<p class="prob-title">${title}</p>`
-      + `<div class="prob-list" style="--prob-count:${Math.max(1, predictions.length)}">`
-      + predictions.map(a =>
+    g.fillStyle = muted; g.font = PIX(H * 0.19); g.textAlign = 'center';
+    g.fillText(m.title, W / 2, H * 0.19);
+    const n = Math.max(1, m.rows.length), cw = W / n;
+    m.rows.forEach((a, i) => {
+      const cx = cw * (i + 0.5);
+      if (i){
+        g.globalAlpha = 0.22; g.fillStyle = ink;
+        g.fillRect(Math.round(cw * i), H * 0.08, Math.max(2, H * 0.02), H * 0.84);
+        g.globalAlpha = 1;
+      }
+      g.fillStyle = ink; g.font = PIX(H * 0.29); g.textAlign = 'center';
+      g.fillText(a.label, cx, H * 0.55);
+      const pct = `${Math.round(a.probability * 100)}%`;
+      g.font = PIX(H * 0.21);
+      const tw = g.measureText(a.type).width, pw = g.measureText(pct).width, gap = H * 0.09;
+      let x = cx - (tw + gap + pw) / 2;
+      g.textAlign = 'left';
+      g.fillStyle = muted; g.fillText(a.type, x, H * 0.81);
+      x += tw + gap;
+      g.fillStyle = ink; g.fillText(pct, x, H * 0.81);
+      g.textAlign = 'center';
+    });
+    machine.commitSubDisplay();
+    return;
+  }
+
+  const cells = m.cells, cw = W / cells.length;
+  g.textAlign = 'center';
+  cells.forEach((cell, i) => {
+    const cx = cw * (i + 0.5);
+    if (i){
+      g.globalAlpha = 0.18; g.fillStyle = ink;
+      g.fillRect(Math.round(cw * i), H * 0.08, Math.max(2, H * 0.02), H * 0.84);
+      g.globalAlpha = 1;
+    }
+    // 出完的格子整体变灰，和 DOM 版保持一致
+    g.fillStyle = cell.n ? ink : muted;
+    g.font = PIX(H * (cell.labelLong ? 0.40 : 0.56));
+    g.fillText(cell.text, cx, H * 0.40);
+    if (!cell.n) return;
+    const dots = Math.min(4, cell.n);
+    const ds = H * 0.09, gapDot = cell.dotsLong ? H * 0.13 : H * 0.05;
+    let dx = cx - (dots * ds + (dots - 1) * gapDot) / 2;
+    g.fillStyle = accent;
+    for (let k = 0; k < dots; k++){ g.fillRect(dx, H * 0.79, ds, ds); dx += ds + gapDot; }
+  });
+  machine.commitSubDisplay();
+}
+
+/* ---------- 主屏 HUD：座位圆点画进真屏纹理 ---------- */
+// 槽位就是 template.html 里 .seat-label 的百分比定位：上家左上、下家右上、我方下缘居中。
+const HUD_SLOTS = {
+  up:   { x: 0.05, y: 0.07, sx:  1, sy:  1 },
+  down: { x: 0.95, y: 0.07, sx: -1, sy:  1 },
+  me:   { x: 0.50, y: 0.98, sx:  0, sy: -1 },
+};
+
+/**
+ * 把三个座位张数圆点画进主屏纹理。DOM 那层退成锚点：机身一转，圆点跟着屏一起转、
+ * 被凸边框挡住、翻到背面就看不见；盖在画布上的 HTML 永远压在最上层，做不到这一点。
+ */
+function paintScreenHud(){
+  const c = machine.mainHudCanvas();
+  if (!c) return;
+  const v = S.snap;
+  const g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const ink = cssVar('--ink') || '#201a26';
+  const ground = cssVar('--ground') || '#efe7d8';
+  const accent = cssVar('--accent') || '#e0442a';
+  g.clearRect(0, 0, W, H);
+  // 圆点大小照 DOM 那颗 28px 圆点折算：CSS 一改，纹理跟着走，不各写一个常量。
+  const box = $('screen-hud').getBoundingClientRect();
+  const domDot = Object.values(labels)[0]?.getBoundingClientRect().width || 0;
+  const r = box.width > 0 && domDot > 0 ? (domDot / 2) * (W / box.width) : W * 0.02;
+  const edge = Math.max(2, r * 0.16);
+  // 窄屏手牌排成两排时，屏的下缘已经被牌面占满，再落一颗「我」的圆章必然压住牌；
+  // 我的张数在计分板和机顶条里都有，这里直接把槽位让出来。行数取排牌那一份数据，
+  // 不再按宽度猜一次，省得两边规则各自漂移。
+  const meDotHidden = (machine.machineStatus().handRows || []).length > 1;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  for (const [player, el] of Object.entries(labels)){
+    if (!el || el.style.display === 'none') continue;      // board.place 会把缺席的座位藏掉
+    const slot = HUD_SLOTS[S.meta.seats[player].relative] || HUD_SLOTS.up;
+    if (meDotHidden && slot === HUD_SLOTS.me) continue;
+    const cx = slot.x * W + slot.sx * r, cy = slot.y * H + slot.sy * r;
+    if (!v.finished && v.acting === player){               // DOM 版用脉冲，纹理里用一圈静态光环
+      g.beginPath(); g.arc(cx, cy, r + edge, 0, Math.PI * 2);
+      g.lineWidth = edge * 1.2; g.strokeStyle = accent; g.stroke();
+    }
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.fillStyle = isMe(player) ? accent : ink; g.fill();
+    g.beginPath(); g.arc(cx, cy, r - edge / 2, 0, Math.PI * 2);
+    g.lineWidth = edge; g.strokeStyle = ground; g.stroke();   // 底色描边（CSS 的 border 也在盒内）
+    g.fillStyle = ground;
+    g.font = `600 ${Math.round(r * 0.79)}px Pixel, monospace`;
+    g.fillText(String(v.remaining[player]), cx, cy);
+  }
+  machine.commitMainHud();
+}
+
+/** 副屏 DOM：仍是记牌/概率的内容源与几何锚点，真 3D 面就绪后它隐身不再压住机身。 */
+function renderCounterDom(){
+  const counter = $('counter');
+  counter.dataset.mode = S.barMode;
+  const cells = $('counter-cells');
+  const m = counterModel();
+
+  if (m.mode === 'prob'){
+    if (m.empty){
+      cells.innerHTML = `<p class="prob-empty">${m.empty}</p>`;
+      return;
+    }
+    cells.innerHTML = `<p class="prob-title">${m.title}</p>`
+      + `<div class="prob-list" style="--prob-count:${Math.max(1, m.rows.length)}">`
+      + m.rows.map(a =>
         `<p class="prob-row"><span class="prob-action">${a.label}</span>`
         + `<span class="prob-meta"><span class="prob-type">${a.type}</span>`
         + `<span class="prob-pct">${Math.round(a.probability * 100)}%</span></span></p>`).join('')
@@ -78,15 +227,17 @@ function renderCounter(){
     return;
   }
 
-  const pool = S.snap.pool_counts || {};
-  const nm = r => NAME[r];
-  const cls = r => (nm(r).length > 1 && !/^[0-9]+$/.test(nm(r)) ? 'long' : '');
-  cells.innerHTML = RANKS.map(r => {
-    const n = pool[r] || 0;
-    const dots = Array.from({ length: Math.min(4, n) }, () => '<s></s>').join('');
-    return `<span class="cc${n ? '' : ' is-out'}" title="${NAME[r]} 还剩 ${n} 张">`
-      + `<b class="${cls(r)}">${nm(r)}</b><i>${dots}</i></span>`;
-  }).join('');
+  cells.innerHTML = m.cells.map(cell =>
+    `<span class="cc${cell.n ? '' : ' is-out'}" title="${NAME[cell.rank]} 还剩 ${cell.n} 张">`
+    + `<b class="${cell.labelLong ? 'long' : ''}">${cell.text}</b>`
+    + `<i class="${cell.dotsLong ? 'i long' : 'i'}">`
+    + Array.from({ length: Math.min(4, cell.n) }, () => '<s></s>').join('')
+    + '</i></span>').join('');
+}
+
+function renderCounter(){
+  renderCounterDom();
+  paintCounter();
 }
 
 export function renderBar(){ renderCounter(); }
@@ -131,6 +282,43 @@ function setMachineError(status, error){
     : (status === 'loading' ? '正在加载 3D 机身…' : '');
 }
 
+/* ---------- 四边形贴片 ----------
+   机身一转，副屏的投影就是斜的四边形；AABB 贴上去必然顶出槽位。
+   这里求 3x3 单应矩阵（矩形 → 四角），再翻成 CSS matrix3d。 */
+function m3adj(m){
+  return [
+    m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+    m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+    m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+  ];
+}
+function m3mul(a, b){
+  const c = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++){
+    c[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  }
+  return c;
+}
+function m3mulv(m, v){
+  return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+          m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+          m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+}
+function basisToPoints(p){
+  const m = [p[0].x, p[1].x, p[2].x, p[0].y, p[1].y, p[2].y, 1, 1, 1];
+  const v = m3mulv(m3adj(m), [p[3].x, p[3].y, 1]);
+  return m3mul(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]]);
+}
+/** (0,0)-(w,h) 的矩形 → 四角 [tl,tr,br,bl]，返回 CSS transform 值。 */
+function quadMatrix(w, h, quad){
+  const src = basisToPoints([{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }]);
+  const t = m3mul(basisToPoints(quad), m3adj(src));
+  const k = 1 / t[8];
+  const m = t.map(v => v * k);
+  // matrix3d 是列主序：x'=(m0·x+m1·y+m2)/(m6·x+m7·y+m8)
+  return `matrix3d(${m[0]},${m[3]},0,${m[6]},`
+    + `${m[1]},${m[4]},0,${m[7]},0,0,1,0,${m[2]},${m[5]},0,${m[8]})`;
+}
 function placeHotspots(items){
   const ready = items.length > 0;
   const controls = $('controls');
@@ -147,23 +335,13 @@ function placeHotspots(items){
 }
 
 function place(payload){
-  const { status, error, seats = {}, rects = {}, buttons = [] } = payload;
+  const { status, error, seats = {}, rects = {}, buttons = [], sub3d = false, screen3d = false } = payload;
   const machineEl = $('board');
   const stage = $('stage');
   const stacked = window.innerWidth < 950;
   machineEl.classList.toggle('is-stacked', stacked);
   setMachineError(status, error);
   placeHotspots(status === 'ready' ? buttons : []);
-
-  // 操作台托盘贴合机身下沿：机身底边（stage 局部坐标）到 stage 底还有一段空画布，
-  // 用等量的负 margin 把它收掉（留 8px 给机底接触阴影），托盘就成了机身下沿的延伸。
-  const tb = rects.tablet;
-  if (tb){
-    const lip = Math.max(0, stage.clientHeight - (tb.y + tb.h) - 8);
-    machineEl.style.setProperty('--lip', `${lip.toFixed(1)}px`);
-  } else {
-    machineEl.style.removeProperty('--lip');
-  }
 
   const s = rects.screen;
   if (!s) return;
@@ -172,16 +350,45 @@ function place(payload){
   ov.style.fontSize = `${Math.max(7, Math.min(13, s.w * 0.025)).toFixed(1)}px`;
 
   const sh = $('screen-hud');
+  // 座位圆点已经画进主屏纹理：DOM 只留悬停展开的完整卡片，别再压一层盖在模型上。
+  sh.classList.toggle('is-3d', Boolean(screen3d));
   sh.style.left = `${s.x}px`; sh.style.top = `${s.y}px`;
   sh.style.width = `${s.w}px`; sh.style.height = `${s.h}px`;
   for (const [player, el] of Object.entries(labels)) el.style.display = seats[player] ? '' : 'none';
 
-  const top = rects.top;
+  const top = rects.top, quad = rects.topQuad;
   const counter = $('counter');
-  if (top){
-    // 副屏内容最多两行：标题 + 横向 Top-3；尽量用满真屏高度，避免裁切。
-    const th = Math.max(stacked ? 30 : 0, Math.min(top.h, 64));
+  // 副屏已经贴进 3D 机身：DOM 只留几何与断言，别再画一层盖在模型上。
+  counter.classList.toggle('is-3d', Boolean(sub3d));
+  if (quad){
+    // 副屏的投影是四边形：按四角做透视映射，机身怎么转它怎么跟，
+    // 不会像 AABB 那样顶出槽位。宽度严格贴合副屏，高度只沿副屏自身
+    // 的高度方向伸缩——窄屏要两行排 15 格，撑高比压成糊线好。
+    const ux = quad.tr.x - quad.tl.x, uy = quad.tr.y - quad.tl.y;
+    const vx = quad.bl.x - quad.tl.x, vy = quad.bl.y - quad.tl.y;
+    const qw = Math.hypot(ux, uy) || 1;
+    const qh = Math.hypot(vx, vy) || 1;
+    const th = Math.max(stacked ? 26 : 0, Math.min(qh * 0.82, 64));
+    const k = th / qh;
+    const ox = quad.tl.x - vx * (k - 1) / 2, oy = quad.tl.y - vy * (k - 1) / 2;
     counter.hidden = false;
+    counter.style.left = '0px';
+    counter.style.top = '0px';
+    counter.style.width = `${qw.toFixed(2)}px`;
+    counter.style.height = `${th.toFixed(2)}px`;
+    counter.style.transformOrigin = '0 0';
+    counter.style.transform = quadMatrix(qw, th, [
+      { x: ox, y: oy },
+      { x: ox + ux, y: oy + uy },
+      { x: ox + ux + vx * k, y: oy + uy + vy * k },
+      { x: ox + vx * k, y: oy + vy * k },
+    ]);
+    counter.style.fontSize = `${Math.max(stacked ? 10 : 8, Math.min(15, th * 0.34)).toFixed(1)}px`;
+  } else if (top){
+    // 没量到四边形（旧模型/异常）时退回 AABB，别让机顶条整个消失。
+    const th = Math.max(stacked ? 26 : 0, Math.min(top.h * 0.82, 64));
+    counter.hidden = false;
+    counter.style.transform = 'none';
     counter.style.left = `${top.x}px`;
     counter.style.width = `${top.w}px`;
     counter.style.top = `${top.y + (top.h - th) / 2}px`;
@@ -213,4 +420,6 @@ export function render(){
   renderScoreboard();
   renderHandLine();
   machine.apply(S.snap, S.meta);
+  // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。
+  paintScreenHud();
 }

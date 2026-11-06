@@ -57,11 +57,26 @@ function watchPage(page, label, isAllowed = () => false) {
   });
 }
 const text = async (page, sel) => ((await page.locator(sel).textContent()) ?? '').trim();
+// 页面的反馈文案是异步落下来的（提交 → 分析 → 写文案）。慢机器上固定等待会误报，
+// 所以需要什么就轮询到什么为止，只有超时才算失败。
+const waitUntil = async (page, cond, timeout = 15000) => {
+  const t0 = Date.now();
+  for (;;){
+    if (await cond()) return true;
+    if (Date.now() - t0 > timeout) return false;
+    await page.waitForTimeout(100);
+  }
+};
+const waitText = (page, sel, needle, timeout = 15000) =>
+  waitUntil(page, async () => (((await page.locator(sel).textContent()) || '').includes(needle)), timeout);
+const waitBanner = (page, needle, timeout = 15000) => waitText(page, '#banner', needle, timeout);
 // 手牌在画布上的中心点：直接问 3D 场景，脚本据此点"真牌"
 const handPts = page => page.evaluate(async () => (await import('/app/machine.js')).handPoints());
 // 在屏幕里点第 k 张手牌：先把鼠标移过去让视差收敛，再按收敛后的真实落点点击
 const clickCard = async (page, k) => {
-  const box = await page.locator('#scene').boundingBox();
+  // machine.js 投影出来的手牌坐标是 .stage 局部坐标；机身铺满视口渲染后画布比 .stage 大，
+  // 所以点击基准必须取 .stage 而不是画布本身。
+  const box = await page.locator('#stage').boundingBox();
   let pt = (await handPts(page))[k];
   if (!pt) throw new Error(`没有第 ${k} 张手牌坐标`);
   await page.mouse.move(box.x + pt.x, box.y + pt.y);
@@ -69,8 +84,69 @@ const clickCard = async (page, k) => {
   pt = (await handPts(page))[k];
   await page.mouse.click(box.x + pt.x, box.y + pt.y);
 };
+
+// 极简模式下操作台是 dock 上沿的浮层，默认收起；需要操作前先展开。
+// 展开的是 #panel（不是机身），所以机身版式不受它影响。
+const openDeck = async page => {
+  const opened = await page.evaluate(() => {
+    const p = document.getElementById('panel');
+    if (!p) return true;
+    if (p.classList.contains('is-open')) return true;
+    p.classList.add('is-open');
+    return false;
+  });
+  if (!opened) await page.waitForTimeout(150);
+  await page.waitForTimeout(400); // 等浮层拉起动画落位
+};
 const machineStatus = page => page.evaluate(async () =>
   (await import('/app/machine.js')).machineStatus());
+
+// 操作台浮层的版式硬约束：接在 dock 上沿之上、不压真屏、不出屏、内容不外溢。
+// 机身投影的下沿允许被浮层压掉一点点（浮层是立体的一块，最下沿的机座压边 <=24px），
+// 但真屏必须完整露出 —— 展开态只平移不缩放，所以 stage + 投影坐标是 1:1 的。
+const checkPanelLayout = async (page, label) => {
+  const geo = await page.evaluate(async () => {
+    const rect = el => el.getBoundingClientRect();
+    const stage = rect(document.getElementById('stage'));
+    const panel = rect(document.getElementById('panel'));
+    const dock = rect(document.getElementById('dock'));
+    const deck = rect(document.getElementById('deckbar'));
+    const ms = (await import('/app/machine.js')).machineStatus();
+    const scr = ms.screen || {}, tab = ms.tablet || {};
+    return {
+      open: document.getElementById('panel').classList.contains('is-open'),
+      panel: panel.toJSON(), dock: dock.toJSON(), deck: deck.toJSON(),
+      scrollH: document.getElementById('panel').scrollHeight,
+      clientH: document.getElementById('panel').clientHeight,
+      screenBottom: stage.top + (scr.y || 0) + (scr.h || 0),
+      machineBottom: tab.h ? stage.top + tab.y + tab.h : null,
+      vw: innerWidth,
+    };
+  });
+  if (!geo.open) problems.push(`${label}：操作台浮层没有展开`);
+  if (geo.panel.bottom > geo.dock.top + 1) {
+    problems.push(`${label}：操作台浮层没接在 dock 上沿之上`
+      + `（浮层底 ${geo.panel.bottom.toFixed(1)} > dock 顶 ${geo.dock.top.toFixed(1)}）`);
+  }
+  if (geo.panel.top < geo.screenBottom - 1) {
+    problems.push(`${label}：操作台浮层压住真屏`
+      + `（浮层顶 ${geo.panel.top.toFixed(1)} < 真屏底 ${geo.screenBottom.toFixed(1)}）`);
+  }
+  if (geo.machineBottom !== null && geo.panel.top < geo.machineBottom - 24) {
+    problems.push(`${label}：操作台浮层把机身投影吃掉了`
+      + `（浮层顶 ${geo.panel.top.toFixed(1)}，机底 ${geo.machineBottom.toFixed(1)}）`);
+  }
+  if (geo.panel.left < -1 || geo.panel.right > geo.vw + 1) {
+    problems.push(`${label}：操作台浮层横向出屏`
+      + `（${geo.panel.left.toFixed(1)}..${geo.panel.right.toFixed(1)}，视口宽 ${geo.vw}）`);
+  }
+  if (geo.deck.left < geo.panel.left - 1 || geo.deck.right > geo.panel.right + 1) {
+    problems.push(`${label}：操作台内容横向溢出了浮层`);
+  }
+  if (geo.scrollH > geo.clientH + 1) {
+    problems.push(`${label}：操作台内容被浮层裁掉（需要滚动 ${geo.scrollH - geo.clientH}px）`);
+  }
+};
 const frameStats = page => page.evaluate(async () =>
   (await import('/app/machine.js')).frameStats());
 
@@ -186,13 +262,15 @@ async function goToMyTurn(page, label){
 // 机身取景会随布局和相机收敛变化，所以"取景矩形 + 像素"必须在同一次 evaluate 里读完，
 // 分两次读会错位。色块靠极值找（金取最黄、靛蓝取最暗），但打分的是 5×5 中位数本身 ——
 // 零散的抗锯齿暗点会在中位数里被淘汰，只有真是整块色的位置才留得下。
+// 靛蓝描边只有几个像素宽，锚点必须落在足够宽的斜边段上；机身正中的右侧轮廓更细，
+// 5×5 里大部分是背景，取不到描边本身。
 const FIDELITY_PROBES = [
   { id: '壳-左',   fx: 0.100, fy: 0.72, mode: 'flat' },
   { id: '壳-右',   fx: 0.865, fy: 0.72, mode: 'flat' },
   { id: '饰条-左', fx: 0.020, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
   { id: '饰条-右', fx: 0.980, fy: 0.50, mode: 'gold',   wx: 0.016, wy: 0.04 },
-  { id: '靛蓝-左', fx: 0.021, fy: 0.20, mode: 'indigo', wx: 0.010, wy: 0.014 },
-  { id: '靛蓝-右', fx: 0.986, fy: 0.50, mode: 'indigo', wx: 0.016, wy: 0.018 },
+  { id: '靛蓝-左上', fx: 0.021, fy: 0.20, mode: 'indigo', wx: 0.010, wy: 0.014 },
+  { id: '靛蓝-右下', fx: 0.979, fy: 0.80, mode: 'indigo', wx: 0.010, wy: 0.014 },
 ];
 const FIDELITY_MAX_DIFF = 8;    // 单通道：必须过
 const FIDELITY_MEAN_DIFF = 4;   // 六个探针的均值：参考线
@@ -231,21 +309,33 @@ const sampleFidelity = (page, sel) => page.evaluate(async ({ sel, probes }) => {
   const frame = typeof window.__glbFrame === 'function'
     ? window.__glbFrame()
     : (await import('/app/machine.js')).machineStatus().tablet;
+  // 主页机身铺满视口渲染，画布比 .stage 大：frame 是 .stage 局部坐标，
+  // 取像素前先补上 .stage 左上角到画布左上角的偏移。/glb 页画布就是视口，偏移为 0。
+  const stageEl = document.getElementById('stage');
+  const cr = c.getBoundingClientRect(), sr = stageEl ? stageEl.getBoundingClientRect() : cr;
+  const ox = sr.left - cr.left, oy = sr.top - cr.top;
   if (!frame || !(frame.w > 0)) return { frame: null, out: [] };
   const out = [];
   for (const s of probes) {
-    const x0 = frame.x + frame.w * s.fx, y0 = frame.y + frame.h * s.fy;
+    const x0 = ox + frame.x + frame.w * s.fx, y0 = oy + frame.y + frame.h * s.fy;
     const wx = Math.max(0, Math.round(frame.w * (s.wx || 0)));
     const wy = Math.max(0, Math.round(frame.h * (s.wy || 0)));
     let best = null;
+    const hits = [];
     for (let j = -wy; j <= wy; j++) for (let i = -wx; i <= wx; i++) {
       const x = Math.round(x0) + i, y = Math.round(y0) + j;
       const pm = patch(x, y), sc = score(pm, s.mode);
       if (sc === null) continue;
+      hits.push(pm);
       const d = Math.hypot(i, j);
       if (!best || sc > best.sc || (sc === best.sc && d < best.d)) best = { sc, d, p5: pm };
     }
-    out.push({ id: s.id, p5: best ? best.p5 : null });
+    // 靛蓝描边只有几个像素宽：取极值会各自锁到两侧的抗锯齿过渡（主页面压着透明底、
+    // /glb 压着米色底），两边必然不同。取窗口内全部命中像素的中位色，量的才是描边本身。
+    const p5 = s.mode === 'indigo' && hits.length
+      ? [0, 1, 2].map(k => median(hits.map(p => p[k])))
+      : (best ? best.p5 : null);
+    out.push({ id: s.id, p5 });
   }
   return { frame, out };
 }, { sel, probes: FIDELITY_PROBES });
@@ -281,16 +371,19 @@ async function waitForMachineState(page, predicate, timeoutMs = 30000) {
 }
 const rectOverlap = (a, b) =>
   !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
-async function waitForFramesToSettle(page, timeoutMs = 20000) {
+async function waitForFramesToSettle(page, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
+  let quiet = 0;
   let last = (await frameStats(page)).frameCount;
   while (Date.now() < deadline) {
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(400);
     const now = (await frameStats(page)).frameCount;
-    if (now === last) return;
+    // 连续两次采样都没有新帧才算稳定，单次空闲可能只是恰好落在两帧之间的停顿。
+    quiet = now === last ? quiet + 1 : 0;
     last = now;
+    if (quiet >= 2) return;
   }
-  throw new Error('渲染在 20 秒内没有稳定');
+  throw new Error('渲染在 60 秒内没有稳定');
 }
 
 try {
@@ -301,6 +394,7 @@ try {
   await waitForHealth();
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, deviceScaleFactor: 2 });
+  page.setDefaultTimeout(90000);
   // 故意造一次被服务端拒掉的出牌时，浏览器会记一条 400；只有那一下放行
   let expectReject = false;
   watchPage(page, '主页面', msg => expectReject && /400 \(Bad Request\)/.test(msg));
@@ -316,7 +410,7 @@ try {
     problems.push('3D 机身还在加载（loading）时就弹出了错误提示');
   }
   holdGlb = false;
-  await page.waitForSelector('#who', { timeout: 40000 });
+  await page.waitForSelector('#who', { state: 'attached', timeout: 40000 });
   await page.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
     { timeout: 40000 });
   await waitForMachineState(page, s => s.status === 'ready' && s.ready);
@@ -370,8 +464,61 @@ try {
     if (!lights.map(lightKey).includes(want)) problems.push(`主页面缺少灯 ${want}`);
   }
   if (!shell.contactShadow) problems.push('主页面没有机底接触阴影');
+  // ADR-0006：真投影软阴影。灯仍是三盏（key 灯兼职投影，castShadow 不改灯自己的贡献），
+  // 机身背后一块只吃阴影的接影面；验收要能读到这一层，并且影子真的落到画布上。
+  const shadow = shell.shadow || {};
+  if (!shadow.mapEnabled) problems.push('主页面没开阴影贴图（ADR-0006 真投影）');
+  if (shadow.mapTypeName !== 'VSM') problems.push(`主页面阴影类型不是 VSM：${shadow.mapTypeName}`);
+  if (shadow.caster !== 'key') problems.push(`投影灯不是兼职的 key 灯：${shadow.caster}`);
+  if (!shadow.backdrop) problems.push('主页面没有接影面');
+  if (!(shadow.casters > 0)) problems.push(`机身上没有开投影的 mesh：${shadow.casters}`);
+  if (!(shadow.radius > 0) || !(shadow.opacity > 0)) {
+    problems.push(`阴影参数不成立：radius=${shadow.radius} opacity=${shadow.opacity}`);
+  }
+  // 影子是画布上真画出来的：机下条带被压暗，而机身左下的空场不该被涂满（影子偏右下，有方向）。
+  const band = await page.evaluate(async () => {
+    const c = document.getElementById('scene');
+    const ctx = c.getContext('webgl2') || c.getContext('webgl');
+    const px = new Uint8Array(c.width * c.height * 4);
+    ctx.readPixels(0, 0, c.width, c.height, ctx.RGBA, ctx.UNSIGNED_BYTE, px);
+    const dpr = c.width / c.clientWidth;
+    const alphaAt = (x, y) => {
+      const X = Math.round(x * dpr), Y = Math.round(y * dpr);
+      if (X < 0 || Y < 0 || X >= c.width || Y >= c.height) return -1;
+      return px[((c.height - 1 - Y) * c.width + X) * 4 + 3];
+    };
+    const r = (await import('/app/machine.js')).machineStatus().tablet;
+    // 同保真探针：tablet 是 .stage 局部坐标，画布铺满视口后要补偏移才能取到对像素。
+    const sr = document.getElementById('stage').getBoundingClientRect();
+    const cr = c.getBoundingClientRect(), ox = sr.left - cr.left, oy = sr.top - cr.top;
+    let peak = 0, left = 0, n = 0;
+    for (const dy of [6, 12, 20, 30]) for (let i = 0; i <= 12; i++) {
+      const x = ox + r.x + r.w * (0.06 + 0.08 * i), y = oy + r.y + r.h + dy;
+      peak = Math.max(peak, alphaAt(x, y));
+      if (i <= 1) { left += alphaAt(x, y); n++; }
+    }
+    return { peak, left: n ? left / n : -1, corner: [alphaAt(4, 4), alphaAt(c.clientWidth - 4, 6)] };
+  });
+  if (!(band.peak >= 60)) problems.push(`机下没有影子：条带 alpha 峰值只有 ${band.peak}`);
+  if (!(band.left <= 25)) problems.push(`机身左下的影子铺满了整条（${band.left}），影子没有方向`);
+  for (const a of band.corner) if (a !== 0) problems.push(`机身外空场被涂了东西：alpha=${a}`);
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
+  // ADR-0008：座位徽章内嵌进主屏纹理，DOM 只留锚点；否则机身一转圆点就浮到屏外。
+  const mainHud = shell.mainHud || {};
+  if (!mainHud.ready) problems.push('主屏 HUD 没就绪：座位徽章没画进真屏');
+  if (!mainHud.texture || !(mainHud.texture.w > 0) || !(mainHud.texture.h > 0)) {
+    problems.push(`主屏 HUD 纹理尺寸无效：${JSON.stringify(mainHud.texture)}`);
+  }
+  const hudInk = await page.evaluate(async () => (await import('/app/machine.js')).mainHudInk());
+  if (!(hudInk > 0)) problems.push(`主屏 HUD 画布是空的（ink=${hudInk}），徽章没画进去`);
+  if (!(await page.locator('#screen-hud').evaluate(el => el.classList.contains('is-3d')))) {
+    problems.push('#screen-hud 没标成 is-3d：DOM 圆点还压在机身上');
+  } else {
+    const domOpacity = await page.locator('#board .seat-label').first().evaluate(el => getComputedStyle(el).opacity);
+    if (domOpacity !== '0') problems.push(`is-3d 下 DOM 座位圆点没隐身：opacity=${domOpacity}`);
+  }
+  // 10 颗机身按键 + 副屏右侧那颗实体返回键（切机顶屏模式）= 11 个可量热区
   if (shell.buttons.length !== 11) problems.push(`透明键热区数量不是 11：${shell.buttons.length}`);
   for (const id of ['bar-mode', 'dpad-up', 'dpad-left', 'play-clear', 'dpad-right',
                     'dpad-down', 'new-round', 'play-hint-btn', 'undo', 'play-go', 'play-pass']) {
@@ -390,8 +537,8 @@ try {
       problems.push(`菱形键热区 ${h.id} 没有贴合描边`);
     }
   }
-  for (const id of ['bar-mode','dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
-                    'play-hint-btn','undo','play-go','play-pass']) {
+  for (const id of ['dpad-up','dpad-left','play-clear','dpad-right','dpad-down','new-round',
+                    'play-hint-btn','undo','play-go','play-pass','bar-mode']) {
     if (!hotspots.some(h => h.id === id)) problems.push(`缺少主键热区 ${id}`);
   }
 
@@ -407,18 +554,19 @@ try {
   if (deck.first !== 'step-cell') {
     problems.push(`操作台最左的箱子不是出牌机会：${deck.first || '(空)'}（${deck.ids.join(',')}）`);
   }
-  const seam = await page.evaluate(() => {
-    const stage = document.getElementById('stage').getBoundingClientRect();
-    const chassis = document.getElementById('chassis').getBoundingClientRect();
-    return { stageTop: stage.top, chassisTop: chassis.top,
-             lip: document.getElementById('board').style.getPropertyValue('--lip') };
+  const deckState = await page.evaluate(() => {
+    const p = document.getElementById('panel');
+    const cs = getComputedStyle(p);
+    return { open: p.classList.contains('is-open'), visibility: cs.visibility,
+             opacity: Number(cs.opacity), pointerEvents: cs.pointerEvents,
+             chassisTop: document.getElementById('chassis').getBoundingClientRect().top };
   });
-  const tab = (await machineStatus(page)).tablet;
-  if (!tab) problems.push('量不到机身取景框，操作台贴合判定不成立');
-  else {
-    const gap = seam.chassisTop - (seam.stageTop + tab.y + tab.h);
-    if (gap > 12) problems.push(`操作台没贴住机身下沿：缝隙 ${gap.toFixed(1)}px（上限 12px，lip=${seam.lip}）`);
-    if (gap < -1) problems.push(`操作台压进了机身：${gap.toFixed(1)}px`);
+  if (deckState.open || deckState.visibility === 'visible'
+      || deckState.opacity > 0.01 || deckState.pointerEvents !== 'none') {
+    problems.push('操作台浮层默认没有收起：应该只留 dock 上的「出牌机会」入口');
+  }
+  if (deckState.chassisTop !== 0) {
+    problems.push(`极简态宽屏不该再显示机身壳体：chassis 顶 ${deckState.chassisTop.toFixed(1)}px`);
   }
 
   // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
@@ -432,7 +580,7 @@ try {
   if (idleB.dpr > 2) problems.push(`DPR 超过 2：${idleB.dpr}`);
 
   // 视差动画也必须有明确终点：鼠标停住后 500ms 不再续帧
-  const stageBox = await page.locator('#scene').boundingBox();
+  const stageBox = await page.locator('#stage').boundingBox();
   await page.mouse.move(stageBox.x + stageBox.width * 0.18, stageBox.y + stageBox.height * 0.28);
   await page.mouse.move(stageBox.x + stageBox.width * 0.72, stageBox.y + stageBox.height * 0.62);
   await page.waitForTimeout(400);
@@ -463,6 +611,67 @@ try {
   await page.click('#bar-mode');
   await page.waitForTimeout(250);
   if ((await probabilityScreen(page)).mode !== 'count') problems.push('实体 BackKey 没切回记牌模式');
+  if ((await page.locator('#counter .cc i s').count()) < 20) problems.push('记牌模式没有画出红点');
+
+  // 副屏必须**绑在模型上**：机顶条按副屏四角做透视映射，转机身时跟着一起斜，
+  // 而不是一块固定矩形（那会在转动时顶出槽位）。
+  const counterQuad = () => page.evaluate(() => {
+    const el = document.getElementById('counter');
+    const cs = getComputedStyle(el);
+    const m = new DOMMatrix(cs.transform);
+    const W = el.offsetWidth, H = el.offsetHeight;
+    const box = el.offsetParent.getBoundingClientRect();
+    const at = (x, y) => {
+      const p = m.transformPoint(new DOMPoint(x, y));
+      return { x: p.x + box.left, y: p.y + box.top };
+    };
+    return { transform: cs.transform, inline: el.style.transform, W, tl: at(0, 0), tr: at(W, 0), bl: at(0, H), br: at(W, H) };
+  });
+  // 上面的点击会把鼠标带进舞台，触发悬停视差让机身歪着——先移出去等它回正再取基准。
+  await page.mouse.move(stageBox.x - 5, stageBox.y - 5);
+  await waitForFramesToSettle(page);
+  const restQuad = await counterQuad();
+  // 内联 style 才是 board.js 实际写入的值：计算样式在透视分量极小时会被序列化成 matrix()，不可靠。
+  if (!/^matrix3d\(/.test(restQuad.inline)) {
+    problems.push(`机顶条没走四边形映射（回落到固定矩形）：${restQuad.inline}`);
+  }
+  const bodyPoint = await page.evaluate(async () => {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    const scr = document.getElementById('screen-hud').getBoundingClientRect();
+    const m = await import('/app/machine.js');
+    for (let fy = 0.06; fy <= 0.92; fy += 0.04) {
+      for (let fx = 0.06; fx <= 0.94; fx += 0.04) {
+        const x = r.left + r.width * fx, y = r.top + r.height * fy;
+        if (x > scr.left && x < scr.right && y > scr.top && y < scr.bottom) continue;
+        if (m.isOnBody(x, y)) return { x, y };
+      }
+    }
+    return null;
+  });
+  if (!bodyPoint) {
+    problems.push('机身上找不到可拖的点，没法验证副屏跟随');
+  } else {
+    await page.mouse.move(bodyPoint.x, bodyPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(bodyPoint.x + 160, bodyPoint.y, { steps: 8 });
+    await page.waitForTimeout(80);
+    const turned = await counterQuad();
+    await page.mouse.up();
+    // 松手后旋转/视差弹簧约 900ms 才收敛，先等它停稳再采样，否则会读到回弹中途的角度。
+    await page.waitForTimeout(1200);
+    const tilt = Math.abs(turned.tr.y - turned.tl.y);
+    if (tilt < 1) problems.push(`转机身后机顶条没跟着斜：顶边高差 ${tilt.toFixed(2)}px`);
+    if (turned.W >= restQuad.W) {
+      problems.push(`转机身后机顶条没有随副屏收窄：${restQuad.W.toFixed(1)} → ${turned.W.toFixed(1)}px`);
+    }
+    // 先移出舞台，避免悬停视差让机身停在与初始不同的角度。
+    await page.mouse.move(stageBox.x - 5, stageBox.y - 5);
+    await waitForFramesToSettle(page);
+    const backQuad = await counterQuad();
+    if (Math.abs(backQuad.tl.y - restQuad.tl.y) > 1.5) {
+      problems.push(`松手机顶条没回弹归位：${restQuad.tl.y.toFixed(1)} → ${backQuad.tl.y.toFixed(1)}px`);
+    }
+  }
 
   // 数据面板：默认不占页面，点"数据面板"才盖在屏幕上
   if (await page.locator('#crt').evaluate(el => el.classList.contains('is-open'))) {
@@ -492,9 +701,12 @@ try {
   if (panelRects.panel.left < panelRects.screen.right) problems.push('宽屏数据面板不在机身右侧');
   await page.screenshot({ path: '/tmp/ddz-web-1.png', fullPage: true });
 
-  // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
-  // 选中模型是"按点数计数、从左往右抬起"的，所以要点那张真正会被抬起的牌
-  // （它自己的点数在它左边没出现过），否则点在重复点数的第二/三张上是"再加一张"。
+  // 极简模式下操作台默认收起，先展开才能操作内部控件
+  await openDeck(page);
+  await checkPanelLayout(page, '宽屏');
+    // 交互 1：在屏幕里点自己的牌 → 选中；再点同一张 → 取消；清空
+  // 选中的是「具体哪一张」（按下标记身份），所以点同一张两次能反转，
+  // 同点数的第二、三张也各自独立。
   const hand = await page.evaluate(async () => (await import('/app/state.js')).S.snap.my_hand);
   let first = hand.length - 1;
   while (first > 0 && hand.indexOf(hand[first]) !== first) first--;
@@ -511,6 +723,49 @@ try {
     if (await page.locator('#play-chips i.c').count()) {
       await page.click('#play-clear'); await page.waitForTimeout(150);
       if ((await page.locator('#play-chips i.c').count()) !== 0) problems.push('清空没有清掉选中的牌');
+    }
+  }
+
+  // 滑动选牌：进入一张牌的区域就反转它。滑过去再滑回来必须回到原状态，
+  // 而且同点数的第 2/3 张也要能各自反转（历史上会残留一张取消不掉）。
+  {
+    if (await page.locator('#play-clear').isEnabled()) { await page.click('#play-clear'); await page.waitForTimeout(120); }
+    const seq = await page.evaluate(async () => {
+      const c = await import('/app/console.js');
+      const { S, SEL } = await import('/app/state.js');
+      const hand = S.snap.my_hand;
+      let g = -1;
+      for (let i = 0; i + 2 < hand.length; i++)
+        if (hand[i] === hand[i + 1] && hand[i + 1] === hand[i + 2]) { g = i; break; }
+      const got = [];
+      for (const k of [g, g + 1, g + 2, g, g + 1, g + 2]) { c.toggleCard(k); got.push(SEL.play.length); }
+      return { g, rank: hand[g], got, leftover: SEL.play.length };
+    });
+    if (seq.g < 0) problems.push('手牌里没有同点数三张，滑动选牌的身份用例没法跑');
+    else if (seq.got.join(',') !== '1,2,3,2,1,0' || seq.leftover !== 0) {
+      problems.push(`同点数三张没能各自反转：${seq.rank}×3 → ${seq.got.join('→')}（末态 ${seq.leftover}）`);
+    }
+    if (seq.g >= 0) {
+      const chipN = () => page.locator('#play-chips i.c').count();
+      const n0 = await chipN();
+      const slideAcross = async () => {
+        const box = await page.locator('#stage').boundingBox();
+        await page.mouse.move(box.x + (await handPts(page))[seq.g].x, box.y + (await handPts(page))[seq.g].y);
+        await page.waitForTimeout(600);
+        const P = await handPts(page);
+        await page.mouse.down();
+        await page.mouse.move(box.x + P[seq.g + 1].x, box.y + P[seq.g + 1].y, { steps: 8 });
+        await page.mouse.move(box.x + P[seq.g + 2].x, box.y + P[seq.g + 2].y, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(150);
+      };
+      await slideAcross();
+      const n1 = await chipN();
+      await slideAcross();
+      const n2 = await chipN();
+      if (n1 - n0 < 2) problems.push(`鼠标滑过 3 张牌只反转了 ${n1 - n0} 张（每滑到一张就该反转一张）`);
+      if (n2 !== n0) problems.push(`鼠标沿同一路径滑两次没有回到起点：${n0} → ${n1} → ${n2}`);
+      if (n2 !== 0) { await page.click('#play-clear'); await page.waitForTimeout(120); }
     }
   }
 
@@ -548,8 +803,7 @@ try {
 
   // 交互 2b：终局 —— 跳到最后那一手，操作台必须收手，不再提示"该谁出牌"
   await page.click('#play-latest');
-  await page.waitForTimeout(1200);
-  if (!(await text(page, '#play-who')).includes('牌局已结束')) {
+  if (!(await waitText(page, '#play-who', '牌局已结束'))) {
     problems.push('终局时操作台没报「牌局已结束」');
   }
   if (!(await page.locator('#play-go').isDisabled())
@@ -592,9 +846,21 @@ try {
   await tapNew(['T','J','Q']);
   if (!(await text(page, '#new-count')).includes('20/20')) problems.push('牌盘没数对手牌张数');
   await page.click('#new-go');
-  await page.waitForTimeout(1600);
-  if (!(await text(page, '#banner')).includes('已开局')) problems.push('开新局没有反馈');
+  if (!(await waitBanner(page, '已开局'))) problems.push('开新局没有反馈');
   if (!(await text(page, '#board')).includes('该你出')) problems.push('开新局后第一手不是我方');
+
+  // 20 张满手牌也必须每一张都能从屏里点中；扇面外缘不能跑出可拾取区域。
+  const fullHand = await page.evaluate(async () => {
+    const m = await import('/app/machine.js');
+    const { S } = await import('/app/state.js');
+    const hits = m.handPoints().map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y) }));
+    return { n: S.snap.my_hand.length, pts: hits.length,
+             miss: hits.filter(p => p.i !== p.pick) };
+  });
+  if (fullHand.n !== 20 || fullHand.pts !== fullHand.n || fullHand.miss.length) {
+    problems.push(`20 张满手牌拾取错位：${fullHand.pts}/${fullHand.n} 个点，`
+      + `错 ${fullHand.miss.length} 张 ${JSON.stringify(fullHand.miss)}`);
+  }
 
   // #25 服务端拒掉一手时，已经选中的牌不能被清空（点了两张不同点数，凑不成牌型）
   {
@@ -609,7 +875,9 @@ try {
       if (picked !== 2) problems.push(`想选两张不同点数的牌，实际选上 ${picked} 张`);
       expectReject = true;
       await page.click('#play-go');
-      await page.waitForTimeout(900);
+      // 拒绝是异步回来的；固定 900ms 在慢机器上会漏掉那条控制台消息
+      await waitUntil(page, async () =>
+        (await page.locator('#banner').getAttribute('data-kind')) === 'error', 8000);
       expectReject = false;
       const afterReject = await page.locator('#play-chips i.c').count();
       if (afterReject !== picked) {
@@ -622,13 +890,82 @@ try {
   }
 
   // 交互 4：在屏幕里点一张自己的牌 → 出牌（领出时单张一定合法）
+  // 顺带验 #48：点的若是同点数的**非首张**，出牌区必须显示被点那张的花色，
+  // 而不是"按下标/排序猜"的首张（只有点非首张，两种结果才不同，才验得出接线）。
   const n4 = (await handPts(page)).length;
-  await clickCard(page, Math.round((n4 - 1) * 0.5));
+  const faceCheck = await page.evaluate(async () => {
+    const { S } = await import('/app/state.js');
+    const vc = await import('/app/virtual-cards.js');
+    const hand = S.snap.my_hand;
+    const played = (S.snap.played || {})[S.snap.me] || [];
+    const cards = vc.handCards(S.record.record_id, hand, vc.rankCounts(played));
+    const seen = {};
+    let k = -1;
+    for (let i = 0; i < hand.length; i++){
+      const j = seen[hand[i]] || 0; seen[hand[i]] = j + 1;
+      if (j > 0 && hand[i] !== 'B' && hand[i] !== 'R'){ k = i; break; }
+    }
+    let other = -1;
+    for (let i = 0; i < hand.length; i++) if (hand[i] !== hand[k]){ other = i; break; }
+    return {
+      k, other,
+      rank: k >= 0 ? hand[k] : null,
+      otherRank: other >= 0 ? hand[other] : null,
+      suit: k >= 0 ? cards[k].suit : null,
+    };
+  });
+  await clickCard(page, faceCheck.k >= 0 ? faceCheck.k : Math.round((n4 - 1) * 0.5));
   await page.waitForTimeout(220);
   if (!(await page.locator('#play-chips i.c').count())) problems.push('轮到我方时，屏幕里点牌没选上');
+
+  // #48 回归（评审反例）：再加选一张别的点数，删掉它的牌片后，先点的那张同点数牌
+  // 身份不能丢 —— 旧实现用 adoptPlay() 按下标重排，会把身份挪回同点数的第一张。
+  if (faceCheck.k >= 0 && faceCheck.other >= 0) {
+    await clickCard(page, faceCheck.other);
+    await page.waitForTimeout(220);
+    const both = await page.locator('#play-chips i.c').count();
+    if (both !== 2) problems.push(`#48 删牌片回归：想选两张不同点数的牌，实际选上 ${both} 张`);
+    else {
+      const drop = await page.evaluate(async rank => {
+        const { SEL } = await import('/app/state.js');
+        const { RANKS } = await import('/app/labels.js');
+        return SEL.play.slice().sort((a, b) => RANKS.indexOf(a) - RANKS.indexOf(b)).indexOf(rank);
+      }, faceCheck.otherRank);
+      if (drop < 0) problems.push('#48 删牌片回归：找不到另一张点数的牌片');
+      else {
+        await page.click(`#play-chips [data-drop="${drop}"]`);
+        await page.waitForTimeout(220);
+        const left = await page.locator('#play-chips i.c').count();
+        if (left !== 1) problems.push(`#48 删牌片回归：删掉另一张后应剩 1 张，实际 ${left} 张`);
+      }
+    }
+  }
+  // 回归步骤若没把选择收敛到一张，先清空再只点最初那张，保证主断言能独立跑。
+  if ((await page.locator('#play-chips i.c').count()) !== 1) {
+    await page.click('#play-clear');
+    await page.waitForTimeout(150);
+    await clickCard(page, faceCheck.k >= 0 ? faceCheck.k : Math.round((n4 - 1) * 0.5));
+    await page.waitForTimeout(220);
+  }
   await page.click('#play-go');
-  await page.waitForTimeout(1400);
-  if (!(await text(page, '#banner')).includes('已录')) problems.push('录我方的牌没有反馈');
+  if (!(await waitBanner(page, '已录'))) problems.push('录我方的牌没有反馈');
+  if (faceCheck.k >= 0) {
+    const got = await page.evaluate(async rank => {
+      const { S } = await import('/app/state.js');
+      const vc = await import('/app/virtual-cards.js');
+      const played = (S.snap.played || {})[S.snap.me] || [];
+      const trick = S.snap.last_move || [];
+      const mine = vc.isMyTrick(played, trick);
+      const suits = vc.trickCards(S.record.record_id, trick, vc.rankCounts(played), mine)
+                      .filter(c => c.rank === rank).map(c => c.suit);
+      return { mine, suits };
+    }, faceCheck.rank);
+    if (!got.mine) problems.push('刚打完一手，出牌区却不认这是我的牌');
+    if (!got.suits.includes(faceCheck.suit)) {
+      problems.push(`#48 出牌区花色没跟着被点的那张走：${faceCheck.rank} 点的是 ${faceCheck.suit}，`
+        + `出牌区给了 ${JSON.stringify(got.suits)}`);
+    }
+  }
 
   // 交互 5：轮到对手 → 出场"录对手牌"的点数条，且能选、受牌池上限约束
   if (!(await page.locator('#opp-cell').isVisible())) {
@@ -672,20 +1009,21 @@ try {
     await page.waitForTimeout(250);
     // 这一手按"不要"记下去（对手的牌是背面，实际牌型由服务端裁定）
     await page.click('#play-pass');
-    await page.waitForTimeout(1400);
-    if (!(await text(page, '#banner')).includes('已录')) problems.push('录对手不要没有反馈');
+    if (!(await waitBanner(page, '已录'))) problems.push('录对手不要没有反馈');
   }
 
   await page.screenshot({ path: '/tmp/ddz-web-2.png', fullPage: true });
 
   // 交互 7：撤销
   await page.click('#undo');
-  await page.waitForTimeout(1000);
-  if (!(await text(page, '#banner')).includes('已撤销')) problems.push('撤销没有反馈');
+  if (!(await waitBanner(page, '已撤销'))) problems.push('撤销没有反馈');
 
   // 窄屏：不出横向滚动条，保留 3D 正视，数据面板在机下且不遮屏
   await page.setViewportSize({ width: 420, height: 1200 });
-  await page.waitForTimeout(700);
+  // 切窄后版式要重排（面板入机下布局、机身重新量尺）；固定等待在慢机器上会量到重排中途那一帧。
+  // 轮到"不再横向溢出"为止，只有一直溢出才算失败。
+  await waitUntil(page, async () =>
+    (await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 2, 8000);
   const narrow = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth - window.innerWidth,
     panel: document.getElementById('crt').getBoundingClientRect().toJSON(),
@@ -693,7 +1031,12 @@ try {
     panelOpen: document.getElementById('board').classList.contains('panel-open'),
     status: document.getElementById('board').classList.contains('is-stacked'),
   }));
-  if (narrow.overflow > 2) problems.push(`窄屏出现横向溢出 ${narrow.overflow}px`);
+  if (narrow.overflow > 2) {
+    const off = await page.evaluate(() => [...document.querySelectorAll('*')]
+      .filter(e => e.getBoundingClientRect().right > window.innerWidth + 2)
+      .slice(0, 8).map(e => `${e.tagName}#${e.id}.${(e.className||'').toString().slice(0,26)} r=${Math.round(e.getBoundingClientRect().right)} w=${Math.round(e.getBoundingClientRect().width)}`));
+    problems.push(`窄屏出现横向溢出 ${narrow.overflow}px :: ${off.join(' | ')}`);
+  }
   if (!narrow.panelOpen || !narrow.status) problems.push('窄屏数据面板没有进入机下布局');
   if (rectOverlap(narrow.panel, narrow.screen)) problems.push('窄屏数据面板盖住了真屏');
   if (narrow.panel.top < narrow.screen.bottom) problems.push('窄屏数据面板不在机身下方');
@@ -719,7 +1062,7 @@ try {
     const counterButtons = counterEl.querySelectorAll('button').length;
     const rowTops = {};
     document.querySelectorAll('#counter .cc').forEach(el => {
-      const y = Math.round(el.getBoundingClientRect().top);
+      const y = el.offsetTop;
       rowTops[y] = (rowTops[y] || 0) + 1;
     });
     return {
@@ -729,7 +1072,7 @@ try {
       touchTop: touch.top, touchBottom: touch.bottom,
       chassisTop: chassis.top, chassisBottom: chassis.bottom,
       counterFs: parseFloat(getComputedStyle(counterEl).fontSize),
-      counterCellW: cell ? cell.getBoundingClientRect().width : 0,
+      counterCellW: cell ? cell.offsetWidth : 0,
       counterRows: Object.values(rowTops),
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
       counterButtons,
@@ -747,19 +1090,19 @@ try {
   if (JSON.stringify(narrowLayout.counterRows) !== JSON.stringify([8, 7])) {
     problems.push(`420px 机顶记牌不是 8+7 两行：${narrowLayout.counterRows.join('+')}`);
   }
+  // 操作台已经脱离机身，窄屏只剩一条计分板收在壳体里；
+  // 浮层本身由 checkPanelLayout 保证接在 dock 上沿之上。
+  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
+      || narrowLayout.scoreBottom > narrowLayout.chassisBottom + 1) {
+    problems.push('窄屏计分板没有收进机身壳体');
+  }
   if (narrowLayout.scoreBottom > narrowLayout.deckTop + 1) {
     problems.push(`窄屏计分板与操作台相撞：${narrowLayout.scoreBottom.toFixed(1)} > ${narrowLayout.deckTop.toFixed(1)}`);
   }
   if (narrowLayout.deckBottom > narrowLayout.touchTop + 1) {
     problems.push(`窄屏操作台与触控条相撞：${narrowLayout.deckBottom.toFixed(1)} > ${narrowLayout.touchTop.toFixed(1)}`);
   }
-  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
-      || narrowLayout.deckBottom > narrowLayout.chassisBottom + 1) {
-    problems.push('窄屏计分板/操作台没有收进机身壳体');
-  }
-  if (Math.abs(narrowLayout.touchTop - narrowLayout.chassisBottom) > 2) {
-    problems.push(`窄屏触控条没有从机身底边接出：差 ${(narrowLayout.touchTop - narrowLayout.chassisBottom).toFixed(1)}px`);
-  }
+  await checkPanelLayout(page, '窄屏');
   if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
     problems.push(`420px 页面级横向溢出：html ${narrowLayout.docOverflow}px / body ${narrowLayout.bodyOverflow}px`);
   }
@@ -772,9 +1115,10 @@ try {
 
   // 新开一页复核 17 张这个真实高频状态；主流程此时已经改过手牌，不能拿它冒充 17 张。
   const fresh420 = await browser.newPage({ viewport: { width: 420, height: 1200 } });
+  fresh420.setDefaultTimeout(90000);
   watchPage(fresh420, '420 复核');
   await fresh420.goto(`${BASE}/`);
-  await fresh420.waitForSelector('#who', { timeout: 40000 });
+  await fresh420.waitForSelector('#who', { state: 'attached', timeout: 40000 });
   await fresh420.waitForFunction(() => (document.getElementById('who')?.textContent || '').includes('·'), null,
     { timeout: 40000 });
   await waitForMachineState(fresh420, s => s.status === 'ready' && s.ready);

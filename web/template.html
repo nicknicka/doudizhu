@@ -22,6 +22,8 @@
     --shell-hi:color-mix(in srgb,var(--ground) 96%,var(--ink));
     --shell-lo:color-mix(in srgb,var(--ground) 74%,var(--ink));
     --well:color-mix(in srgb,var(--ground) 62%,var(--ink));
+    --dock-bottom:22px;   /* dock 离页面底的距离；操作台浮层接在 dock 上沿 */
+    --dock-h:58px;        /* dock 总高（含边框/内边距），窄屏会覆写 */
   }
   *{box-sizing:border-box}
   /* 点阵字要"点"出来：关掉浏览器的字体平滑，中文才不会糊成普通网页字 */
@@ -30,7 +32,7 @@
        font-family:var(--display);font-size:12px;line-height:1.75;
        background-image:repeating-linear-gradient(0deg,
          color-mix(in srgb,var(--ink) 2.5%,transparent) 0 1px, transparent 1px 4px)}
-  .page{max-width:1120px;margin:0 auto;padding:56px 32px 88px}
+  .page{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:56px 32px 88px}
 
   header{margin-bottom:28px;padding-bottom:16px;border-bottom:var(--px) solid var(--ink)}
   h1{margin:0;font-size:24px;font-weight:400;line-height:1.2}
@@ -57,6 +59,7 @@
           border:var(--px) solid var(--ink);border-left-width:8px;
           border-left-color:var(--muted);color:var(--muted);background:var(--ground)}
   .banner[data-kind="error"]{border-left-color:var(--accent);color:var(--accent)}
+  .banner[data-kind="hint"]{border-left-color:var(--side-b);color:var(--side-b)}
   .banner.flash{animation:flash .45s steps(2,end)}
   @keyframes flash{0%{background:color-mix(in srgb,var(--accent) 22%,var(--ground))}
                    100%{background:var(--ground)}}
@@ -66,27 +69,66 @@
   .machine{position:relative;margin:0}
   .stage{position:relative;width:100%;aspect-ratio:2.03;margin:0 auto}
   @supports (aspect-ratio:1){.stage{height:auto}}
-  #scene{display:block;width:100%;height:100%}
-  .overlay{position:absolute;inset:0;pointer-events:none;font-size:12px}
+  #scene{display:block;width:100%;height:100%;position:relative;z-index:1}
+
+  /* ---------- 桌面层：光池 + 浮尘，机器浮在桌上而不是画布里 ---------- */
+  /* 方波田铺满整个页面：固定层 + 不吃指针事件，任何断点下都是一整页 */
+  .bgpix{position:fixed;inset:0;width:100%;height:100%;display:block;
+    z-index:0;pointer-events:none}
+
+  /* 桌面层：只有光池 + 浮尘，机器浮在桌上而不是画布里 */
+  .desk{position:absolute;left:0;right:0;top:-9%;bottom:-13%;z-index:0;pointer-events:none}
+  .desk .glow{position:absolute;left:50%;top:44%;width:100%;height:96%;
+    transform:translate(-50%,-50%) scale(1);opacity:.8;
+    background:radial-gradient(ellipse at center,
+      color-mix(in srgb,var(--accent) 17%,transparent) 0%,
+      color-mix(in srgb,var(--side-a) 12%,transparent) 32%,
+      color-mix(in srgb,var(--ink) 5%,transparent) 58%,
+      transparent 76%);
+    transition:opacity .18s ease,transform .45s var(--spring,cubic-bezier(0.34,1.56,0.64,1))}
+  .desk.is-pulsing .glow{opacity:1;transform:translate(-50%,-50%) scale(1.06)}
+  .desk .dust{position:absolute;border-radius:50%;
+    background:color-mix(in srgb,var(--ink) 26%,transparent)}
+  .desk .dust.a{left:16%;top:22%;width:3px;height:3px;animation:dust-a 19s linear infinite}
+  .desk .dust.b{left:79%;top:30%;width:4px;height:4px;animation:dust-b 25s linear infinite}
+  .desk .dust.c{left:58%;top:72%;width:2px;height:2px;animation:dust-c 15s linear infinite}
+  @keyframes dust-a{0%,100%{transform:translate(0,0);opacity:.12}
+    50%{transform:translate(22px,-30px);opacity:.5}}
+  @keyframes dust-b{0%,100%{transform:translate(0,0);opacity:.16}
+    50%{transform:translate(-26px,26px);opacity:.45}}
+  @keyframes dust-c{0%,100%{transform:translate(0,0);opacity:.1}
+    50%{transform:translate(14px,-22px);opacity:.4}}
+  /* 按键时从按压点荡出一圈 */
+  .desk .ripple{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;
+    border-radius:50%;border:2px solid color-mix(in srgb,var(--accent) 72%,transparent);
+    animation:desk-ripple .62s ease-out forwards}
+  @keyframes desk-ripple{0%{transform:scale(.45);opacity:.85}
+    100%{transform:scale(7.5);opacity:0}}
+  .overlay{position:absolute;inset:0;pointer-events:none;font-size:12px;z-index:2}
   .overlay > *{pointer-events:none}
   .overlay button,.overlay .clickable{pointer-events:auto}
 
-  /* 机顶记牌条：一行 15 格，均分；点数正下方是红点；屏内没有切换键 */
+  /* 机顶记牌条：一行 15 格，均分；点数一排居中、红点贴格子下沿；屏内没有切换键。
+     内容已经画进副屏的 3D 面（machine.js），这层 DOM 只当几何锚点与断言源。 */
   .counter{position:absolute;display:grid;grid-template-columns:1fr;
            background:var(--ground);border:2px solid var(--ink);overflow:hidden}
+  /* 副屏进 3D 后 DOM 不再往上盖：否则它永远画在机身顶层，凸边框挡不住它 */
+  .counter.is-3d{opacity:0}
   .counter .cells{min-width:0;display:grid;grid-template-columns:repeat(15,1fr);
            align-items:stretch;justify-items:stretch}
-  .counter .cc{min-width:0;display:flex;flex-direction:column;align-items:center;
+  .counter .cc{position:relative;min-width:0;display:flex;flex-direction:column;align-items:center;
                justify-content:center;line-height:1.15;color:var(--ink);text-align:center;
-               padding:3px 0 4px;
-               border-left:1px solid color-mix(in srgb,var(--ink) 26%,transparent)}
+               padding:2px 0 8px;
+               border-left:1px solid var(--ink)}
   .counter .cc:first-child{border-left:none}
   .counter .cc b{font-size:1em;font-weight:400;white-space:nowrap}
   .counter .cc b.long{font-size:.62em;letter-spacing:-.04em}   /* 小王/大王 挤不进一格就缩小，别竖排 */
-  /* 剩几张就几个红点；没了 → 字变灰、点也没有 */
-  .counter .cc i{font-style:normal;display:flex;align-items:center;justify-content:center;
-                 gap:2px;height:5px;margin-top:2px}
+  /* 剩几张就几个红点，排在格子底边；没了 → 字变灰、点也没有 */
+  .counter .cc i{font-style:normal;position:absolute;left:0;right:0;bottom:2px;height:4px;
+                 display:flex;align-items:center;justify-content:center;gap:3px}
   .counter .cc i s{display:block;width:4px;height:4px;background:var(--accent)}
+  .counter .cc i.long{gap:.34em}                 /* 双字点数：一个红点对一个字 */
+  .counter .cc i.long s{width:.34em;height:.34em;min-width:3px;min-height:3px}
   .counter .cc.is-out{color:color-mix(in srgb,var(--muted) 62%,var(--ground))}
   /* 概率模式：标题一行，Top-3 横向三列；每列是完整动作 + 牌型 + 概率 */
   .counter[data-mode="prob"] .cells{display:grid;grid-template-rows:auto minmax(0,1fr);
@@ -183,22 +225,15 @@
   .key.key-round::before{content:"";display:block;width:44%;height:44%;background:var(--muted)}
   .key-center{font-size:10px;background:color-mix(in srgb,var(--ink) 96%,var(--ground))}
 
-  /* 机顶条：概率模式的双色条 */
-  .counter .cc-prob .bar{display:block;width:100%;height:4px;margin:1px 0;
-    background:var(--side-b);border:1px solid var(--ink);overflow:hidden}
-  .counter .cc-prob .bar s{display:block;height:100%;background:var(--side-a)}
-  .counter .cc-prob em{font-style:normal;font-size:.7em;color:var(--ground);opacity:.85}
-
   /* ---------- 左右握把：物理键区 ---------- */
   /* 宽屏：面板浮在握把上；窄屏（.is-stacked）：落到机身下方，不再挤在握把里 */
-  .controls{position:absolute;inset:0;pointer-events:none}
+  .controls{position:absolute;inset:0;pointer-events:none;z-index:2}
   .controls .hud{pointer-events:none}
   .controls .hud button{pointer-events:auto}
   .hud{position:absolute;display:flex;flex-direction:column;gap:.42em;
        padding:.5em .46em;overflow:hidden}
   /* 机身下方的操作台托盘：宽窄屏都是同一块底座，紧贴机身下沿 —— 不是网页里的另一张卡片 */
   .chassis{position:relative;display:block;margin:0;padding:0;
-    margin-top:calc(-1 * var(--lip, 0px));
     border:var(--px) solid var(--ink);border-top:none;
     background:
       radial-gradient(circle at 10px 12px,var(--ink) 0 1.5px,var(--shell-lo) 1.6px 2.5px,transparent 2.8px),
@@ -214,10 +249,6 @@
     width:20px;background:var(--shell);border:var(--px) solid var(--ink);z-index:-1}
   .machine.is-stacked .grip-rail.l{left:-2px;border-right:none}
   .machine.is-stacked .grip-rail.r{right:-2px;border-left:none}
-  .machine.is-stacked .deckbar{border:none;box-shadow:none;margin:0;background:transparent;
-    padding:0}
-  .machine.is-stacked .deckbar::before,
-  .machine.is-stacked .deckbar::after{display:none}
   /* 窄屏也让按键留在握把上：机器轮廓不散 */
   .machine.is-stacked .controls{position:absolute;inset:0;pointer-events:none}
   .machine.is-stacked .cluster{pointer-events:auto}
@@ -228,11 +259,6 @@
     border-left:var(--px) solid var(--ink)}
   .machine.is-stacked .scoreboard .sc:first-child{border-left:none;padding-left:0}
   .machine.is-stacked .scoreboard .sc.is-acting{box-shadow:none;outline:2px solid var(--accent)}
-  .machine.is-stacked .deckbar{border:none;box-shadow:none;margin:0;background:transparent;
-    border-top:var(--px) solid var(--ink);padding:10px 0 0}
-
-
-
   /* 牌盘 */
   .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:.32em}
   .keypad.compact{grid-template-columns:repeat(12,1fr);gap:4px}
@@ -456,14 +482,17 @@
   .controls .key:hover:enabled,.controls .key:active:enabled{background:transparent;
     transform:none;box-shadow:none}
   .controls .key::after{content:"";position:absolute;inset:1px;border:2px solid transparent;
-    clip-path:inherit;pointer-events:none}
+    clip-path:inherit;pointer-events:none;
+    transition:inset .09s ease-out,border-color .09s ease-out,box-shadow .09s ease-out}
   .controls .key:hover::after,.controls .key:focus-visible::after{
     border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--ground)}
-  .controls .key:active::after{inset:3px 1px 0;border-color:var(--ink);box-shadow:none}
   .controls .key:focus-visible{outline:none}
   .controls .key:disabled::after{border-color:transparent}
   .controls.is-unavailable .key{pointer-events:none}
   .controls .key-center::after{inset:12%}
+  /* 键帽外观全部由模型给：方键的灰标是模型上的凹刻，HTML 里再画一个只会在机身
+     旋转时和键面错位地飘着（DOM 是轴对齐的，永远跟不上模型的透视）。 */
+  .controls .key.key-round::before{display:none}
 
   .machine-error{position:absolute;inset:12% 8%;z-index:12;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;
@@ -495,47 +524,47 @@
     .chassis{display:block}
     /* 窄屏也把画布留白收进托盘；2px 是托盘与机底接触阴影的接缝，
        不是一整条网页卡片之间的空隙。 */
-    .machine.is-stacked .chassis{margin-top:calc(2px - var(--lip, 0px))}
+    .machine.is-stacked .chassis{margin-top:2px}
     .machine.is-stacked .scoreboard{display:grid;margin-top:0;font-size:10px;
       line-height:1.25}
-    /* 窄屏把操作台压扁：两列排布 + 去掉与触控条重复的图例，机身才留得住主角位 */
-    .machine.is-stacked .deckbar{margin-top:0;padding:5px 0 0;gap:4px 8px;
+    /* 窄屏把浮层里的操作台压扁：两列排布 + 去掉与触控条重复的图例 */
+    .panel .deckbar{padding:8px 10px 10px;gap:4px 8px;
       grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-    .machine.is-stacked .deckbar .handline,
-    .machine.is-stacked .deckbar .step-cell,
-    .machine.is-stacked .deckbar .hint,
-    .machine.is-stacked .deckbar .cell-wide{grid-column:1/-1}
-    .machine.is-stacked .deckbar .legend{display:none}
-    .machine.is-stacked .handline{gap:3px;padding-bottom:4px}
-    .machine.is-stacked .handline .lb{font-size:11px}
-    .machine.is-stacked .handline i{min-width:18px;padding:0 3px;font-size:11px;line-height:1.35}
-    .machine.is-stacked .deckbar .k{margin-bottom:2px;font-size:11px}
+    .panel .deckbar .handline,
+    .panel .deckbar .step-cell,
+    .panel .deckbar .hint,
+    .panel .deckbar .cell-wide{grid-column:1/-1}
+    .panel .deckbar .legend{display:none}
+    .panel .handline{gap:3px;padding-bottom:4px}
+    .panel .handline .lb{font-size:11px}
+    .panel .handline i{min-width:18px;padding:0 3px;font-size:11px;line-height:1.35}
+    .panel .deckbar .k{margin-bottom:2px;font-size:11px}
     /* 出牌机会一行排完：标签 / ← 第 N 次 → / 回到最新 */
-    .machine.is-stacked .step-cell{display:grid;align-items:center;
+    .panel .step-cell{display:grid;align-items:center;
       grid-template-columns:auto minmax(0,1fr) auto;gap:5px;min-height:28px}
-    .machine.is-stacked .step-cell .k{margin:0}
-    .machine.is-stacked .step-cell .stepper{display:grid;grid-template-columns:26px minmax(0,1fr) 26px;
+    .panel .step-cell .k{margin:0}
+    .panel .step-cell .stepper{display:grid;grid-template-columns:26px minmax(0,1fr) 26px;
       min-width:0;gap:3px}
-    .machine.is-stacked .step-cell .stepper button{min-width:0;width:26px;padding:1px 0;
+    .panel .step-cell .stepper button{min-width:0;width:26px;padding:1px 0;
       box-shadow:none;line-height:1.2}
-    .machine.is-stacked .step-cell .now{padding:1px 3px;line-height:1.2}
-    .machine.is-stacked .step-cell .latest{grid-column:3;width:auto;margin:0;
+    .panel .step-cell .now{padding:1px 3px;line-height:1.2}
+    .panel .step-cell .latest{grid-column:3;width:auto;margin:0;
       padding:2px 5px;font-size:10px;box-shadow:none}
-    .machine.is-stacked .hint{margin:2px 0 0;font-size:11px}
-    .machine.is-stacked .picks button{font-size:11px;padding:2px 6px}
+    .panel .hint{margin:2px 0 0;font-size:11px}
+    .panel .picks button{font-size:11px;padding:2px 6px}
   }
   @media (max-width:620px){
     /* 机顶条只有屏幕上方一条窄带。两行 8+7 格让 15 个点数都有足够格宽，
-       且不靠缩到 5px 假装清楚；概率模式只保留色条，精确数值仍在数据面板。 */
+       且不靠缩到 5px 假装清楚；概率模式仍显示完整 Top-3。 */
     .counter .cells{grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(2,1fr)}
-    .counter .cc{flex-direction:row;gap:1px;padding:0 1px;line-height:1}
+    .counter .cc{padding:1px 0 6px;line-height:1}
     .counter .cc b.long{font-size:.88em;letter-spacing:0}
-    .counter .cc i{height:auto;margin-top:0;gap:1px}
+    .counter .cc i{bottom:1px;height:3px;gap:1px}
     .counter .cc i s{width:3px;height:3px}
-    .counter .cc .bar{width:9px;height:4px;margin:0}
-    .counter .cc em{display:none}
-    /* 420px 机顶屏不再塞切换键：同一功能已在下方触控条，让出整格宽度给点数。 */
-    .counter .mode-btn{display:none}
+    .counter .cc i.long{gap:2px}
+    .counter .cc i.long s{width:3px;height:3px;min-width:0;min-height:0}
+    .counter[data-mode="prob"] .cells{padding:1px 2px;gap:1px}
+    /* 420px 仍保留机身右侧的实体返回键：它是记牌 ↔ 概率的唯一切换入口。 */
     .machine.is-stacked .chassis{gap:4px;padding:5px 7px 6px}
     .machine.is-stacked .grip-rail{top:-13px;width:11px}
     .machine.is-stacked .scoreboard{gap:0;padding:1px 0 3px}
@@ -546,32 +575,32 @@
     .machine.is-stacked .scoreboard .sc .badge{padding:0 2px;font-size:9px}
     .machine.is-stacked .scoreboard .sc .played{font-size:9px;line-height:1.2}
     /* 3D 手牌已经排成 9+8；这份平面副本只在 620px 以上补读，窄屏不再重复占高。 */
-    .machine.is-stacked .handline{display:none}
-    .machine.is-stacked .deckbar{padding-top:3px;gap:3px 6px}
-    .machine.is-stacked .deckbar .k{font-size:9px;line-height:1.2;white-space:nowrap;
+    .panel .handline{display:none}
+    .panel .deckbar{padding:6px 8px 8px;gap:3px 6px;grid-template-columns:1fr}
+    .panel .deckbar .k{font-size:9px;line-height:1.2;white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis}
-    .machine.is-stacked .step-cell{min-height:32px;gap:3px}
-    .machine.is-stacked .step-cell .k .sub{display:none}
-    .machine.is-stacked .step-cell .stepper{grid-template-columns:24px minmax(0,1fr) 24px;gap:2px}
-    .machine.is-stacked .step-cell .stepper button{width:24px;min-height:24px;font-size:10px}
-    .machine.is-stacked .step-cell .now{font-size:10px;padding:2px;line-height:1.25}
-    .machine.is-stacked .step-cell .latest{font-size:9px;padding:1px 4px}
+    .panel .step-cell{min-height:32px;gap:3px}
+    .panel .step-cell .k .sub{display:none}
+    .panel .step-cell .stepper{grid-template-columns:24px minmax(0,1fr) 24px;gap:2px}
+    .panel .step-cell .stepper button{width:24px;min-height:24px;font-size:10px}
+    .panel .step-cell .now{font-size:10px;padding:2px;line-height:1.25}
+    .panel .step-cell .latest{font-size:9px;padding:1px 4px}
     /* 对手回合：候选区为空，收起；出牌人与从点数条选中的牌并成一行。 */
-    .machine.is-stacked .deckbar.is-opp-turn .play-picks-cell{display:none}
-    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell{
+    .panel .deckbar.is-opp-turn .play-picks-cell{display:none}
+    .panel .deckbar.is-opp-turn .play-selected-cell{
       grid-column:1/-1;display:flex;align-items:center;gap:6px;min-height:24px}
-    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .k{margin:0;flex:0 0 auto}
-    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .chips{flex:1;min-width:0;
+    .panel .deckbar.is-opp-turn .play-selected-cell .k{margin:0;flex:0 0 auto}
+    .panel .deckbar.is-opp-turn .play-selected-cell .chips{flex:1;min-width:0;
       flex-wrap:nowrap;overflow:hidden}
-    .machine.is-stacked .deckbar.is-opp-turn .play-selected-cell .chips .empty{display:none}
-    .machine.is-stacked .deckbar.is-opp-turn #opp-cell .k{display:none}
-    .machine.is-stacked .deckbar.is-opp-turn .keypad.compact{grid-template-columns:repeat(15,minmax(0,1fr));gap:2px}
-    .machine.is-stacked .deckbar.is-opp-turn .keypad.compact button{min-height:25px;padding:3px 0;font-size:9px}
-    .machine.is-stacked .chips{gap:3px}
-    .machine.is-stacked #play-chips i.c{min-width:18px;height:21px;padding:0 1px;font-size:10px}
-    .machine.is-stacked .picks{gap:3px}
-    .machine.is-stacked .picks button{font-size:9px;padding:1px 4px;gap:3px;box-shadow:none}
-    .machine.is-stacked .hint{margin:0;font-size:9px;line-height:1.35;white-space:nowrap;
+    .panel .deckbar.is-opp-turn .play-selected-cell .chips .empty{display:none}
+    .panel .deckbar.is-opp-turn #opp-cell .k{display:none}
+    .panel .deckbar.is-opp-turn .keypad.compact{grid-template-columns:repeat(15,minmax(0,1fr));gap:2px}
+    .panel .deckbar.is-opp-turn .keypad.compact button{min-height:25px;padding:3px 0;font-size:9px}
+    .panel .chips{gap:3px}
+    .panel #play-chips i.c{min-width:18px;height:21px;padding:0 1px;font-size:10px}
+    .panel .picks{gap:3px}
+    .panel .picks button{font-size:9px;padding:1px 4px;gap:3px;box-shadow:none}
+    .panel .hint{margin:0;font-size:9px;line-height:1.35;white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis}
     .machine .crt{padding:10px}
     .machine .crt-grid{gap:18px}
@@ -579,9 +608,284 @@
     .touchbar button{font-size:9px;padding-inline:1px}
   }
 
+
+  /* ================================================================
+     极简舞台模式（minimal stage）：
+     砍掉 header / banner / 操作台常驻，
+     信息全部按需浮出；模型是首屏唯一主角。
+     ================================================================ */
+  body.is-minimal{
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 42%, color-mix(in srgb,var(--ground) 96%,#fff 4%) 0%, var(--ground) 45%, color-mix(in srgb,var(--ground) 86%,#000 14%) 100%) fixed}
+  body.is-minimal .page{max-width:none;padding:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    position:relative}
+  body.is-minimal .page::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:1;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.03 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity:.5;mix-blend-mode:multiply}
+  body.is-minimal header{
+    position:fixed;top:-200px;left:0;right:0;opacity:0;pointer-events:none;z-index:-1;
+    margin:0;padding:0;border:none;height:0;overflow:visible}
+  body.is-minimal header .who,
+  body.is-minimal header .tools,
+  body.is-minimal header h1{opacity:0}
+  /* 反馈横幅在极简态是底部浮层提示：默认收着，setBanner 时亮起再自己退场
+     —— 推荐键、报错都得看得见，不能悄悄写在页面上方看不见的地方 */
+  /* 锚在顶部：操作台浮层和 dock 都在下方，顶部这条谁都不挡 */
+  body.is-minimal .banner{
+    position:fixed;top:14px;left:50%;z-index:98;margin:0;pointer-events:none;
+    width:max-content;max-width:min(92vw,560px);
+    border-radius:10px;
+    box-shadow:0 4px 0 color-mix(in srgb,var(--ink) 22%,transparent),
+               0 14px 28px color-mix(in srgb,var(--ink) 16%,transparent);
+    transform:translateX(-50%) translateY(-12px);opacity:0;
+    transition:transform .3s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),opacity .22s ease}
+  body.is-minimal .banner.is-show{transform:translateX(-50%) translateY(0);opacity:1}
+  body.is-minimal .banner[data-kind="error"]{background:color-mix(in srgb,var(--accent) 9%,var(--ground))}
+  /* 浮层提示在最上面时，别和一次性的拖拽提示叠在一起 */
+  body.is-minimal:has(.banner.is-show) .drag-hint{opacity:0}
+  /* verify 会点 #data-toggle，保留在视口内但透明不可见 */
+  body.is-minimal #data-toggle{
+    position:fixed;top:12px;right:12px;opacity:0;pointer-events:auto;z-index:50;
+    width:40px;height:40px;font-size:0;padding:0;border:none;background:transparent;box-shadow:none;z-index:9999}
+  body.is-minimal #data-toggle:hover{background:transparent}
+  /* 铺满可用宽度：宽度同时受视口高度约束（--stage-reserve 留给 dock 与顶部提示），
+     机身再大也不会把操作台挤出视口。max-height 用同一个公式，避免 aspect-ratio 被压变形。 */
+  body.is-minimal .machine{
+    width:min(96vw,1600px,calc((100vh - var(--stage-reserve,210px)) * 2.03));
+    transition:transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
+  body.is-minimal .stage{aspect-ratio:2.03;max-height:calc(100vh - var(--stage-reserve,210px))}
+  /* 画布铺满视口：机身被拖出设计盒时不再被画布边缘切一刀，只剩视口本身是边界。
+     画布中心与 .stage 中心重合，所以投影出来的热区仍是 .stage 局部坐标。 */
+  body.is-minimal #scene{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:100vw;height:100vh}
+  /* 操作台已脱离机身，成为 dock 上沿的浮层；极简态机身只留 3D 主屏 +
+     座位覆盖层（窄屏再留一条计分板）。展开时整机轻轻上浮给浮层让位 ——
+     机身位置只由自身几何决定，不会被浮层内容挤压。 */
+  body.is-minimal .chassis{display:none}
+  body.is-minimal .machine.is-stacked .chassis{display:flex}
+  body.is-minimal .machine.is-stacked .seat-label{display:flex}
+  /* 展开：整机退半步（纯平移，不改缩放，保证 canvas 投影 1:1 可测），
+     浮层浮在机身下沿之上。数据面板打开时机身本身就很高，不再额外抬升，
+     免得实体按键被推出屏幕。 */
+  body.is-minimal:has(#panel.is-open) .machine:not(.panel-open){
+    transform:translateY(var(--stage-shift,-30%))}
+
+  /* 极简态座位圆点可悬停/点击（overlay 默认穿透） */
+  body.is-minimal .overlay .seat-label{pointer-events:auto;cursor:pointer}
+  /* 圆点已经画进主屏纹理（ADR-0008）：DOM 那层默认隐身——它永远压在画布最上层，
+     机身一转就会跑到屏外面去。悬停仍浮出完整卡片，那是「要读的字」不是屏内标记。 */
+  body.is-minimal .screen-hud.is-3d .seat-label{opacity:0}
+  body.is-minimal .screen-hud.is-3d .seat-label:hover{opacity:1}
+  /* 默认：只剩张数圆点 */
+  body.is-minimal .seat-label{
+    padding:0;border:none;background:transparent;box-shadow:none;
+    max-width:none;font-size:0;line-height:0;
+    transition:transform .25s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
+  body.is-minimal .seat-label .who{display:inline}
+  body.is-minimal .seat-label .who > b,
+  body.is-minimal .seat-label .badge,
+  body.is-minimal .seat-label .turn-flag,
+  body.is-minimal .seat-label .played,
+  body.is-minimal .seat-label .cnt .u{display:none}
+  body.is-minimal .seat-label .cnt{
+    margin:0;font-size:11px;font-weight:600;line-height:1;
+    color:var(--ground);background:var(--ink);
+    border:2px solid var(--ground);border-radius:50%;
+    width:28px;height:28px;display:grid;place-items:center;
+    box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),
+               0 0 0 1px color-mix(in srgb,var(--ink) 30%,transparent);
+    transition:transform .22s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
+  body.is-minimal .seat-label .cnt .n{display:block}
+  body.is-minimal .seat-label:hover .cnt{transform:scale(1.12)}
+  body.is-minimal .seat-label.is-me .cnt{background:var(--accent)}
+  body.is-minimal .seat-label.is-acting .cnt{
+    animation:cnt-pulse 1.3s ease-in-out infinite}
+  @keyframes cnt-pulse{0%,100%{box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),0 0 0 0 color-mix(in srgb,var(--accent) 55%,transparent)}
+                       50%{box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 55%,transparent),0 0 0 6px color-mix(in srgb,var(--accent) 0%,transparent)}}
+  body.is-minimal .seat-label[data-seat="up"]{left:5%;top:7%}
+  body.is-minimal .seat-label[data-seat="down"]{right:5%;top:7%;align-items:flex-start}
+  body.is-minimal .seat-label[data-seat="me"]{left:50%;bottom:2%;transform:translateX(-50%)}
+  /* 悬停：浮出完整标签 */
+  body.is-minimal .seat-label:hover{
+    padding:3px 8px;background:var(--ground);border:var(--px) solid var(--ink);
+    border-radius:2px;font-size:12px;line-height:1.45;max-width:62%;
+    box-shadow:3px 3px 0 color-mix(in srgb,var(--ink) 85%,transparent);z-index:30}
+  body.is-minimal .seat-label[data-seat="me"]:hover{transform:translateX(-50%) translateY(-2px)}
+  body.is-minimal .seat-label:hover .who{display:inline-flex;align-items:center;gap:5px}
+  body.is-minimal .seat-label:hover .who > b,
+  body.is-minimal .seat-label:hover .badge,
+  body.is-minimal .seat-label:hover .turn-flag,
+  body.is-minimal .seat-label:hover .cnt .u{display:inline}
+  body.is-minimal .seat-label:hover .played{
+    display:block;width:100%;font-size:11px;color:var(--muted);line-height:1.4}
+  body.is-minimal .seat-label:hover .cnt{
+    width:auto;height:auto;border-radius:2px;background:transparent;color:var(--muted);
+    border:none;box-shadow:none;font-size:11px;font-weight:400;animation:none;
+    margin:0;display:inline-flex;transform:none}
+  body.is-minimal .seat-label.is-me:hover .cnt{color:var(--muted)}
+  /* 点击 ripple（label 本身 absolute，即定位上下文） */
+  body.is-minimal .seat-label .ripple{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(0);
+    width:34px;height:34px;border-radius:50%;
+    border:2px solid var(--accent);opacity:0;pointer-events:none;
+    animation:ripple-pop .6s ease-out forwards}
+  @keyframes ripple-pop{
+    0%{transform:translate(-50%,-50%) scale(.8);opacity:.8}
+    100%{transform:translate(-50%,-50%) scale(2.2);opacity:0}}
+
+  /* 机顶记牌条：极简态下视觉降级，别抢主角 */
+  body.is-minimal .counter{
+    opacity:.92;transition:opacity .28s ease}
+  body.is-minimal .counter:hover{opacity:1}
+  /* 副屏已是 3D 贴图；DOM 只留几何/断言，别在模型上方再画一遍 */
+  body.is-minimal .counter.is-3d{opacity:0}
+
+  /* ---------- 操作台浮层：从 dock 上沿拉起 ---------- */
+  .panel{
+    position:fixed;left:50%;z-index:99;
+    bottom:calc(var(--dock-bottom) + var(--dock-h) + 10px);
+    width:min(92vw,700px);max-height:calc(100vh - 150px);overflow:auto;
+    border:var(--px) solid var(--ink);border-radius:12px;
+    background:linear-gradient(180deg,var(--shell-hi),var(--shell));
+    box-shadow:inset 0 2px 0 color-mix(in srgb,#fff 24%,transparent),
+               inset 0 -4px 0 var(--shell-lo),
+               0 8px 0 var(--ink),0 24px 48px color-mix(in srgb,var(--ink) 26%,transparent);
+    overscroll-behavior:contain;scrollbar-width:thin;
+    transform:translateX(-50%) translateY(18px) scale(.98);transform-origin:50% 100%;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:transform .45s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),
+               opacity .22s ease,visibility 0s linear .45s;
+    -webkit-overflow-scrolling:touch}
+  .panel.is-open{
+    transform:translateX(-50%) translateY(0) scale(1);
+    opacity:1;visibility:visible;pointer-events:auto;
+    transition:transform .45s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),
+               opacity .18s ease,visibility 0s}
+  .panel .deckbar{border-radius:10px}
+
+  /* 高倍缩放/很矮的视口：不再抬升机身，压低浮层并保留机身按键可点 */
+  @media (max-height:520px){
+    body.is-minimal:has(#panel.is-open) .machine:not(.panel-open){transform:none}
+    body.is-minimal #panel.is-open{max-height:44vh}
+    body.is-minimal .drag-hint{display:none}
+  }
+
+  /* ---------- 底部 Dock（状态行 + 图标轨） ---------- */
+  .dock{
+    position:fixed;left:50%;bottom:var(--dock-bottom);transform:translateX(-50%) translateY(30px) scale(.95);
+    display:flex;align-items:center;gap:4px;padding:6px;max-width:min(94vw,780px);
+    background:color-mix(in srgb,var(--ground) 88%,var(--ink));
+    border:var(--px) solid var(--ink);border-radius:14px;
+    box-shadow:0 6px 0 var(--ink),0 14px 30px color-mix(in srgb,var(--ink) 22%,transparent);
+    z-index:100;backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);
+    opacity:0;
+    transition:transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),
+                opacity .35s ease,bottom .3s ease;
+    animation:dock-enter .6s var(--spring, cubic-bezier(0.34,1.56,0.64,1)) .8s forwards}
+  @keyframes dock-enter{
+    to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+  /* 状态行：现在是 dock 的常驻第一格，不再跟机身绑定 */
+  .status-strip{display:flex;align-items:center;gap:9px;min-width:0;
+    padding:0 12px 0 8px;font-size:11px;color:var(--ink);user-select:none}
+  .status-strip .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;
+    background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .status-strip .who-txt{font-weight:600;white-space:nowrap}
+  .status-strip .muted{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dock-row{display:flex;align-items:center;gap:4px;padding-left:8px;
+    border-left:1px solid color-mix(in srgb,var(--ink) 22%,transparent)}
+  .dock-btn{
+    position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    width:42px;height:42px;padding:0;cursor:pointer;
+    background:transparent;color:var(--ink);
+    border:none;border-radius:10px;
+    font:inherit;font-size:10px;line-height:1;
+    opacity:0;transform:translateY(10px) scale(.9);
+    transition:transform .28s var(--spring, cubic-bezier(0.34,1.56,0.64,1)),
+                background .2s ease,color .2s ease,opacity .25s ease;
+    animation:btn-pop .45s var(--spring, cubic-bezier(0.34,1.56,0.64,1)) forwards}
+  @keyframes btn-pop{to{opacity:1;transform:translateY(0) scale(1)}}
+  .dock-btn:nth-child(1){animation-delay:.95s}
+  .dock-btn:nth-child(2){animation-delay:1.02s}
+  .dock-btn:nth-child(3){animation-delay:1.09s}
+  .dock-btn:nth-child(4){animation-delay:1.16s}
+  .dock-btn:nth-child(5){animation-delay:1.23s}
+  .dock-btn:nth-child(6){animation-delay:1.30s}
+  .dock-sep{animation:sep-fade .4s ease 1.1s forwards;opacity:0}
+  @keyframes sep-fade{to{opacity:1}}
+  .dock-btn svg{width:18px;height:18px;stroke-width:1.6;stroke:currentColor;fill:none;
+                stroke-linecap:round;stroke-linejoin:round}
+  .dock-btn:hover{background:var(--ink);color:var(--ground);transform:translateY(-4px) scale(1.08)}
+  .dock-btn:active{transform:translateY(-1px) scale(1.02)}
+  .dock-btn.is-active{background:var(--accent);color:var(--ground)}
+  .dock-btn .lbl{
+    position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%) translateY(4px);
+    padding:3px 8px;font-size:11px;line-height:1.3;white-space:nowrap;
+    background:var(--ink);color:var(--ground);border-radius:6px;
+    opacity:0;pointer-events:none;
+    transition:opacity .2s ease,transform .25s var(--spring, cubic-bezier(0.34,1.56,0.64,1))}
+  .dock-btn .lbl::after{
+    content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+    border:4px solid transparent;border-top-color:var(--ink)}
+  .dock-btn:hover .lbl{opacity:1;transform:translateX(-50%) translateY(0)}
+  .dock-sep{width:1px;height:24px;background:color-mix(in srgb,var(--ink) 25%,transparent);margin:0 2px}
+
+  /* 拖拽提示：轻量胶囊 */
+  .drag-hint{
+    position:fixed;top:16px;left:50%;transform:translateX(-50%);
+    display:flex;align-items:center;gap:6px;
+    padding:4px 12px 4px 8px;font-size:11px;color:var(--muted);
+    background:color-mix(in srgb,var(--ground) 90%,var(--ink));
+    border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
+    border-radius:20px;z-index:90;opacity:.7;
+    pointer-events:none;
+    transition:opacity .8s ease,transform .5s var(--spring, cubic-bezier(0.34,1.56,0.64,1));
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .drag-hint svg{width:14px;height:14px;stroke:currentColor;fill:none;
+                 stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;
+                 flex-shrink:0;opacity:.7}
+  .drag-hint.is-hidden{opacity:0;transform:translateX(-50%) translateY(-8px)}
+  body.is-dragging{cursor:grabbing}
+  body.is-dragging #scene{cursor:grabbing}
+  body.is-panning{cursor:grabbing}
+  body.is-panning #scene{cursor:grabbing}
+  body.is-dragging .dock{
+    transform:translateX(-50%) translateY(20px) scale(.92);
+    opacity:.3;pointer-events:none}
+  body.is-dragging .drag-hint{opacity:0 !important}
+  body.is-dragging .seat-label .cnt{transition:transform .15s ease}
+
+  @media (max-width:620px){
+    :root{--dock-bottom:12px;--dock-h:91px}
+    /* 窄屏一行塞不下「现在该谁」+「全局第 N/M 手」，抬头折成两行：
+       主行报谁在动，副行报进度；图标轨让到第二行并居中，不再挤同一行。 */
+    .dock{gap:2px;padding:4px;border-radius:12px;flex-wrap:wrap;row-gap:3px;
+      width:min(94vw,780px)}
+    .status-strip{flex:1 0 100%;flex-wrap:wrap;align-items:center;
+      padding:1px 6px 0;gap:1px 6px}
+    .status-strip .muted{display:block;flex:1 0 100%;font-size:10px;line-height:1.25}
+    .dock-row{flex:1 0 100%;justify-content:center;padding:5px 0 0;border-left:none;
+      border-top:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
+    .dock-btn{width:36px;height:36px}
+    .dock-btn svg{width:16px;height:16px}
+    .dock-btn .lbl{display:none}
+    body.is-minimal .machine{width:100%}
+  }
+
+  @media (max-width:380px){
+    /* 三格并排时「我」格最窄，320px 下连「▶ 该你出」都放不下；
+       该格已有 is-acting 的红色描边表达同一件事，这里让文字退场换整格不裁切。 */
+    .machine.is-stacked .scoreboard .sc .turn-flag{display:none}
+  }
+
 </style>
 </head>
 <body>
+<!-- 方波田：整页背景，铺满视口（像素格、光池、浮尘都由它垫底） -->
+<canvas class="bgpix" id="bg-pixels" aria-hidden="true"></canvas>
 <div class="page">
   <header>
     <h1>斗地主决策助手</h1>
@@ -602,9 +906,14 @@
   <section class="machine" id="board">
     <div class="machine-unit" id="machine-unit">
       <div class="stage" id="stage">
+        <div class="desk" id="desk" aria-hidden="true">
+          <span class="glow"></span>
+          <span class="dust a"></span><span class="dust b"></span><span class="dust c"></span>
+        </div>
         <canvas id="scene"></canvas>
         <div class="overlay" id="overlay">
-          <!-- 机顶窄屏：点数 + 红点（剩几张）；右边那个按钮切换「记牌 / 出牌概率」 -->
+          <!-- 机顶窄屏：记牌或我方 Top-3 模型动作概率；模式只由机身右侧 BackKey 切换。
+               内容与上面这块 DOM 同源，但真正显示的是副屏上的 3D 面；这里就绪后隐身。 -->
           <div class="counter" id="counter">
             <div class="cells" id="counter-cells"></div>
           </div>
@@ -623,8 +932,6 @@
         <!-- 透明热区：位置/尺寸从 GLB Buttons 连通块量出；外观完全由模型给 -->
         <div class="controls" id="controls">
           <span class="tip" id="tip"></span>
-          <button class="key" id="bar-mode" type="button"
-                  aria-label="切换机顶屏" data-tip="BackKey · 切换记牌 / 出牌概率"></button>
           <div class="cluster cluster-l" id="keys-l">
             <button class="key k-up" id="dpad-up" type="button" aria-label="方向上键" data-tip="↑"></button>
             <button class="key k-left" id="dpad-left" type="button" aria-label="上一次出牌机会" data-tip="← · 上一次出牌机会"></button>
@@ -638,6 +945,12 @@
             <button class="key k-y" id="undo" type="button" aria-label="撤销" data-tip="↺ · 撤销：撤掉刚记下的那一手"></button>
             <button class="key go k-a" id="play-go" type="button" aria-label="出牌" data-tip="▶ · 出牌：把桌上选中的牌记下来"></button>
             <button class="key k-b" id="play-pass" type="button" aria-label="不要" data-tip="✕ · 不要：这一手不出"></button>
+          </div>
+          <!-- 副屏右侧的实体返回键：切换机顶屏「记牌 ↔ 出牌概率」，位置由 GLB BackKey 量出 -->
+          <div class="cluster cluster-back" id="keys-back">
+            <button class="key key-back" id="bar-mode" type="button"
+                    aria-label="切换机顶屏：记牌 ↔ 出牌概率"
+                    data-tip="机顶屏：记牌 ↔ 出牌概率"></button>
           </div>
         </div>
 
@@ -687,48 +1000,9 @@
         <span class="grip-rail l" aria-hidden="true"></span>
         <span class="grip-rail r" aria-hidden="true"></span>
         <div class="scoreboard" id="scoreboard"></div>
-        <div class="deckbar" id="deckbar">
-          <p class="handline" id="handline"></p>
-          <!-- 最左：出牌机会切换（本质是回放） -->
-          <div class="cell step-cell" id="step-cell">
-            <div class="k">出牌机会 <span class="sub">· 回放</span></div>
-            <div class="stepper">
-              <button type="button" id="step-prev" aria-label="上一次出牌机会" title="上一次出牌机会">←</button>
-              <span class="now" id="step-now">—</span>
-              <button type="button" id="step-next" aria-label="下一次出牌机会" title="下一次出牌机会">→</button>
-            </div>
-            <button type="button" class="latest" id="play-latest" hidden>回到最新 →</button>
-          </div>
-          <div class="cell play-selected-cell">
-            <div class="k"><b id="play-who"></b> <span id="play-count"></span></div>
-            <div class="chips" id="play-chips"></div>
-          </div>
-          <div class="cell play-picks-cell">
-            <div class="k">模型的候选（点一下直接记下这一手）</div>
-            <div class="picks" id="play-picks"></div>
-          </div>
-          <div class="cell cell-wide" id="opp-cell" hidden>
-            <div class="k">录对手出的牌：从他还没现身的点数里点</div>
-            <div class="keypad compact" id="play-keys"></div>
-          </div>
-          <p class="hint" id="play-hint"></p>
-          <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>BackKey</b> 切换机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
-        </div>
+
       </div>
 
-      <!-- 窄屏最小 44px 操作条：同功能，DOM id 独立，点击转发给主热区 -->
-      <div class="touchbar" id="touchbar" aria-label="掌机触控操作条">
-
-
-        <button type="button" data-control="dpad-left">← 机会</button>
-        <button type="button" data-control="dpad-right">机会 →</button>
-        <button type="button" data-control="play-clear">清空</button>
-        <button type="button" data-control="new-round">新一轮</button>
-        <button type="button" data-control="play-hint-btn">★ 推荐</button>
-        <button type="button" data-control="undo">↺ 撤销</button>
-        <button type="button" data-control="play-go">▶ 出牌</button>
-        <button type="button" data-control="play-pass">✕ 不要</button>
-      </div>
     </div>
 
     <!-- 数据面板：宽屏在机侧，窄屏在机下；任何视口都不覆盖屏幕 -->
@@ -766,5 +1040,84 @@
      靠 importmap 指回同一份 vendor，避免 GLTFLoader 取到第二份 three -->
 <script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
 <script type="module" src="app/main.js"></script>
+
+  <!-- 操作台浮层：脱离机身，从 dock 上沿拉起（窄屏再加一条触控回退条） -->
+  <div class="panel" id="panel">
+<div class="deckbar" id="deckbar">
+          <p class="handline" id="handline"></p>
+          <!-- 最左：出牌机会切换（本质是回放） -->
+          <div class="cell step-cell" id="step-cell">
+            <div class="k">出牌机会 <span class="sub">· 回放</span></div>
+            <div class="stepper">
+              <button type="button" id="step-prev" aria-label="上一次出牌机会" title="上一次出牌机会">←</button>
+              <span class="now" id="step-now">—</span>
+              <button type="button" id="step-next" aria-label="下一次出牌机会" title="下一次出牌机会">→</button>
+            </div>
+            <button type="button" class="latest" id="play-latest" hidden>回到最新 →</button>
+          </div>
+          <div class="cell play-selected-cell">
+            <div class="k"><b id="play-who"></b> <span id="play-count"></span></div>
+            <div class="chips" id="play-chips"></div>
+          </div>
+          <div class="cell play-picks-cell">
+            <div class="k">模型的候选（点一下直接记下这一手）</div>
+            <div class="picks" id="play-picks"></div>
+          </div>
+          <div class="cell cell-wide" id="opp-cell" hidden>
+            <div class="k">录对手出的牌：从他还没现身的点数里点</div>
+            <div class="keypad compact" id="play-keys"></div>
+          </div>
+          <p class="hint" id="play-hint"></p>
+          <p class="legend" id="key-legend"><span class="lg"><b>▶</b> 出牌</span><span class="lg"><b>✕</b> 不要</span><span class="lg"><b>★</b> 推荐</span><span class="lg"><b>↺</b> 撤销</span><span class="lg"><b>■</b> 开新一轮</span><span class="lg"><b>←→</b> 换出牌机会</span><span class="lg"><b>BackKey</b> 切换机顶屏</span><span class="lg legend-extra"><b>中心</b> 清掉已选</span></p>
+        </div>
+      <!-- 窄屏最小 44px 操作条：同功能，DOM id 独立，点击转发给主热区 -->
+      <div class="touchbar" id="touchbar" aria-label="掌机触控操作条">
+        <button type="button" data-control="dpad-left">← 机会</button>
+        <button type="button" data-control="dpad-right">机会 →</button>
+        <button type="button" data-control="play-clear">清空</button>
+        <button type="button" data-control="new-round">新一轮</button>
+        <button type="button" data-control="play-hint-btn">★ 推荐</button>
+        <button type="button" data-control="undo">↺ 撤销</button>
+        <button type="button" data-control="play-go">▶ 出牌</button>
+        <button type="button" data-control="play-pass">✕ 不要</button>
+      </div>
+  </div>
+
+  <!-- 底部图标轨（极简模式） -->
+  <nav class="dock" id="dock" aria-label="操作">
+    <div class="status-strip" id="status-strip">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="who-txt" id="strip-who">—</span>
+      <span class="muted" id="strip-sub">正在加载…</span>
+    </div>
+    <div class="dock-row">
+    <button class="dock-btn" id="dock-steps" data-action="steps" title="出牌机会">
+      <svg viewBox="0 0 24 24"><path d="M9 6l-5 6 5 6M15 6l5 6-5 6"/></svg>
+      <span class="lbl">出牌机会</span>
+    </button>
+    <span class="dock-sep"></span>
+    <button class="dock-btn" id="dock-data" data-action="data" title="数据面板">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 15l3-4 3 2 4-5"/><circle cx="17" cy="8" r="1.2"/></svg>
+      <span class="lbl">数据面板</span>
+    </button>
+    <label class="dock-btn" id="dock-open" title="打开记录">
+      <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14l3-3 3 3"/></svg>
+      <span class="lbl">打开记录</span>
+      <input type="file" id="dock-file" accept="application/json,.json" style="display:none">
+    </label>
+    <button class="dock-btn" id="dock-new" data-action="new" title="开新局">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      <span class="lbl">开新局</span>
+    </button>
+    <button class="dock-btn" id="dock-export" data-action="export" title="导出">
+      <svg viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <span class="lbl">导出</span>
+    </button>
+      </div>
+  </nav>
+
+  <!-- 拖拽提示 -->
+  <div class="drag-hint" id="drag-hint"><svg viewBox="0 0 24 24"><path d="M12 2v6M12 22v-6M2 12h6M22 12h-6"/><circle cx="12" cy="12" r="3"/></svg>按住机身边框拖动可旋转 · 拖空白背景可平移 · 悬停座位看信息</div>
+
 </body>
 </html>

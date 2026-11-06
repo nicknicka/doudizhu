@@ -81,6 +81,7 @@ PIXEL_STAIR_SIZE = 4.0 * DESIGN_PX
 
 # ---- 厚度方向派生量（scene.js 用 bevel 参数隐式表达） ----
 SB_BEV = 1.8                 # 侧边带前后大倒角
+SB_INNER_INSET = 0.15        # v7：侧边带内缘相对面板轮廓内缩，避免与 Shell 侧墙共面打架
 # v4：参考图的侧面是米色厚边 + 前后各一道暗缝，不是整面黑 ——
 # 所以暗色包边只在前后边缘各留一条细缝，而不是整圈深色侧墙。
 PIPE_W = 1.6                 # 前后暗缝沿厚度方向的宽度
@@ -154,6 +155,53 @@ WELL_X0, WELL_X1 = 62.0, 92.0          # 左：x -92..-62；右：62..92
 WELL_Z0, WELL_Z1 = -25.0, 26.0
 
 # --------------------------------------------------------------------------
+# 背面（B 面）：参照用户背板参考图做的改良 —— 肩带横缝 / 两道竖缝 / 电池盖 + 卡扣 /
+# 铭牌 / 扬声器孔阵 / 8 颗螺丝。背面平面在 BACK_Y = +9.5，下面尺寸都从它起算。
+# 参考图量出来的比例：肩带横缝在顶边下方 10.6mm；两道竖缝把背面分成 左板 / 中板 / 右板。
+# --------------------------------------------------------------------------
+BK_SEAM_Z = 27.8                       # 肩带横缝：照参考图量出来
+# 肩带：横缝以上那条微微抬起的浅色带（参考图里它比中板亮一档）
+BK_SHOULDER_Z0 = 27.8                  # 肩带下沿 = 横缝
+BK_SHOULDER_RAISE = 0.20
+BK_SEAM_X = 58.1                       # 两道竖缝，和正面中段竖缝同一条 X
+BK_SEAM_W, BK_SEAM_D = 1.0, 0.5        # 缝宽 / 缝深（跟正面分隔缝同一档）
+BK_SEAM_HX, BK_SEAM_HZ = 92.0, 38.6    # 横缝半长 / 竖缝半高（竖缝通到上下边）
+BK_SEAM_LINE_W = 0.62                  # 缝口只补一道近壳色暗线，主要靠深度与 AO
+BK_PLATE_W, BK_PLATE_H = 100.5, 43.8   # 电池盖
+BK_PLATE_CZ = -7.9
+BK_PLATE_CHAMFER = 4.0                 # 四角 45° 折角
+BK_PLATE_RAISE = 0.70                  # 真实凸台高度
+BK_PLATE_BEVEL = 0.40                  # 凸台顶部收边，形成可见的浅台阶
+BK_PLATE_STEP_X = 11.3                 # 内圈右下角向内收 11.3mm（参考图那个台阶）
+BK_PLATE_STEP_Z = -6.9                 # 台阶起始高度
+
+BK_TAB_W, BK_TAB_H = 5.2, 18.4
+BK_TAB_CZ = -15.2                      # 窄长卡扣，整块落在盖板台阶以下
+
+BK_PLATE_GROOVE_W = 0.32               # 单圈浅刻线净宽
+BK_PLATE_GROOVE_INSET = 1.55            # 刻线离盖板外缘的净距
+BK_PLATE_GROOVE_DEPTH = 0.24
+
+BK_BADGE_W, BK_BADGE_H = 27.0, 7.5     # 铭牌：只保留干净单圈框
+BK_BADGE_CZ = 21.8                     # 与肩带横缝留出约 2mm 净空
+BK_BADGE_CHAMFER = 1.6
+BK_BADGE_LINE_W = 0.32                 # 线框宽，不做凸起牌子或字标
+
+BK_SPK_COLS, BK_SPK_ROWS = 9, 10       # 背面扬声器孔阵（参考图量出来 9 列 × 10 行）
+BK_SPK_PITCH_X, BK_SPK_PITCH_Z = 2.08, 1.76
+BK_SPK_R = 0.53
+BK_SPK_DEPTH = 1.2
+BK_SPK_CX, BK_SPK_CZ = 78.2, -3.7      # 从背后看落在图像左侧（= 机身 +X 板）；和竖缝留 13mm
+
+BK_SCREW_R, BK_SCREW_INNER_R = 2.3, 1.62
+BK_SCREW_DOT_R = 0.72
+# 照参考图数出来的 7 颗：肩带 2 + 左板 3 + 右板 2。
+BK_SCREW_POS = ((-47.8, 35.9), (47.8, 35.9),      # 肩带一对
+                (-64.8, 20.4), (63.9, 20.4),      # 侧板上
+                (-65.4, -26.3),                    # 左侧中下
+                (-64.8, -36.2), (63.9, -36.2))     # 两侧下
+
+# --------------------------------------------------------------------------
 # 颜色（web/tokens.json）
 # --------------------------------------------------------------------------
 C_GROUND = "#f2ecdd"
@@ -165,6 +213,7 @@ C_BEZEL = "#17161a"
 C_INNER = "#2a2036"
 C_GLASS = "#0b0f18"
 C_KEY_EDGE = "#d9d5cc"   # P0：键的描边从金改成浅灰哑光（参考图键沿是浅色阶梯）
+C_KEY_MARK = "#635e52"   # 方键键面中央的灰标（web/tokens.json 的 --muted）
 
 
 def log(msg):
@@ -348,11 +397,17 @@ def twenty_outline(w, h):
     return pts
 
 
-def stairify(pts, step=PIXEL_STAIR_SIZE):
-    """把多边形里所有非水平/垂直的边换成阶梯（每阶约 step 毫米）。"""
-    out = []
-    for a, b in zip(pts, pts[1:] + pts[:1]):
+def stairify_with_t(pts, step=PIXEL_STAIR_SIZE):
+    """把多边形里所有非水平/垂直的边换成阶梯（每阶约 step 毫米）。
+
+    返回 (out, par)：`out` 是阶梯点列，`par` 与之一一对应，每项是
+    (原始边序号, 该边上的参数 0..1)。有了 `par`，就能让另一条同构轮廓
+    （点数相同、相位对齐）精确地对上这批阶梯点，loft 时四边形不会拧。
+    """
+    out, par = [], []
+    for ei, (a, b) in enumerate(zip(pts, pts[1:] + pts[:1])):
         out.append(a)
+        par.append((ei, 0.0))
         dx, dz = b[0] - a[0], b[1] - a[1]
         if abs(dx) < 1e-6 or abs(dz) < 1e-6:
             continue
@@ -360,8 +415,25 @@ def stairify(pts, step=PIXEL_STAIR_SIZE):
         for k in range(1, steps + 1):
             # 先走水平那一格，再走竖直那一格
             out.append((a[0] + dx * k / steps, a[1] + dz * (k - 1) / steps))
+            par.append((ei, (k - 1) / steps))
             if k < steps:
                 out.append((a[0] + dx * k / steps, a[1] + dz * k / steps))
+                par.append((ei, k / steps))
+    return out, par
+
+
+def stairify(pts, step=PIXEL_STAIR_SIZE):
+    """把多边形里所有非水平/垂直的边换成阶梯（每阶约 step 毫米）。"""
+    return stairify_with_t(pts, step)[0]
+
+
+def sample_params(pts, par):
+    """按 `par`（来自 stairify_with_t）在 `pts` 上取样，得到同点数的对齐轮廓。"""
+    m = len(pts)
+    out = []
+    for ei, t in par:
+        a, b = pts[ei % m], pts[(ei + 1) % m]
+        out.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
     return out
 
 
@@ -578,14 +650,22 @@ def make_mat(name, hex_col, rough, metal):
 # ==========================================================================
 def build_side_band(mats):
     """侧边带：二十边米色厚边 + 像素阶梯深色描边 + 内侧白色高光。"""
-    inner = twenty_outline(BODY_W - 2 * SHELL_INSET, BODY_H - 2 * SHELL_INSET)
-    outer_f = twenty_outline(BODY_W - 2 * SB_BEV, BODY_H - 2 * SB_BEV)
-    outer_m = twenty_outline(BODY_W, BODY_H)
+    # v7：内缘仍用面板那条像素阶梯轮廓，但整体内缩 SB_INNER_INSET。
+    # 若两条边完全重合，侧边带内壁与 Shell 侧墙共面，渲染器在四角来回闪
+    # （奶油色/米色交替），正是用户看到的"糊糊"锯齿边；内缩后面板侧墙
+    # 明确外探、形成一条干净的细暗缝。外圈仍是光顺二十边，
+    # 只把点数补齐到匹配的步数，供 loft 接线。
+    inner, par = stairify_with_t(
+        twenty_outline(SHELL_W - 2 * SB_INNER_INSET, SHELL_H - 2 * SB_INNER_INSET))
+    # 外圈用同一条 twenty_outline 的平滑边，但按内缘台阶的参数取样，
+    # 这样 loft 各层点数一致、逐点对齐，转角处不会拧出波纹。
+    outer_f = sample_params(twenty_outline(BODY_W - 2 * SB_BEV, BODY_H - 2 * SB_BEV), par)
+    outer_m = sample_params(twenty_outline(BODY_W, BODY_H), par)
     # 比深色环内缘外扩一格，确保阶梯内缘的凹口也被唇边压住；
     # 仍留在深色环外缘以内，因此正视时黑边依然是最外圈。
     lip_w = BODY_W - 2 * (OUTLINE_WIDTH - OUTLINE_OUTSET) + PIXEL_STAIR_SIZE
     lip_h = BODY_H - 2 * (OUTLINE_WIDTH - OUTLINE_OUTSET) + PIXEL_STAIR_SIZE
-    outer_lip = twenty_outline(lip_w, lip_h)
+    outer_lip = sample_params(twenty_outline(lip_w, lip_h), par)
     v, f = loft_ring_solid([
         (outer_lip, inner, SHELL_FRONT - 0.02),
         (outer_lip, inner, FRONT_Y),
@@ -594,7 +674,7 @@ def build_side_band(mats):
         (outer_f, inner, BACK_Y),
     ])
     obj = new_object("SideBand", v, f, mats=[mats["band"]])
-    add_bevel(obj, 0.5, segments=2, angle=25.0)
+    add_bevel(obj, 0.18, segments=1, angle=25.0)   # v7：内缘内缩 0.15mm，倒角收窄不磨圆
     apply_modifier(obj)
 
     # 深紫黑描边：正面/背面各一道 3–4px 的像素阶梯实线。
@@ -633,7 +713,7 @@ def build_shell(mats):
     pts = pixel_stair_outline(SHELL_W, SHELL_H)      # P3：正面板跟机身同一套台阶
     v, f = prism_solid(pts, SHELL_FRONT, BACK_Y)
     obj = new_object("Shell", v, f, mats=[mats["shell"]])
-    add_bevel(obj, 0.45, segments=2, angle=28.0)     # 台阶只有 0.6mm，倒角收窄
+    add_bevel(obj, 0.06, segments=1, angle=28.0)     # v7：内缘内缩后侧墙外探，倒角收细才够利落
     apply_modifier(obj)
 
     cutters = []
@@ -694,12 +774,35 @@ def build_shell(mats):
             sf += [tuple(i + off for i in face) for face in cf]
     cutters.append(new_object("cut_screws", sv, sf))
 
-    # ⑥ 中段分隔竖缝
+    # ⑥ 中段分隔竖缝（正面）
     for sgn in (-1, 1):
         v, f = box_solid(1.0, 74.0, 1.0, (sgn * 58.1, 0.0, -1.0))
         c = new_object("cut_seam", v, f)
         c.location = (0.0, SHELL_FRONT - 0.15, 0.0)
         cutters.append(c)
+
+    # ⑦ 背面：肩带横缝 + 两道竖缝（细缝，正视图上读成一条阴影线）
+    v, f = box_solid(2 * BK_SEAM_HX, BK_SEAM_W, BK_SEAM_D + 1.0,
+                     (0.0, BACK_Y + (1.0 - BK_SEAM_D) / 2.0, BK_SEAM_Z))
+    cutters.append(new_object("cut_back_seam_h", v, f))
+    for sgn in (-1, 1):
+        v, f = box_solid(BK_SEAM_W, 2 * BK_SEAM_HZ, BK_SEAM_D + 1.0,
+                         (sgn * BK_SEAM_X, BACK_Y + (1.0 - BK_SEAM_D) / 2.0, 0.0))
+        cutters.append(new_object("cut_back_seam_v", v, f))
+
+    # ⑧ 背面扬声器孔阵 9x10（真孔，落进左板）
+    sv, sf = [], []
+    bk_x0 = BK_SPK_CX - (BK_SPK_COLS - 1) * BK_SPK_PITCH_X / 2.0
+    bk_z0 = BK_SPK_CZ + (BK_SPK_ROWS - 1) * BK_SPK_PITCH_Z / 2.0
+    for r in range(BK_SPK_ROWS):
+        for cc in range(BK_SPK_COLS):
+            cv, cf = cylinder_solid(BK_SPK_R, BACK_Y - BK_SPK_DEPTH, BACK_Y + 0.5,
+                                    bk_x0 + cc * BK_SPK_PITCH_X,
+                                    bk_z0 - r * BK_SPK_PITCH_Z, seg=10)
+            off = len(sv)
+            sv += cv
+            sf += [tuple(i + off for i in face) for face in cf]
+    cutters.append(new_object("cut_back_speakers", sv, sf))
 
     for c in cutters:
         boolean(obj, c)
@@ -789,6 +892,208 @@ def build_band_inset(mats):
     join_into(back, [gold, black])
 
     return [sub, back]
+
+
+# ==========================================================================
+# 背面（B 面）细节
+# ==========================================================================
+def chamfer_rect(w, h, c):
+    """四角 45° 折角的矩形。"""
+    hw, hh = w / 2.0, h / 2.0
+    return [(-hw + c, hh), (hw - c, hh), (hw, hh - c), (hw, -hh + c),
+            (hw - c, -hh), (-hw + c, -hh), (-hw, -hh + c), (-hw, hh - c)]
+
+
+def inset_polygon_2d(pts, width):
+    """用 bmesh 的 inset_individual 求真正的内缩轮廓（凹角也不会自交）。"""
+    me = bpy.data.meshes.new("_inset_tmp")
+    me.from_pydata([(p[0], 0.0, p[1]) for p in pts], [],
+                   [tuple(range(len(pts)))])
+    me.validate()
+    ob = bpy.data.objects.new("_inset_tmp", me)
+    bpy.context.scene.collection.objects.link(ob)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    bmesh.ops.inset_individual(bm, faces=[bm.faces[0]], thickness=width,
+                               depth=0.0, use_even_offset=True)
+    # 内缩后的那圈面顶点数 = 原多边形顶点数，且面积最大
+    best, best_area = None, -1.0
+    for f in bm.faces:
+        if len(f.verts) == len(pts) and f.calc_area() > best_area:
+            best, best_area = f, f.calc_area()
+    if best is None:
+        bm.free()
+        bpy.data.objects.remove(ob, do_unlink=True)
+        raise ValueError("inset failed for %d-gon" % len(pts))
+    inner = [(v.co.x, v.co.z) for v in best.verts]
+    bm.free()
+    bpy.data.objects.remove(ob, do_unlink=True)
+    return inner
+
+
+def stroke_polygon(name, pts, width, y0, y1, mat):
+    """把多边形轮廓描成一条 width 宽的细线（贴面薄片）。"""
+    inner = inset_polygon_2d(pts, width)
+    if len(inner) != len(pts):
+        raise ValueError("stroke ring point mismatch")
+    v, f = ring_solid(pts, inner, y0, y1)
+    return new_object(name, v, f, mats=[mat])
+
+
+def back_plate_outline():
+    """电池盖外轮廓：四角折角矩形（参考图的外圈没有台阶）。"""
+    return chamfer_rect(BK_PLATE_W, BK_PLATE_H, BK_PLATE_CHAMFER)
+
+
+def back_plate_inner_outline():
+    """电池盖内圈：外轮廓内缩一圈，右下角再向内收一个台阶（照参考图）。"""
+    hw, hh = BK_PLATE_W / 2.0, BK_PLATE_H / 2.0
+    g = BK_PLATE_GROOVE_INSET
+    ihw, ihh = hw - g, hh - g
+    ic = max(0.8, BK_PLATE_CHAMFER - g)
+    sx, z0 = BK_PLATE_STEP_X, BK_PLATE_STEP_Z
+    return [
+        (-ihw + ic, ihh), (ihw - ic, ihh), (ihw, ihh - ic),
+        (ihw, z0), (ihw - sx, z0),
+        (ihw - sx, -ihh + ic), (ihw - sx - ic, -ihh),
+        (-ihw + ic, -ihh), (-ihw, -ihh + ic), (-ihw, ihh - ic),
+    ]
+
+
+def back_badge_outline():
+    """铭牌外轮廓：细长 45° 折角矩形。"""
+    return chamfer_rect(BK_BADGE_W, BK_BADGE_H, BK_BADGE_CHAMFER)
+
+
+def clip_polygon_above(pts, zmin):
+    """把闭合多边形裁到 z >= zmin 一侧（Sutherland–Hodgman，单侧）。"""
+    out = []
+    n = len(pts)
+    for i in range(n):
+        a = pts[i]
+        b = pts[(i + 1) % n]
+        ain = a[1] >= zmin
+        bin_ = b[1] >= zmin
+        if ain:
+            out.append(a)
+        if ain != bin_:
+            t = (zmin - a[1]) / (b[1] - a[1])
+            out.append((a[0] + (b[0] - a[0]) * t, zmin))
+    if not out:
+        return []
+    # 去掉裁切后可能出现的重复点
+    clean = [out[0]]
+    for p in out[1:]:
+        if abs(p[0] - clean[-1][0]) > 1e-9 or abs(p[1] - clean[-1][1]) > 1e-9:
+            clean.append(p)
+    return clean
+
+
+def build_back_patches(mats):
+    """真实电池盖凸台 + 顶部肩带；盖板顶部收边形成一圈浅台阶。"""
+    out = []
+    outer = back_plate_outline()
+    top = inset_polygon_2d(outer, BK_PLATE_BEVEL)
+    v, f = loft_solid([
+        (outer, BACK_Y - 0.4),
+        (outer, BACK_Y + BK_PLATE_RAISE - BK_PLATE_BEVEL),
+        (top, BACK_Y + BK_PLATE_RAISE),
+    ])
+    ob = new_object("BackCover", v, f, mats=[mats["shell"]])
+    ob.location = (0.0, 0.0, BK_PLATE_CZ)
+    apply_transform(ob)
+
+    # 内圈单槽直接刻进盖板实体，避免贴面环在顶边出现共面断线。
+    outer = back_plate_inner_outline()
+    inner = inset_polygon_2d(outer, BK_PLATE_GROOVE_W)
+    v, f = ring_solid(outer, inner,
+                      BACK_Y + BK_PLATE_RAISE - BK_PLATE_GROOVE_DEPTH,
+                      BACK_Y + BK_PLATE_RAISE + 0.30)
+    groove = new_object("cut_back_cover_groove", v, f)
+    groove.location = (0.0, 0.0, BK_PLATE_CZ)
+    apply_transform(groove)
+    boolean(ob, groove)
+    shade_by_angle(ob, 30.0)
+    out.append(ob)
+
+    # 肩带必须跟着面板轮廓走（我们的双折角在顶部收得很窄，
+    # 用一个普通矩形会从斜边戳出去），所以直接把面板轮廓在横缝以上裁出来。
+    shoulder = clip_polygon_above(pixel_stair_outline(SHELL_W, SHELL_H),
+                                  BK_SHOULDER_Z0)
+    v, f = prism_solid(shoulder, BACK_Y - 0.4, BACK_Y + BK_SHOULDER_RAISE)
+    ob = new_object("BackShoulder", v, f, mats=[mats["shell"]])
+    apply_transform(ob)
+    shade_by_angle(ob, 30.0)
+    out.append(ob)
+    return out
+
+
+def build_back_seam_lines(mats):
+    """肩带横缝 + 两道竖缝的细暗线；不画中段刻口。"""
+    pieces = []
+    y0, y1 = BACK_Y - 0.02, BACK_Y + 0.05
+    v, f = prism_solid(rect_pts(2 * BK_SEAM_HX, BK_SEAM_LINE_W), y0, y1)
+    h = new_object("back_seam_h", v, f, mats=[mats["seam_line"]])
+    h.location = (0.0, 0.0, BK_SEAM_Z)
+    apply_transform(h)
+    pieces.append(h)
+    for sgn in (-1, 1):
+        v, f = prism_solid(rect_pts(BK_SEAM_LINE_W, 2 * BK_SEAM_HZ), y0, y1)
+        vv = new_object("back_seam_v", v, f, mats=[mats["seam_line"]])
+        vv.location = (sgn * BK_SEAM_X, 0.0, 0.0)
+        apply_transform(vv)
+        pieces.append(vv)
+    return pieces
+
+
+def build_back_latch(mats):
+    """右下窄长双层卡扣；内圈浅槽已在盖板实体上刻出。"""
+    pieces = []
+    # 卡扣右侧贴住内圈台阶竖边，左侧只留窄长条；底沿落进盖板内。
+    ihw = (BK_PLATE_W / 2.0 - BK_PLATE_GROOVE_INSET - BK_PLATE_STEP_X)
+    tab_cx = -ihw + BK_TAB_W / 2.0
+    base = rounded_rect(BK_TAB_W, BK_TAB_H, 1.0, seg=4)
+    raised = rounded_rect(BK_TAB_W - 1.0, BK_TAB_H - 1.6, 0.6, seg=4)
+    y0 = BACK_Y + BK_PLATE_RAISE - 0.18
+    v, f = loft_solid([(base, y0),
+                       (base, y0 + 0.20),
+                       (raised, y0 + 0.34)])
+    ob = new_object("back_cover_tab", v, f, mats=[mats["shell"]])
+    ob.location = (tab_cx, 0.0, BK_TAB_CZ)
+    apply_transform(ob)
+    shade_by_angle(ob, 30.0)
+    pieces.append(ob)
+    return pieces
+
+
+def build_back_badge_marks(mats):
+    """铭牌：只保留一圈干净细线框，不添加品牌或型号字标。"""
+    y0, y1 = BACK_Y - 0.03, BACK_Y + 0.06
+    ob = stroke_polygon("badge_outer", back_badge_outline(), BK_BADGE_LINE_W,
+                        y0, y1, mats["badge_line"])
+    ob.location = (0.0, 0.0, BK_BADGE_CZ)
+    apply_transform(ob)
+    return [ob]
+
+
+def build_back_screws(mats):
+    """背面 7 颗螺丝：黑外环 + 浅灰盘 + 深色凹点。"""
+    pieces = []
+    for x, z in BK_SCREW_POS:
+        # 肩带上的两颗要跟着肩带抬起来，否则会被那条带子埋掉一半
+        lift = BK_SHOULDER_RAISE if z > BK_SEAM_Z else 0.0
+        v, f = cylinder_solid(BK_SCREW_R, BACK_Y - 0.20 + lift,
+                              BACK_Y + 0.30 + lift, x, z, seg=16)
+        ring = new_object("screw_ring_bk", v, f, mats=[mats["outline"]])
+        v, f = cylinder_solid(BK_SCREW_INNER_R, BACK_Y + 0.02 + lift,
+                              BACK_Y + 0.36 + lift, x, z, seg=16)
+        fill = new_object("screw_fill_bk", v, f, mats=[mats["screw"]])
+        v, f = cylinder_solid(BK_SCREW_DOT_R, BACK_Y + 0.24 + lift,
+                              BACK_Y + 0.44 + lift, x, z, seg=20)
+        center = new_object("screw_center_bk", v, f, mats=[mats["screw_dark"]])
+        pieces += [ring, fill, center]
+    return pieces
 
 
 def build_key_wells():
@@ -1026,11 +1331,17 @@ def build_square_key(name, mats, cx, cz):
                         stepped_round_rect(SQ_W, SQ_W, 0.6, steps=1),
                         front - 0.10, front + 0.32,
                         [mats["key"]], bevel=0.18)
-    for ob in (gold, black):
+    # 键面中央的灰标必须长在模型上：HTML 伪元素画的那块是轴对齐的，
+    # 机身一转就和键面错位地飘着（键面外观只能由模型给，见 ADR-0003）。
+    mark = front_piece(name + "_mark",
+                       rounded_rect(4.2, 4.2, 0.5, seg=2),
+                       front - 0.22, front - 0.06,
+                       [mats["key_mark"]], bevel=0.04)
+    for ob in (gold, black, mark):
         ob.location = (cx, 0.0, cz)
         apply_transform(ob)
         shade_by_angle(ob, 28.0)
-    return [gold, black]
+    return [gold, black, mark]
 
 
 def parent_children(parent, children):
@@ -1278,6 +1589,8 @@ def render_previews():
     shoot("front", (0.0, -600.0, 2.0), (0.0, 0.0, 2.0), (1440, 720),
           ortho_scale=216.0)
     shoot("three-quarter", (-235.0, -400.0, 175.0), (0.0, 0.0, -2.0), (1440, 900))
+    shoot("back", (0.0, 600.0, 2.0), (0.0, 0.0, 2.0), (1440, 720), ortho_scale=216.0)
+    shoot("back34", (-235.0, 400.0, 175.0), (0.0, 0.0, -2.0), (1440, 900))
 
 
 # ==========================================================================
@@ -1325,8 +1638,11 @@ def main():
         "key": make_mat("keyMat", "#191817", 0.32, 0.08),        # 键帽：缎面黑，高光锐
         "key_center": make_mat("keyCenterMat", "#10100f", 0.28, 0.10),
         "symbol": make_mat("symbolMat", "#f4efe3", 0.50, 0.0),
+        "key_mark": make_mat("keyMarkMat", C_KEY_MARK, 0.55, 0.0),  # 方键中央灰标
         "screw": make_mat("Screw", C_KEY_EDGE, 0.50, 0.0),       # P0：螺丝环改浅灰哑光
         "screw_dark": make_mat("screwDarkMat", "#211c18", 0.50, 0.0),  # P0：凹点去金属
+        "badge_line": make_mat("badgeLineMat", "#a8846b", 0.52, 0.0),  # 背面铭牌刻线：暖棕
+        "seam_line": make_mat("seamLineMat", "#8a8172", 0.58, 0.0),   # 背面缝线：近壳色深一档
     }
 
     # 清漆层：塑料有一层很薄的面漆高光，金属不要（否则像塑料）
@@ -1348,9 +1664,13 @@ def main():
     band = build_side_band(mats)
     shade_by_angle(band, 28.0)
 
-    log("② 正面米白板 + 布尔挖孔")
+    log("② 正面米白板 + 布尔挖孔（含背面细缝与孔阵）")
     shell = build_shell(mats)
     shade_by_angle(shell, 26.0)
+
+    log("②a 背面凸件：电池盖 / 卡扣 / 铭牌 / 缝线")
+    join_into(shell, build_back_patches(mats) + build_back_latch(mats)
+              + build_back_seam_lines(mats) + build_back_badge_marks(mats))
 
     log("③ 屏幕分层")
     bezel, screen_trim, glass = build_screen(mats)
@@ -1367,6 +1687,7 @@ def main():
     buttons = new_object("Buttons", [], [])
     join_into(buttons, button_parts)
     screws = build_screws(mats, shell)
+    join_into(screws, build_back_screws(mats))
     band_inset = build_band_inset(mats)
     parent_children(shell, wells + [buttons, screws] + band_inset)
 

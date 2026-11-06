@@ -3,6 +3,7 @@
 import { S, reduce, $ } from './state.js';
 import { label, overText } from './labels.js';
 
+let bannerTimer = null;
 export function setBanner(text, kind){
   const b = $('banner');
   const changed = b.textContent !== (text || '');
@@ -13,6 +14,11 @@ export function setBanner(text, kind){
     void b.offsetWidth;          // 强制重排，动画才会重放
     b.classList.add('flash');
   }
+  // 极简态下横幅是浮层提示：有内容就亮起来，过一会儿自己退场
+  clearTimeout(bannerTimer);
+  b.classList.toggle('is-show', Boolean(text));
+  if (text) bannerTimer = setTimeout(() => b.classList.remove('is-show'),
+                                     kind === 'error' ? 6000 : 4200);
 }
 
 export async function api(path, body){
