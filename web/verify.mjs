@@ -1171,16 +1171,28 @@ try {
     const m = await import('/app/machine.js');
     const { S } = await import('/app/state.js');
     const pts = m.handPoints();
-    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y) }));
+    const hits = pts.map(p => ({ i: p.i, pick: m.pickCardAt(p.x, p.y), x: p.x, y: p.y }));
+    const miss = hits.filter(p => p.i !== p.pick);
+    const byIndex = new Map(pts.map(p => [p.i, p]));
+    const missDetail = miss.map(h => {
+      const target = byIndex.get(h.pick);
+      const d = target ? Math.hypot(target.x - h.x, target.y - h.y) : NaN;
+      const card = S.snap.my_hand[h.i];
+      return `牌#${h.i}(${card || '?'}) 落点 ${Math.round(h.x)},${Math.round(h.y)}`
+        + ` → 拾到 #${h.pick}，两心距 ${Number.isFinite(d) ? d.toFixed(1) : '?'}px`;
+    });
     return { n: S.snap.my_hand.length, rows: m.machineStatus().handRows,
-             pts: hits.length, miss: hits.filter(p => p.i !== p.pick) };
+             pts: hits.length, miss, missDetail };
   });
   if (freshHand.n !== 17) problems.push(`420px 复核样本不是 17 张：${freshHand.n}`);
   if (freshHand.rows.length !== 2 || freshHand.rows[0]?.count !== 9 || freshHand.rows[1]?.count !== 8) {
     problems.push(`420px 17 张手牌不是 9+8 双排：${freshHand.rows.map(r => r.count).join('+')}`);
   }
   if (freshHand.pts !== freshHand.n || freshHand.miss.length) {
-    problems.push(`420px 手牌拾取错位：${freshHand.pts}/${freshHand.n} 个点，错 ${freshHand.miss.length} 张`);
+    // 只报"错 N 张"在 CI 上没法定位：到底是哪张牌的落点被邻牌盖住了、差多少。
+    // 报出每张错牌自己的投影点、实际拾取到谁，以及它到邻牌中心的距离。
+    problems.push(`420px 手牌拾取错位：${freshHand.pts}/${freshHand.n} 个点，`
+      + `错 ${freshHand.miss.length} 张 :: ${(freshHand.missDetail || []).join(' | ')}`);
   }
   await fresh420.close();
 
