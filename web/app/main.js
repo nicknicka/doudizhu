@@ -59,11 +59,20 @@ async function mutate(path, body, note){
   return ok;
 }
 
-async function loadRecord(record, note){
+/* 演示局只把记录接到开屏那一手 —— 后端把整局完整下发（回放/终局用例照旧
+   拿得到），这里切到 ``opening_step``，让首页直接落在「轮到我方、真有得选」
+   的局面，接着录就是用户的牌局。步号不合法（0 / 越界 / 缺省）就原样返回。 */
+function openingRecord(record, step){
+  if (!Number.isInteger(step) || step <= 0 || step >= record.steps.length) return record;
+  return {...record, steps: record.steps.slice(0, step)};
+}
+
+async function loadRecord(record, note, viewStep){
   const previous = S.record;
   resetSession();                       // 换 / 重开记录：花色回到 record_id 确定性重推（#48）
   S.record = record;
-  if (!(await refresh(null, note))) S.record = previous;
+  // 不指定就看后端挑的默认局面；演示局会指定"开屏那一手"，让首页直接落在能出牌的地方
+  if (!(await refresh(viewStep ?? null, note))) S.record = previous;
 }
 
 function stepTo(delta){
@@ -453,7 +462,9 @@ async function boot(){
     const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
     S.config = config;
     S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-    await loadRecord(d.record, '演示局：随机自对弈的一局。点「开新局」录自己的牌局，或「打开记录」。');
+    await loadRecord(openingRecord(d.record, d.opening_step),
+      '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
+      d.opening_step);
     updateStatusStrip();
   } catch (err){
     setBanner(err.message, 'error');

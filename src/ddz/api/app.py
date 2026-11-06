@@ -38,7 +38,7 @@ from ddz.record.schema import (
     MatchRecord,
 )
 from ddz.record.state import derive, my_turn_steps, relative_seats
-from ddz.rules import action_label, action_type
+from ddz.rules import action_label, action_type, legal_actions
 from ddz.source import manual, sim
 
 REPO = Path(__file__).resolve().parents[3]
@@ -218,10 +218,29 @@ def analyze(
     return view
 
 
+def opening_step(record: MatchRecord) -> int:
+    """演示局开屏停在哪一手：第一个「我方真有得选」的决策点。
+
+    光停到第一个轮到我方的决策点是不够的 —— 那一手常常**只能不要**（上家刚
+    甩了个压不住的牌），页面一打开就是一片灰、看着像坏了。所以挑第一个我方
+    有两条以上**出牌**线路可选的决策点；实在没有就退回第一个轮到我方的决策点，
+    保证开屏一定轮到我方、而且没打完。
+    """
+    mine = my_turn_steps(record)
+    if not mine:
+        return len(record.steps)
+    for step in mine:
+        snapshot = derive(record, steps=record.steps[:step])
+        if sum(1 for a in legal_actions(snapshot) if a.is_play) >= 2:
+            return step
+    return mine[0]
+
+
 @functools.lru_cache(maxsize=1)
 def demo_payload(policy: DouZeroPolicy) -> dict[str, Any]:
     """演示局 + 数据集级的评测与校准。第一次请求时算，之后走缓存。"""
     record = next(r for r in sim.generate(4, seed=DEMO_SEED) if r.me == DEMO_ME)
+    opening = opening_step(record)
     metrics_ours, metrics_base = evaluate(
         list(sim.generate(METRIC_GAMES, seed=0)),
         n_particles=METRIC_PARTICLES,
@@ -236,6 +255,9 @@ def demo_payload(policy: DouZeroPolicy) -> dict[str, Any]:
     )
     return {
         "record": record.to_json(),
+        # 页面只接载到这一手：开屏直接落在「轮到我方、真有得选」的局面，而不是
+        # 半路的历史局面。整局仍然完整下发，回放/终局那些用例照旧能拿到。
+        "opening_step": opening,
         "metrics": {
             "top1": round(metrics_ours.top1_accuracy, 4),
             "top1_base": round(metrics_base.top1_accuracy, 4),
