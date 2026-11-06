@@ -72,6 +72,11 @@ const ZOOM_MIN = 0.75, ZOOM_MAX = 1.6, ZOOM_STEP = 0.12;
 let dragSpringFrom = 0, dragSpringStart = 0;
 let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
+// boot 交接用：机身就绪或明确失败时兑现一次；重复装载会换新的 Promise。
+let readyResolve = null;
+let readyPromise = new Promise(res => { readyResolve = res; });
+/** 机身进入终态时兑现，值就是那个状态：'ready' | 'error' | 'no-webgl'。 */
+export function whenSettled(){ return readyPromise; }
 let nodes = [], buttonsVisible = false, contactShadow = null, backdrop = null;
 let frameCount = 0, renderQueued = false, dirty = true;
 const raycaster = new THREE.Raycaster();
@@ -882,6 +887,7 @@ function installModel(gltf){
   body.traverse(o => { if (o.isMesh) o.castShadow = true; });   // ADR-0006：机壳全件投影
   if (backdrop) backdrop.visible = true;
   ready = true; status = 'ready'; error = '';
+  settle();
   resize(stageW, stageH);
   // installModel 时画布尺寸通常没变，resize 会提前返回；这里必须立即布局，
   // 否则 ready 后到入场动画结束前，屏与键热区都会短暂读成空。
@@ -893,8 +899,13 @@ function installModel(gltf){
       ease: 'power2.out', onUpdate: requestRender, onComplete: relayout });
   }
 }
+function settle(){
+  const res = readyResolve; readyResolve = null;
+  if (res) res(status);
+}
 function loadModel(){
   ready = false; status = 'loading'; error = '';
+  if (!readyResolve) readyPromise = new Promise(res => { readyResolve = res; });
   nodes = []; buttonsVisible = false; buttons = []; buttonZones = [];
   keyGroups = new Map(); pressKey = '';
   if (contactShadow) contactShadow.visible = false;
@@ -911,12 +922,14 @@ function loadModel(){
 function fail(err){
   ready = false; status = 'error';
   error = err && err.message ? err.message : String(err || '未知错误');
+  settle();
   emit();
   requestRender();
 }
 function failNoWebGL(err){
   status = 'no-webgl'; ready = false;
   error = '浏览器没有提供 WebGL，机身无法显示。启用 WebGL 后点重试；数据面板仍可查看。';
+  settle();
   emit();
   if (window.console && console.warn) console.warn('WebGL 初始化失败', err);
 }

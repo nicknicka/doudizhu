@@ -829,6 +829,17 @@
                  stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;
                  flex-shrink:0;opacity:.7}
   .drag-hint.is-hidden{opacity:0;transform:translateX(-50%) translateY(-8px)}
+
+  /* 加载层：机身与首屏数据都就绪前盖住整页（见 ADR-0009）。
+     可见性只由 <body class="is-booting"> 决定 —— 这个类写在标记里，
+     不等模块图；退场由 boot() 在两个就绪条件都满足后摘掉类。 */
+  #boot{position:fixed;inset:0;z-index:9999;display:none;
+    place-content:center;justify-items:center;gap:14px;
+    background:var(--ground);color:var(--muted);font-size:13px}
+  body.is-booting #boot{display:grid}
+  #boot .boot-mark{color:var(--accent);font-size:22px;line-height:1}
+  #boot #boot-reload{margin-top:2px}
+  #boot .boot-js{display:none;margin:0}
   body.is-dragging{cursor:grabbing}
   body.is-dragging #scene{cursor:grabbing}
   body.is-panning{cursor:grabbing}
@@ -864,7 +875,38 @@
 
 </style>
 </head>
-<body>
+<body class="is-booting">
+<!-- 加载层：不依赖任何模块脚本；见 ADR-0009 -->
+<div id="boot" aria-live="polite">
+  <span class="boot-mark" aria-hidden="true">◆</span>
+  <p id="boot-text" style="margin:0">正在加载…</p>
+  <button id="boot-reload" type="button" hidden onclick="location.reload()">重新加载</button>
+  <noscript><style>#boot .boot-js{display:block}#boot #boot-text,#boot .boot-mark{display:none}</style>
+    <p class="boot-js">这个页面需要 JavaScript —— 启用后刷新。</p></noscript>
+</div>
+<script>
+// 唯一职责：模块图慢或挂时别让人卡在无限加载上（所以它内联，不走模块）。
+// 计时从 HTML 解析起算 —— 模块下载多久，页头不该跟着瞎等多久。
+window.__bootStarted = false;   // boot() 一跑就置真，"没加载起来"的指控随之作废
+window.__bootFailed = false;
+window.__bootFallback = function(){
+  if (!document.body.classList.contains('is-booting')
+      || window.__bootStarted || window.__bootFailed) return;
+  window.__bootFailed = true;
+  document.getElementById('boot-text').textContent =
+    '页面模块没加载起来 —— 确认后端在跑（ddz serve），然后';
+  document.getElementById('boot-reload').hidden = false;
+};
+window.__bootHandoff = function(){ document.body.classList.remove('is-booting'); };
+setTimeout(function(){
+  // 8 秒强放行：宁可先露半成品，也不把人锁在加载层里；到齐后照常补上。
+  if (window.__bootFailed || !document.body.classList.contains('is-booting')) return;
+  var b = document.getElementById('banner');
+  if (b){ b.textContent = '机身还没加载好 —— 到齐了会自动补上。'; b.classList.add('is-show'); }
+  window.__bootHandoff();
+}, 8000);
+setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
+</script>
 <!-- 方波田：整页背景，铺满视口（像素格、光池、浮尘都由它垫底） -->
 <canvas class="bgpix" id="bg-pixels" aria-hidden="true"></canvas>
 <div class="page">
@@ -1010,6 +1052,10 @@
      靠 importmap 指回同一份 vendor，避免 GLTFLoader 取到第二份 three -->
 <script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
 <script type="module" src="app/main.js"></script>
+<script>
+// 模块图挂了是事件，不用猜网速：fetch/依赖失败直接在 script 元素上冒 error。
+document.querySelector('script[type="module"]').addEventListener('error', window.__bootFallback);
+</script>
 
   <!-- 操作台浮层：脱离机身，从 dock 上沿拉起（窄屏再加一条触控回退条） -->
   <div class="panel" id="panel">

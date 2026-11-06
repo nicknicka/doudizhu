@@ -73,7 +73,9 @@ async function loadRecord(record, note, viewStep){
   resetSession();                       // 换 / 重开记录：花色回到 record_id 确定性重推（#48）
   S.record = record;
   // 不指定就看后端挑的默认局面；演示局会指定"开屏那一手"，让首页直接落在能出牌的地方
-  if (!(await refresh(viewStep ?? null, note))) S.record = previous;
+  const ok = await refresh(viewStep ?? null, note);
+  if (!ok) S.record = previous;
+  return ok;                                   // #54：boot() 要等首屏数据落地才放行加载层
 }
 
 function stepTo(delta){
@@ -439,20 +441,27 @@ setTimeout(hideDragHint, 3500);
 
 
 async function boot(){
+  window.__bootStarted = true;
   board.init();
   consolePanel.init({ refresh, mutate, renderBar: board.renderBar });
   syncTouch();
-  try {
-    const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
-    S.config = config;
-    S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
-    await loadRecord(openingRecord(d.record, d.opening_step),
-      '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
-      d.opening_step);
-    updateStatusStrip();
-  } catch (err){
-    setBanner(err.message, 'error');
-  }
+  const dataReady = (async () => {
+    try {
+      const [config, d] = await Promise.all([api('/api/config'), api('/api/demo')]);
+      S.config = config;
+      S.metrics = d.metrics; S.calibration = d.calibration; S.caveat = d.caveat;
+      await loadRecord(openingRecord(d.record, d.opening_step),
+        '演示局：自对弈到该你出牌的一手，接着录就是你的牌局。想从头开始点「开新局」。',
+        d.opening_step);
+      updateStatusStrip();
+    } catch (err){
+      setBanner(err.message, 'error');
+    }
+  })();
+  // 加载层退场条件（ADR-0009）：机身就绪且首屏数据落地才放行；机身明确失败时
+  // 不等数据，让错误面板与重试立刻可达。超时强放行由标记里的看门狗负责。
+  if (await machine.whenSettled() === 'ready') await dataReady;
+  window.__bootHandoff();
 }
 
 boot();
