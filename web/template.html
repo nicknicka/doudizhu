@@ -861,6 +861,13 @@
   #boot .boot-mark{color:var(--accent);font-size:22px;line-height:1}
   #boot #boot-reload{margin-top:2px}
   #boot .boot-js{display:none;margin:0}
+  /* 常规态只留动画 —— 说明由设计来说，不写字。文字没被删掉：它沉到 sr-only，
+     读屏/aria-live 照旧读得到「正在加载」。失败态（模块没起来 / 8s 强放行）
+     会把文字重新露出来：那是报错，不是装饰。?verbose=1 可把文字放回来做评审。 */
+  #boot #boot-text.boot-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+    overflow:hidden;white-space:nowrap;border:0;clip-path:inset(50%)}
+  #boot.is-verbose #boot-text.boot-sr{position:static;width:auto;height:auto;
+    margin:0;padding:0;clip-path:none;overflow:visible}
 
   /* —— #55 候选原型（?boot=a~h 时生效；选定后其余删掉）——
      八个方向共享同一条退场机制：is-exiting 播完才摘 is-booting，
@@ -1077,6 +1084,9 @@
   #boot[data-candidate="l"] .boot-lib,#boot[data-candidate="m"] .boot-lib{grid-area:1/1;align-self:center}
   #boot[data-candidate="l"] #boot-text,#boot[data-candidate="m"] #boot-text{grid-row:2;grid-column:1}
   #boot[data-candidate="l"] .boot-mark,#boot[data-candidate="m"] .boot-mark{display:none}
+  /* ?gap=1：给九宫格加 1px 白缝 —— 上游数值一个字没动，这是本项目这一侧多出来的一层。
+     不加缝时九格是紧贴的，读起来是「一整块碎成像素」；加缝才读得出是 3×3。 */
+  #boot.is-gap .sk-grid-cube{box-sizing:border-box;padding:1px;background-clip:content-box}
   #boot[data-candidate="l"] #boot-text::after{content:" · 候选 L SpinKit 折叠立方体"}
   #boot[data-candidate="m"] #boot-text::after{content:" · 候选 M SpinKit 像素格"}
   #boot[data-candidate="l"].is-exiting .boot-lib,
@@ -1144,9 +1154,9 @@
 </head>
 <body class="is-booting">
 <!-- 加载层：不依赖任何模块脚本；见 ADR-0009 -->
-<div id="boot" aria-live="polite">
+<div id="boot" aria-live="polite" aria-busy="true">
   <span class="boot-mark" aria-hidden="true">◆</span>
-  <p id="boot-text" style="margin:0">正在加载…</p>
+  <p id="boot-text" class="boot-sr" style="margin:0">正在加载…</p>
   <button id="boot-reload" type="button" hidden onclick="location.reload()">重新加载</button>
   <noscript><style>#boot .boot-js{display:block}#boot #boot-text,#boot .boot-mark{display:none}</style>
     <p class="boot-js">这个页面需要 JavaScript —— 启用后刷新。</p></noscript>
@@ -1160,6 +1170,7 @@ window.__bootFallback = function(){
   if (!document.body.classList.contains('is-booting')
       || window.__bootStarted || window.__bootFailed) return;
   window.__bootFailed = true;
+  document.getElementById('boot-text').classList.remove('boot-sr');
   document.getElementById('boot-text').textContent =
     '页面模块没加载起来 —— 确认后端在跑（ddz serve），然后';
   document.getElementById('boot-reload').hidden = false;
@@ -1185,10 +1196,14 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
   var slow = q.get('slow') === '1';
   var holdMs = parseInt(q.get('hold') || '0', 10) || 0;
   var noBar = q.get('nobar') === '1';
+  var verbose = q.get('verbose') === '1';
+  var gap = q.get('gap') === '1';
   document.addEventListener('DOMContentLoaded', function(){
     var bootEl = document.getElementById('boot');
     bootEl.dataset.candidate = cand;
     if (slow) bootEl.style.setProperty('--slow', 8);
+    if (verbose) bootEl.classList.add('is-verbose');
+    if (gap) bootEl.classList.add('is-gap');
     // L/M：SpinKit 要的 4 / 9 个子节点由这里补上（上游标记原样，只是搬进加载层）
     if (cand === 'l' || cand === 'm') {
       var lib = document.createElement('div');
