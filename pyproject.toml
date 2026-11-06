@@ -28,7 +28,9 @@ dependencies = [
 ddz = "ddz.cli.main:main"
 
 [project.optional-dependencies]
-dev = ["pytest==9.2.0"]
+# httpx 是 starlette TestClient 的依赖：tests/test_api.py 没有它连收集阶段都过不去。
+# 版本与 requirements.lock.txt 一致（本地 freeze 实测通过 353 项）。
+dev = ["pytest==9.2.0", "httpx==0.28.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
