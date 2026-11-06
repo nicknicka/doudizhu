@@ -26,6 +26,13 @@ models/
 # Node 展示页工具链
 node_modules/
 package-lock.json
+# 符号链接形态：worktree / CI 里 .venv、models、node_modules 常被建成软链指向
+# 主 checkout，而带斜杠的规则只匹配目录、不匹配软链 —— 于是 git add -A 会把
+# 指向别人 venv 的软链提交进去（2026-11-06 在 #61 的分支上实际踩到过）。
+# 锚定到根目录的写法同时覆盖"目录"和"同名软链"，且不会波及子目录里的同名项。
+/.venv
+/models
+/node_modules
 
 # 设计随机串：外部生成，仅构建侧，不进成品
 web/design-seed.txt
