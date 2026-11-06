@@ -859,14 +859,26 @@
   body.is-dragging .seat-label .cnt{transition:transform .15s ease}
 
   @media (max-width:620px){
-    :root{--dock-bottom:12px;--dock-h:48px}
-    .dock{gap:2px;padding:4px;border-radius:12px}
-    .status-strip{padding:0 8px 0 6px;gap:6px}
-    .status-strip .muted{display:none}
+    :root{--dock-bottom:12px;--dock-h:91px}
+    /* 窄屏一行塞不下「现在该谁」+「全局第 N/M 手」，抬头折成两行：
+       主行报谁在动，副行报进度；图标轨让到第二行并居中，不再挤同一行。 */
+    .dock{gap:2px;padding:4px;border-radius:12px;flex-wrap:wrap;row-gap:3px;
+      width:min(94vw,780px)}
+    .status-strip{flex:1 0 100%;flex-wrap:wrap;align-items:center;
+      padding:1px 6px 0;gap:1px 6px}
+    .status-strip .muted{display:block;flex:1 0 100%;font-size:10px;line-height:1.25}
+    .dock-row{flex:1 0 100%;justify-content:center;padding:5px 0 0;border-left:none;
+      border-top:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
     .dock-btn{width:36px;height:36px}
     .dock-btn svg{width:16px;height:16px}
     .dock-btn .lbl{display:none}
     body.is-minimal .machine{width:100%}
+  }
+
+  @media (max-width:380px){
+    /* 三格并排时「我」格最窄，320px 下连「▶ 该你出」都放不下；
+       该格已有 is-acting 的红色描边表达同一件事，这里让文字退场换整格不裁切。 */
+    .machine.is-stacked .scoreboard .sc .turn-flag{display:none}
   }
 
 </style>

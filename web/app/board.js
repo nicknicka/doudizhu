@@ -179,11 +179,16 @@ function paintScreenHud(){
   const domDot = Object.values(labels)[0]?.getBoundingClientRect().width || 0;
   const r = box.width > 0 && domDot > 0 ? (domDot / 2) * (W / box.width) : W * 0.02;
   const edge = Math.max(2, r * 0.16);
+  // 窄屏手牌排成两排时，屏的下缘已经被牌面占满，再落一颗「我」的圆章必然压住牌；
+  // 我的张数在计分板和机顶条里都有，这里直接把槽位让出来。行数取排牌那一份数据，
+  // 不再按宽度猜一次，省得两边规则各自漂移。
+  const meDotHidden = (machine.machineStatus().handRows || []).length > 1;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   for (const [player, el] of Object.entries(labels)){
     if (!el || el.style.display === 'none') continue;      // board.place 会把缺席的座位藏掉
     const slot = HUD_SLOTS[S.meta.seats[player].relative] || HUD_SLOTS.up;
+    if (meDotHidden && slot === HUD_SLOTS.me) continue;
     const cx = slot.x * W + slot.sx * r, cy = slot.y * H + slot.sy * r;
     if (!v.finished && v.acting === player){               // DOM 版用脉冲，纹理里用一圈静态光环
       g.beginPath(); g.arc(cx, cy, r + edge, 0, Math.PI * 2);
@@ -411,9 +416,10 @@ export function render(){
   renderWho();
   ensureLabels();
   paintLabels();
-  paintScreenHud();
   renderCounter();
   renderScoreboard();
   renderHandLine();
   machine.apply(S.snap, S.meta);
+  // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。
+  paintScreenHud();
 }
