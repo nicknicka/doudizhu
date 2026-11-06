@@ -59,18 +59,15 @@ let stageW = 0, stageH = 0, dpr = 1, observedW = 0, observedH = 0;
 // 渲染画布铺满视口（比 .stage 设计盒大）；热区/叠加层仍按设计盒坐标算
 let canvasW = 0, canvasH = 0, observedCW = 0, observedCH = 0;
 let lastSnap = null, lastMeta = null, narrowHand = false, tinyHand = false;
-let pointerTarget = { x: 0, y: 0 }, view = { x: 0, y: 0 };
-let parallaxRunning = false, parallaxStart = 0;
 let dragYaw = 0, dragTilt = 0, dragFromYaw = 0, dragFromTilt = 0;
 let dragStartX = 0, dragStartY = 0, isDraggingRig = false, dragSpringRunning = false;
 let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringStart = 0;
-// 拖空白背景的平移偏移（rig 单位），和视差 view 叠加，松手弹回 0
+// 拖空白背景的平移偏移（rig 单位），松手弹回 0
 let panX = 0, panY = 0, panScale = 0.01;
 let panDragging = false, panSpringRunning = false;
 let panStartX = 0, panStartY = 0, panFromX = 0, panFromY = 0, panSpringStart = 0;
 const ZOOM_MIN = 0.75, ZOOM_MAX = 1.6, ZOOM_STEP = 0.04;
 let dragSpringFrom = 0, dragSpringStart = 0;
-let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
 // 入场动画占用 rig.scale；期间不接受滚轮缩放，免得两条动画抢同一根轴。
 let entranceDone = true;
@@ -1073,7 +1070,6 @@ export function init(canvasEl, hook){
   } else {
     addEventListener('resize', () => resize(stage.clientWidth, stage.clientHeight));
   }
-  capParallax();
   loadModel();
   return true;
 }
@@ -1103,28 +1099,13 @@ function renderNow(){
   frameCount++;
   if (dirty) requestRender();
 }
-function capParallax(){
-  if (reduce) return;
-  stage.addEventListener('mousemove', e => {
-    if (stageW < 820) return;
-    const r = stage.getBoundingClientRect();
-    pointerTarget.x = ((e.clientX - r.left) / r.width - 0.5) * 2;
-    pointerTarget.y = ((e.clientY - r.top) / r.height - 0.5) * 2;
-    animateParallax();
-  });
-  stage.addEventListener('mouseleave', () => {
-    pointerTarget.x = pointerTarget.y = 0;
-    animateParallax();
-  });
-}
-
 /* ---------- 机身拖拽旋转 + 弹簧回弹 ---------- */
 function applyRigPose(){
-  // 视差平移 + 拖拽旋转 + 缩放；保留原 TILT 作为基准
+  // 拖拽旋转 + 缩放；保留原 TILT 作为基准
   // 按键冲量：机身被按下去一点、轻微后仰，松手弹回（pressKick 是 0→1→0 的脉冲）
   const kick = pressKick;
   // 机身只跟着轻轻一顿：真正的"按下去了"由键帽自己的行程给，机子不用大幅回弹。
-  rig.position.set(view.x + panX, view.y + panY - kick * 0.012, -kick * 0.015);
+  rig.position.set(panX, panY - kick * 0.012, -kick * 0.015);
   const baseTilt = isNarrow() ? 0 : TILT;
   rig.rotation.x = baseTilt + dragTilt + kick * 0.006;
   rig.rotation.y = dragYaw;
@@ -1217,7 +1198,6 @@ export function endDrag(){
   document.body.classList.remove('is-dragging');
   // 弹簧回弹到默认角度（dragYaw=0, dragTilt=0）
   startDragSpring();
-  animateParallax();
 }
 function startDragSpring(){
   if (Math.abs(dragYaw) < 0.001 && Math.abs(dragTilt) < 0.001) return;
@@ -1273,7 +1253,6 @@ export function endPan(){
   panDragging = false;
   document.body.classList.remove('is-panning');
   startPanSpring();
-  animateParallax();
 }
 export function resetPan(){
   panSpringRunning = false;
@@ -1359,42 +1338,6 @@ function springOut(t){
   // 近似 cubic-bezier(0.34, 1.56, 0.64, 1)
   const c1 = 1.70158, c3 = c1 + 1;
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-}
-
-function animateParallax(){
-  if (isNarrow()) return;
-  // 拖动旋转 / 拖空白平移期间冻结视差：视差弹簧每帧都会 applyRigPose + relayout，
-  // 和拖动弹簧抢同一帧的姿态写入，是拖动中抖动的主因。松手后由 end* 重新启动。
-  if (isDraggingRig || panDragging) return;
-  const tx = -pointerTarget.x * 0.16, ty = pointerTarget.y * 0.10;
-  if (parallaxRunning){
-    if (Math.abs(tx - parallaxTo.x) > 0.001 || Math.abs(ty - parallaxTo.y) > 0.001){
-      parallaxFrom.x = view.x; parallaxFrom.y = view.y;
-      parallaxTo.x = tx; parallaxTo.y = ty;
-      parallaxStart = performance.now();
-    }
-    return;
-  }
-  parallaxRunning = true;
-  parallaxFrom.x = view.x; parallaxFrom.y = view.y;
-  parallaxTo.x = tx; parallaxTo.y = ty;
-  parallaxStart = performance.now();
-  requestAnimationFrame(stepParallax);
-}
-function stepParallax(now){
-  if (!parallaxRunning) return;
-  if (isDraggingRig || panDragging){ parallaxRunning = false; return; }
-  const t = Math.min(1, (now - parallaxStart) / 220);
-  const e = 1 - Math.pow(1 - t, 3);
-  view.x = parallaxFrom.x + (parallaxTo.x - parallaxFrom.x) * e;
-  view.y = parallaxFrom.y + (parallaxTo.y - parallaxFrom.y) * e;
-  applyRigPose();
-  relayout();
-  if (t >= 1){
-    parallaxRunning = false;
-    return;
-  }
-  requestAnimationFrame(stepParallax);
 }
 
 /* ---------- 牌桌状态 / 拾取 ---------- */

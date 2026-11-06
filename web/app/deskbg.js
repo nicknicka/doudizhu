@@ -6,7 +6,7 @@
 
 const INK = '#141310', ACCENT = '#e0442a';
 const RAD = 24 * Math.PI / 180, CX = Math.cos(RAD), CY = Math.sin(RAD);
-const T1 = 7200, T2 = 11000;                 // 两级波的周期（ms）
+const T1 = 5400, T2 = 8250;                  // 两级波的周期（ms）；数值越小流速越快
 const D1 = 0.46, D2 = 0.54;                  // 占空比：高电平占一个周期的比例
 const COLS = 104;                            // 视口宽切多少格；格子随屏自适应
 const A_LO = 0.025, A_HI = 0.085;            // 中档强度
