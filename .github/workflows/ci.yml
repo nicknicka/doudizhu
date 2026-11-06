@@ -66,8 +66,10 @@ jobs:
           node-version: "22"
 
       - name: 装 Playwright 与 Chromium
+        # package-lock.json 不入库，^1.49.0 会被解析成当日最新版；
+        # 浏览器端到端检查对 Playwright 版本敏感，这里锁到本地实测通过的版本。
         run: |
-          npm i
+          npm i --no-save playwright@1.64.1
           npx playwright install --with-deps chromium
 
       - name: 纯逻辑单测（不起浏览器）
