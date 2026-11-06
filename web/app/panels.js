@@ -64,6 +64,8 @@ function draw(focus){
 export function focus(cardName){
   currentFocus = cardName || S.pinned;
   draw(currentFocus);
+  document.querySelectorAll('#plist li[data-card]').forEach(li =>
+    li.classList.toggle('is-focus', li.dataset.card === currentFocus));
 }
 
 function togglePin(cardName){
@@ -98,6 +100,28 @@ function renderCloud(){
   $('la2').textContent = label(p.opponents[0]); $('lb2').textContent = label(p.opponents[1]);
 }
 
+/** 逐张概率：每张未现身的牌在两个对手手里「至少一张」的概率与期望张数。 */
+function renderPlist(){
+  const p = S.point;
+  const box = $('plist');
+  if (!p){ box.innerHTML = ''; return; }
+  const head = '<li class="head"><span></span>'
+    + p.opponents.map((o,i)=>`<span class="p ${i?'b':'a'}">${label(o)}</span>`).join('') + '</li>';
+  const rows = list => head + list.map(r =>
+    `<li data-card="${r.card}" tabindex="0" role="button" aria-label="${NAME[r.card]} 在谁手上">`
+    + `<span class="c">${NAME[r.card]}</span>`
+    + p.opponents.map((o,i)=>{
+        const v = r.by[o];
+        return `<span class="p ${i?'b':'a'}"><b>${(v.p*100).toFixed(0)}%</b>`
+             + `<small>${v.expected.toFixed(2)} 张</small></span>`;
+      }).join('') + '</li>').join('');
+  // 分两栏，每栏各带一次表头 —— 否则读者不知道哪一列是哪一家
+  const half = Math.ceil(p.cards.length / 2);
+  box.innerHTML =
+    `<ul class="plist">${rows(p.cards.slice(0, half))}</ul>`
+    + `<ul class="plist">${rows(p.cards.slice(half))}</ul>`;
+}
+
 function renderCalib(){
   const c = S.calibration;
   if (!c){ $('calib').innerHTML = ''; $('calib-src').textContent = ''; $('calib-caveat').textContent = ''; return; }
@@ -127,8 +151,8 @@ function renderFoot(){
 
 export function render(){
   S.pinned = null;
-  renderCloud(); renderCalib(); renderFoot();
-  build(); sizeCanvas();
+  renderCloud(); renderCalib(); renderFoot(); renderPlist();
+  build(); sizeCanvas(); focus(null);
 }
 
 cv.addEventListener('click', () => togglePin(hoverCard));
@@ -140,3 +164,18 @@ cv.addEventListener('mousemove', e => {
   focus(hoverCard);
 });
 cv.addEventListener('mouseleave', () => { hoverCard = null; focus(null); });
+
+// 逐张概率列表：悬停高亮、点击/回车钉住 —— 与粒子云共用同一套 focus
+const plist = $('plist');
+plist.addEventListener('mouseover', e => {
+  const li = e.target.closest('li[data-card]'); if (li) focus(li.dataset.card);
+});
+plist.addEventListener('mouseleave', () => focus(null));
+plist.addEventListener('click', e => {
+  const li = e.target.closest('li[data-card]'); if (li) togglePin(li.dataset.card);
+});
+plist.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const li = e.target.closest('li[data-card]'); if (!li) return;
+  e.preventDefault(); togglePin(li.dataset.card);
+});

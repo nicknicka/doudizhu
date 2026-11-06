@@ -697,6 +697,7 @@ try {
   }
   if (!(await page.locator('#crt').isVisible())) problems.push('数据面板打开后不可见');
   if ((await page.locator('#calib tr').count()) < 2) problems.push('校准表是空的');
+  if ((await page.locator('#plist li[data-card]').count()) < 1) problems.push('逐张概率列表是空的');
   const canvasBlank = await page.evaluate(() => {
     const c = document.getElementById('cloud');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
