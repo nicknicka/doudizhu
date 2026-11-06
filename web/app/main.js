@@ -410,11 +410,28 @@ $('stage').addEventListener('pointerup', endRigDrag);
 $('stage').addEventListener('pointercancel', endRigDrag);
 $('stage').addEventListener('pointerleave', e => { if (rigDragActive || panActive) endRigDrag(e); });
 
-// 滚轮缩放
-$('stage').addEventListener('wheel', e => {
+// 滚轮缩放：按手势累计位移分档，不按事件个数。
+// 鼠标滚轮一格 deltaY≈100~120px，正好一格；触控板一次滑动累计数百 px，
+// 也只走 2~3 格。事件间隔超过 120ms 视为换了手势，尾巴（惯性滚动）清零。
+const ZOOM_NOTCH = 100;        // 累计多少像素走一格（Chrome 一格滚轮 = 100px）
+const ZOOM_GESTURE_GAP = 120;  // ms；超过就当新手势
+// 行模式（Firefox 一格 3 行）与页模式折算成同一天花板：一格始终≈一步
+const pxPerDelta = d => d.deltaMode === 1 ? d.deltaY * 33 : d.deltaMode === 2 ? d.deltaY * 100 : d.deltaY;
+let zoomAcc = 0, zoomLastAt = 0;
+// 监听在文档上：机身与页面空白都能缩放（画布铺满视口，舞台盒只是投影锚点）。
+// dock、浮层、数据面板里滚轮属于界面滚动，不抢。
+document.addEventListener('wheel', e => {
+  if (e.target.closest('.dock, .panel, .crt, #newgame, .machine-error')) return;
   e.preventDefault();
-  const delta = e.deltaY > 0 ? 1 : -1;
-  machine.zoomBy(delta);
+  const now = performance.now();
+  if (now - zoomLastAt > ZOOM_GESTURE_GAP) zoomAcc = 0;
+  zoomLastAt = now;
+  zoomAcc += pxPerDelta(e);
+  while (Math.abs(zoomAcc) >= ZOOM_NOTCH){
+    const step = Math.sign(zoomAcc) * ZOOM_NOTCH;
+    machine.zoomBy(step > 0 ? 1 : -1);
+    zoomAcc -= step;
+  }
   hideDragHint();
 }, { passive: false });
 
