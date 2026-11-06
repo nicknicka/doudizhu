@@ -853,222 +853,24 @@
 
   /* 加载层：机身与首屏数据都就绪前盖住整页（见 ADR-0009）。
      可见性只由 <body class="is-booting"> 决定 —— 这个类写在标记里，
-     不等模块图；退场由 boot() 在两个就绪条件都满足后摘掉类。 */
+     不等模块图；退场由 __bootHandoff 播完 0.26s 再摘掉这个类。 */
   #boot{position:fixed;inset:0;z-index:9999;display:none;
     place-content:center;justify-items:center;gap:14px;
     background:var(--ground);color:var(--muted);font-size:13px}
   body.is-booting #boot{display:grid}
-  #boot .boot-mark{color:var(--accent);font-size:22px;line-height:1}
   #boot #boot-reload{margin-top:2px}
   #boot .boot-js{display:none;margin:0}
   /* 常规态只留动画 —— 说明由设计来说，不写字。文字没被删掉：它沉到 sr-only，
-     读屏/aria-live 照旧读得到「正在加载」。失败态（模块没起来 / 8s 强放行）
-     会把文字重新露出来：那是报错，不是装饰。?verbose=1 可把文字放回来做评审。 */
+     读屏与 aria-live 照旧读得到「正在加载」。模块没起来时兜底脚本把它放回来
+     （还要给「重新加载」按钮）；8 秒强放行走的是顶部横幅。报错是信息，不是装饰。 */
   #boot #boot-text.boot-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
     overflow:hidden;white-space:nowrap;border:0;clip-path:inset(50%)}
-  #boot.is-verbose #boot-text.boot-sr{position:static;width:auto;height:auto;
-    margin:0;padding:0;clip-path:none;overflow:visible}
 
-  /* —— #55 候选原型（?boot=a~h 时生效；选定后其余删掉）——
-     八个方向共享同一条退场机制：is-exiting 播完才摘 is-booting，
-     机身入场（0.8s gsap，已先行开跑）在退场遮住的那两百毫秒里露出后半段。 */
-  #boot[data-candidate]{gap:18px}
-  #boot[data-candidate] #boot-text::after{font-size:11px;color:var(--muted)}
-
-  /* A · 像素开机：◆ 两档硬闪 + 8 格电源条（steps(8) 逐格点亮，
-     语言取自页面自己的 flash/steps(2) 与像素字）。退场 = CRT 关机：收成一线。 */
-  #boot[data-candidate="a"] .boot-mark{animation:bootA-blink .8s steps(2,end) infinite}
-  #boot[data-candidate="a"]::before{content:"";width:104px;height:6px;
-    border:2px solid var(--ink);padding:0;background:var(--accent);
-    background-repeat:no-repeat;animation:bootA-fill 2.6s steps(8,end) infinite}
-  @keyframes bootA-fill{from{background-size:0 100%}to{background-size:100% 100%}}
-  @keyframes bootA-blink{0%{opacity:1}50%{opacity:.15}}
-  #boot[data-candidate="a"] #boot-text::after{content:" · 候选 A 像素开机"}
-  #boot[data-candidate="a"].is-exiting{animation:bootA-off calc(.26s * var(--slow,1)) steps(3,end) forwards}
-  @keyframes bootA-off{35%{transform:scaleY(1);opacity:1}
-    70%{transform:scaleY(.02);opacity:1}to{transform:scaleY(.002);opacity:0}}
-
-  /* B · 通电扫描环：24 格刻度环 steps(24) 追光 —— 参考 circleloaders 的
-     24 段单色圆环（零依赖 SVG），这里折成纯 CSS conic + mask。退场 = 环
-     塌成一条横扫描线扫出屏外，模拟机身通电。 */
-  #boot[data-candidate="b"] .boot-mark{display:none}
-  #boot[data-candidate="b"]::before,#boot[data-candidate="b"]::after{
-    content:"";grid-area:1/1;justify-self:center;align-self:center;
-    width:96px;height:96px;border-radius:50%}
-  #boot[data-candidate="b"]::before{
-    background:repeating-conic-gradient(var(--ink) 0 2deg,transparent 2deg 15deg);
-    -webkit-mask:radial-gradient(closest-side,transparent 58%,#000 60%);
-            mask:radial-gradient(closest-side,transparent 58%,#000 60%)}
-  #boot[data-candidate="b"]::after{background:conic-gradient(var(--accent) 0 30deg,transparent 30deg);
-    -webkit-mask:radial-gradient(closest-side,transparent 58%,#000 60%);
-            mask:radial-gradient(closest-side,transparent 58%,#000 60%);
-    animation:bootB-chase 1.2s steps(24) infinite}
-  @keyframes bootB-chase{to{transform:rotate(360deg)}}
-  #boot[data-candidate="b"] #boot-text::after{content:" · 候选 B 通电扫描环"}
-  #boot[data-candidate="b"].is-exiting{animation:bootB-off calc(.26s * var(--slow,1)) ease-in forwards}
-  @keyframes bootB-off{to{transform:scaleX(1.6) scaleY(.01);opacity:0}}
-
-  /* D~H 共用：伪元素叠在同一个网格单元里，文字落到第二行 */
-  #boot[data-candidate="d"]::before,#boot[data-candidate="d"]::after,
-  #boot[data-candidate="e"]::before,#boot[data-candidate="e"]::after,
-  #boot[data-candidate="f"]::before,#boot[data-candidate="f"]::after,
-  #boot[data-candidate="g"]::before,#boot[data-candidate="g"]::after,
-  #boot[data-candidate="h"]::before{content:"";grid-area:1/1;align-self:center}
-  #boot[data-candidate="d"] #boot-text,#boot[data-candidate="e"] #boot-text,
-  #boot[data-candidate="f"] #boot-text,#boot[data-candidate="g"] #boot-text,
-  #boot[data-candidate="h"] #boot-text{grid-row:2;grid-column:1}
-  #boot[data-candidate="d"] .boot-mark,#boot[data-candidate="e"] .boot-mark,
-  #boot[data-candidate="f"] .boot-mark,#boot[data-candidate="g"] .boot-mark,
-  #boot[data-candidate="h"] .boot-mark{display:none}
-
-  /* D · 记牌条点亮：15 格逐格点亮（background-size + steps(15)），
-     取材于机顶那排「还没现身的牌」；退场整条收回右端。 */
-  #boot[data-candidate="d"]::before{width:212px;height:16px;box-sizing:border-box;
-    border:2px solid var(--ink);
-    background:repeating-linear-gradient(90deg,transparent 0 12px,var(--ink) 12px 14px)}
-  #boot[data-candidate="d"]::after{width:212px;height:16px;box-sizing:border-box;
-    background:repeating-linear-gradient(90deg,var(--accent) 0 12px,var(--ink) 12px 14px);
-    background-repeat:no-repeat;background-position:left center;
-    animation:bootD-fill 1.8s steps(15,end) infinite}
-  @keyframes bootD-fill{from{background-size:0 100%}to{background-size:100% 100%}}
-  #boot[data-candidate="d"] #boot-text::after{content:" · 候选 D 记牌条点亮"}
-  #boot[data-candidate="d"].is-exiting::after{
-    animation:bootD-out calc(.26s * var(--slow,1)) steps(8,end) forwards}
-  @keyframes bootD-out{to{background-size:0 100%;background-position:right center}}
-
-  /* E · 方波涟漪：两圈方环 steps(6) 逐格扩张，正好是页面自己的方波田语言；
-     退场反向收拢。 */
-  #boot[data-candidate="e"]::before,#boot[data-candidate="e"]::after{
-    width:64px;height:64px;box-sizing:border-box;border:3px solid var(--accent)}
-  #boot[data-candidate="e"]::before{animation:bootE-ring 1.6s steps(6,end) infinite}
-  #boot[data-candidate="e"]::after{animation:bootE-ring 1.6s steps(6,end) .8s infinite}
-  @keyframes bootE-ring{0%{transform:scale(.25);opacity:1}70%{opacity:.35}
-                        100%{transform:scale(2.6);opacity:0}}
-  #boot[data-candidate="e"] #boot-text::after{content:" · 候选 E 方波涟漪"}
-  #boot[data-candidate="e"].is-exiting::before{
-    animation:bootE-in calc(.26s * var(--slow,1)) ease-in forwards}
-  #boot[data-candidate="e"].is-exiting::after{animation:none;opacity:0}
-  @keyframes bootE-in{to{transform:scale(.1);opacity:0}}
-
-  /* F · 扫描自检：先给机屏轮廓，红线 steps(18) 自上而下扫一遍；
-     退场红线冲出下沿、轮廓熄掉。 */
-  #boot[data-candidate="f"]::before{width:184px;height:112px;box-sizing:border-box;
-    border:2px solid var(--ink)}
-  #boot[data-candidate="f"]::after{width:160px;height:6px;background:var(--accent);
-    animation:bootF-scan 1.7s steps(18,end) infinite}
-  @keyframes bootF-scan{from{transform:translateY(-50px)}to{transform:translateY(50px)}}
-  #boot[data-candidate="f"] #boot-text::after{content:" · 候选 F 扫描自检"}
-  #boot[data-candidate="f"].is-exiting::after{
-    animation:bootF-out calc(.26s * var(--slow,1)) ease-in forwards}
-  @keyframes bootF-out{to{transform:translateY(200px);opacity:0}}
-  #boot[data-candidate="f"].is-exiting::before{
-    animation:bootF-blink calc(.26s * var(--slow,1)) steps(4,end) forwards}
-  @keyframes bootF-blink{to{opacity:0}}
-
-  /* G · 按键自检：一排键帽被 steps(14) 的硬边从右往左擦亮；退场整排
-     齐亮一帧再熄（上电瞬间）。 */
-  #boot[data-candidate="g"]::before{width:168px;height:22px;box-sizing:border-box;
-    background:repeating-linear-gradient(90deg,
-      color-mix(in srgb,var(--ink) 32%,transparent) 0 12px,transparent 12px 24px)}
-  #boot[data-candidate="g"]::after{width:12px;height:22px;background:var(--accent);
-    animation:bootG-walk 1.4s steps(7,end) infinite}
-  @keyframes bootG-walk{from{transform:translateX(-78px)}to{transform:translateX(78px)}}
-  #boot[data-candidate="g"] #boot-text::after{content:" · 候选 G 按键自检"}
-  #boot[data-candidate="g"].is-exiting::after{
-    animation:bootG-out calc(.26s * var(--slow,1)) ease-in forwards}
-  #boot[data-candidate="g"].is-exiting::before{
-    animation:bootG-off calc(.26s * var(--slow,1)) steps(4,end) forwards}
-  @keyframes bootG-out{to{transform:translateX(120px);opacity:0}}
-  @keyframes bootG-off{to{opacity:0}}
-
-  /* H · 显像管起搏：一条横线 steps(10) 涨成整屏、再回稳；退场缩回那条线。 */
-  #boot[data-candidate="h"]::before{width:200px;height:118px;box-sizing:border-box;
-    background:color-mix(in srgb,var(--accent) 12%,transparent);
-    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
-    animation:bootH-open 1.9s steps(10,end) infinite}
-  @keyframes bootH-open{0%{transform:scaleY(.02);opacity:1}
-                        55%{transform:scaleY(1);opacity:1}
-                        72%{transform:scaleY(1);opacity:.5}
-                        100%{transform:scaleY(.02);opacity:.8}}
-  #boot[data-candidate="h"] #boot-text::after{content:" · 候选 H 显像管起搏"}
-  #boot[data-candidate="h"].is-exiting::before{
-    animation:bootH-off calc(.26s * var(--slow,1)) steps(4,end) forwards}
-  @keyframes bootH-off{to{transform:scaleY(.02);opacity:0}}
-
-  /* I~K · 三支立体的：真 3D（perspective + preserve-3d），不是画出来的假等距。
-     参考取参数不取代码：Uiverse 的 spicy-otter-30（perspective 350px、六面靠
-     translateZ(±w/2)）与 new-kangaroo-60（rotateX(-30deg) + rotateY 整圈 linear）。
-     三支共用「退场把立体件收进屏幕」的收尾思路。 */
-
-  #boot[data-candidate="i"] #boot-text,#boot[data-candidate="j"] #boot-text,
-  #boot[data-candidate="k"] #boot-text{grid-row:2;grid-column:1}
-
-  /* I · 立体方块：三面 + 左右摆动（不做整圈，回避背面没画的那三面） */
-  #boot[data-candidate="i"]{perspective:420px}
-  #boot[data-candidate="i"] .boot-mark{position:relative;width:40px;height:40px;font-size:0;
-    background:var(--accent);transform-style:preserve-3d;
-    animation:bootI-sway 1.8s cubic-bezier(.45,.03,.51,.95) infinite alternate}
-  #boot[data-candidate="i"] .boot-mark::before,
-  #boot[data-candidate="i"] .boot-mark::after{content:"";position:absolute;inset:0}
-  #boot[data-candidate="i"] .boot-mark::before{background:var(--ink);opacity:.72;
-    transform:rotateX(90deg) translateZ(20px)}
-  #boot[data-candidate="i"] .boot-mark::after{background:color-mix(in srgb,var(--accent) 62%,#000);
-    transform:rotateY(90deg) translateZ(20px)}
-  @keyframes bootI-sway{from{transform:rotateX(22deg) rotateY(-34deg)}
-                        to{transform:rotateX(22deg) rotateY(34deg)}}
-  #boot[data-candidate="i"] #boot-text::after{content:" · 候选 I 立体方块"}
-  #boot[data-candidate="i"].is-exiting .boot-mark{
-    animation:bootI-off calc(.26s * var(--slow,1)) ease-in forwards}
-  @keyframes bootI-off{to{transform:rotateX(22deg) rotateY(150deg) translateZ(-260px);opacity:0}}
-
-  /* J · 翻牌：一张牌绕 Y 自转（带 3px 厚度，转到侧面不会消失） */
-  #boot[data-candidate="j"]{perspective:360px}
-  #boot[data-candidate="j"] .boot-mark{position:relative;width:40px;height:56px;font-size:0;
-    box-sizing:border-box;border:2px solid var(--ink);
-    background:linear-gradient(var(--side-a),var(--side-a)) 6px 8px/28px 3px no-repeat,var(--ground);
-    transform-style:preserve-3d;
-    animation:bootJ-flip 1.7s cubic-bezier(.62,.02,.34,1) infinite alternate}
-  #boot[data-candidate="j"] .boot-mark::before{content:"";position:absolute;inset:0;
-    box-sizing:border-box;border:2px solid var(--ink);
-    background:color-mix(in srgb,var(--ground) 84%,var(--ink));transform:translateZ(-4px)}
-  @keyframes bootJ-flip{from{transform:rotateX(-10deg) rotateY(-54deg)}
-                        to{transform:rotateX(-10deg) rotateY(54deg)}}
-  #boot[data-candidate="j"] #boot-text::after{content:" · 候选 J 翻牌"}
-  #boot[data-candidate="j"].is-exiting .boot-mark{
-    animation:bootJ-off calc(.26s * var(--slow,1)) ease-in forwards}
-  @keyframes bootJ-off{to{transform:rotateX(-10deg) rotateY(200deg) translateY(-38vh) scale(.5);opacity:0}}
-
-  /* K · 透视扫描台：一张网格平面躺进景深里往下滚，接显像管自检的语感 */
-  #boot[data-candidate="k"]{perspective:300px}
-  #boot[data-candidate="k"] .boot-mark{display:none}
-  #boot[data-candidate="k"]::before{content:"";grid-area:1/1;align-self:center;
-    width:170px;height:170px;box-sizing:border-box;border:2px solid var(--ink);opacity:.6;
-    background-image:repeating-linear-gradient(0deg,var(--ink) 0 1px,transparent 1px 22px),
-                     repeating-linear-gradient(90deg,var(--ink) 0 1px,transparent 1px 22px);
-    transform:rotateX(72deg) translateZ(-40px);animation:bootK-scroll 1.6s linear infinite}
-  @keyframes bootK-scroll{from{background-position:0 0,0 0}to{background-position:0 22px,0 0}}
-  #boot[data-candidate="k"] #boot-text::after{content:" · 候选 K 透视扫描台"}
-  #boot[data-candidate="k"].is-exiting::before{
-    animation:bootK-off calc(.26s * var(--slow,1)) ease-in forwards}
-  @keyframes bootK-off{to{transform:rotateX(0) translateZ(0) scale(1.6);opacity:0}}
-
-  /* L/M · SpinKit（MIT · © 2020 Tobias Ahlin · 全文在 vendor/LICENSE-spinkit.txt）：
-     下面两支是从 web/vendor/spinkit.min.css 原样抠出来的字节，一个数值都没改；
-     本项目这一侧只把 --sk-color / --sk-size 指到 accent 与尺寸。
-     整份库 sudah vendored 在 web/vendor/spinkit.min.css —— 这里内联而不是 <link>，
-     因为 <link rel=stylesheet> 会阻塞首帧，和 ADR-0009 直接冲突。 */
-  .sk-grid{width:var(--sk-size);height:var(--sk-size)}
-  .sk-grid-cube{width:33.33%;height:33.33%;background-color:var(--sk-color);float:left;animation:sk-grid 1.3s infinite ease-in-out}
-  .sk-grid-cube:nth-child(1){animation-delay:.2s}
-  .sk-grid-cube:nth-child(2){animation-delay:.3s}
-  .sk-grid-cube:nth-child(3){animation-delay:.4s}
-  .sk-grid-cube:nth-child(4){animation-delay:.1s}
-  .sk-grid-cube:nth-child(5){animation-delay:.2s}
-  .sk-grid-cube:nth-child(6){animation-delay:.3s}
-  .sk-grid-cube:nth-child(7){animation-delay:0s}
-  .sk-grid-cube:nth-child(8){animation-delay:.1s}
-  .sk-grid-cube:nth-child(9){animation-delay:.2s}
-  @keyframes sk-grid{0%,70%,100%{transform:scale3D(1,1,1)}35%{transform:scale3D(0,0,1)}}
+  /* 加载层的动画 = SpinKit 的 .sk-fold（MIT · © 2020 Tobias Ahlin）。
+     全文在 web/vendor/LICENSE-spinkit.txt，整份库 vendored 在 web/vendor/spinkit.min.css。
+     下面这些是从上游抠出来的原样字节，一个数值都没改；本项目这一侧只给尺寸与颜色。
+     内联而不用 <link>：样式表会阻塞首帧，与 ADR-0009 冲突。
+     选它是因为它用设计说话 —— 四个方块在透视里折叠，不需要一个字解释"在加载"。 */
   .sk-fold{width:var(--sk-size);height:var(--sk-size);position:relative;transform:rotateZ(45deg)}
   .sk-fold-cube{float:left;width:50%;height:50%;position:relative;transform:scale(1.1)}
   .sk-fold-cube:before{content:'';position:absolute;top:0;left:0;width:100%;height:100%;background-color:var(--sk-color);animation:sk-fold 2.4s infinite linear both;transform-origin:100% 100%}
@@ -1080,43 +882,11 @@
   .sk-fold-cube:nth-child(3):before{animation-delay:.9s}
   @keyframes sk-fold{0%,10%{transform:perspective(140px) rotateX(-180deg);opacity:0}25%,75%{transform:perspective(140px) rotateX(0);opacity:1}90%,100%{transform:perspective(140px) rotateY(180deg);opacity:0}}
 
-  #boot[data-candidate="l"],#boot[data-candidate="m"]{--sk-size:56px;--sk-color:var(--accent)}
-  #boot[data-candidate="l"] .boot-lib,#boot[data-candidate="m"] .boot-lib{grid-area:1/1;align-self:center}
-  #boot[data-candidate="l"] #boot-text,#boot[data-candidate="m"] #boot-text{grid-row:2;grid-column:1}
-  #boot[data-candidate="l"] .boot-mark,#boot[data-candidate="m"] .boot-mark{display:none}
-  /* ?gap=1：给九宫格加 1px 白缝 —— 上游数值一个字没动，这是本项目这一侧多出来的一层。
-     不加缝时九格是紧贴的，读起来是「一整块碎成像素」；加缝才读得出是 3×3。 */
-  #boot.is-gap .sk-grid-cube{box-sizing:border-box;padding:1px;background-clip:content-box}
-  #boot[data-candidate="l"] #boot-text::after{content:" · 候选 L SpinKit 折叠立方体"}
-  #boot[data-candidate="m"] #boot-text::after{content:" · 候选 M SpinKit 像素格"}
-  #boot[data-candidate="l"].is-exiting .boot-lib,
-  #boot[data-candidate="m"].is-exiting .boot-lib{
-    animation:bootLibOff calc(.26s * var(--slow,1)) steps(3,end) forwards}
-  @keyframes bootLibOff{70%{transform:scaleY(.02);opacity:1}to{transform:scaleY(.002);opacity:0}}
+  #boot .boot-fold{--sk-size:56px;--sk-color:var(--accent);align-self:center}
+  /* 退场：收成一条线，然后才摘 is-booting 把机身露出来 */
+  #boot.is-exiting .boot-fold{animation:bootFoldOff .26s steps(3,end) forwards}
+  @keyframes bootFoldOff{70%{transform:scaleY(.02);opacity:1}to{transform:scaleY(.002);opacity:0}}
 
-  /* 评审条：只在 ?boot= 出现，切换候选 / 慢放 / 重播；选定后整块删 */
-  .boot-review{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10000;
-    display:flex;flex-wrap:wrap;justify-content:center;max-width:min(92vw,720px);
-    gap:6px;align-items:center;padding:6px 10px;
-    background:var(--ground);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);
-    font-size:11px;color:var(--ink)}
-  .boot-review button{padding:2px 8px;font-size:11px}
-  .boot-review button.is-on{background:var(--ink);color:var(--ground)}
-  .boot-review .cap{color:var(--muted);margin-right:2px}
-
-  /* C · 牌堆叠：三张牌背错落洗牌（牌局语义直接进加载态；纯 box-shadow 造
-     三张，零依赖）。退场 = 整叠牌被吸进主屏方向，牌进机器。 */
-  #boot[data-candidate="c"] .boot-mark{display:none}
-  #boot[data-candidate="c"]::before{content:"";width:30px;height:44px;
-    background:linear-gradient(var(--side-a),var(--side-a)) 4px 4px/22px 2px no-repeat, var(--ground);
-    border:2px solid var(--ink);
-    box-shadow:-7px 5px 0 -2px var(--ground),-7px 5px 0 0 var(--ink),
-               -14px 10px 0 -2px var(--ground),-14px 10px 0 0 var(--ink);
-    animation:bootC-shuffle .9s steps(2) infinite alternate}
-  @keyframes bootC-shuffle{from{transform:translate(0,0)}to{transform:translate(3px,-5px) rotate(-3deg)}}
-  #boot[data-candidate="c"] #boot-text::after{content:" · 候选 C 牌堆入机"}
-  #boot[data-candidate="c"].is-exiting{animation:bootC-off calc(.22s * var(--slow,1)) ease-in forwards}
-  @keyframes bootC-off{to{transform:translateY(-34vh) scale(.55);opacity:0}}
   body.is-dragging{cursor:grabbing}
   body.is-dragging #scene{cursor:grabbing}
   body.is-panning{cursor:grabbing}
@@ -1155,10 +925,17 @@
 <body class="is-booting">
 <!-- 加载层：不依赖任何模块脚本；见 ADR-0009 -->
 <div id="boot" aria-live="polite" aria-busy="true">
-  <span class="boot-mark" aria-hidden="true">◆</span>
+  <div class="boot-fold" aria-hidden="true">
+    <div class="sk-fold">
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+      <div class="sk-fold-cube"></div>
+    </div>
+  </div>
   <p id="boot-text" class="boot-sr" style="margin:0">正在加载…</p>
   <button id="boot-reload" type="button" hidden onclick="location.reload()">重新加载</button>
-  <noscript><style>#boot .boot-js{display:block}#boot #boot-text,#boot .boot-mark{display:none}</style>
+  <noscript><style>#boot .boot-js{display:block}#boot #boot-text,#boot .boot-fold{display:none}</style>
     <p class="boot-js">这个页面需要 JavaScript —— 启用后刷新。</p></noscript>
 </div>
 <script>
@@ -1175,7 +952,15 @@ window.__bootFallback = function(){
     '页面模块没加载起来 —— 确认后端在跑（ddz serve），然后';
   document.getElementById('boot-reload').hidden = false;
 };
-window.__bootHandoff = function(){ document.body.classList.remove('is-booting'); };
+window.__bootHandoff = function(){
+  var boot = document.getElementById('boot');
+  if (boot.classList.contains('is-exiting')) return;   // 8s 强放行与 boot() 都调它
+  boot.classList.add('is-exiting');
+  setTimeout(function(){
+    boot.classList.remove('is-exiting');
+    document.body.classList.remove('is-booting');
+  }, 260);                                            // 与 bootFoldOff 的时长对齐
+};
 setTimeout(function(){
   // 8 秒强放行：宁可先露半成品，也不把人锁在加载层里；到齐后照常补上。
   if (window.__bootFailed || !document.body.classList.contains('is-booting')) return;
@@ -1184,70 +969,6 @@ setTimeout(function(){
   window.__bootHandoff();
 }, 8000);
 setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
-// #55 候选原型：?boot=a~m 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
-// ?nobar=1 不画评审条（录屏用）；退场播完才摘 is-booting。
-// 这是给人挑方向的临时骨架：选定后 #56 只留中标那条，评审条与本段一起删。
-(function(){
-  var q = new URLSearchParams(location.search);
-  var cand = q.get('boot');
-  if (!cand || 'abcdefghijklm'.indexOf(cand) < 0) return;
-  var EXIT_MS = { a:260, b:260, c:220, d:260, e:260, f:260, g:260, h:260,
-                  i:260, j:260, k:260, l:260, m:260 }[cand];
-  var slow = q.get('slow') === '1';
-  var holdMs = parseInt(q.get('hold') || '0', 10) || 0;
-  var noBar = q.get('nobar') === '1';
-  var verbose = q.get('verbose') === '1';
-  var gap = q.get('gap') === '1';
-  document.addEventListener('DOMContentLoaded', function(){
-    var bootEl = document.getElementById('boot');
-    bootEl.dataset.candidate = cand;
-    if (slow) bootEl.style.setProperty('--slow', 8);
-    if (verbose) bootEl.classList.add('is-verbose');
-    if (gap) bootEl.classList.add('is-gap');
-    // L/M：SpinKit 要的 4 / 9 个子节点由这里补上（上游标记原样，只是搬进加载层）
-    if (cand === 'l' || cand === 'm') {
-      var lib = document.createElement('div');
-      lib.className = 'boot-lib';
-      var box = cand === 'l' ? 'sk-fold' : 'sk-grid';
-      var cell = cand === 'l' ? 'sk-fold-cube' : 'sk-grid-cube';
-      var n = cand === 'l' ? 4 : 9;
-      lib.innerHTML = '<div class="' + box + '">'
-        + new Array(n + 1).join('<div class="' + cell + '"></div>') + '</div>';
-      bootEl.appendChild(lib);
-    }
-    var realHandoff = window.__bootHandoff;
-    var going = false;
-    window.__bootHandoff = function(){
-      if (going) return;
-      going = true;
-      setTimeout(function(){
-        bootEl.classList.add('is-exiting');
-        setTimeout(function(){ bootEl.classList.remove('is-exiting'); realHandoff(); },
-                   EXIT_MS * (slow ? 8 : 1));
-      }, holdMs);
-    };
-    if (noBar) return;
-    var bar = document.createElement('div');
-    bar.className = 'boot-review';
-    bar.innerHTML = '<span class="cap">加载动画候选</span>'
-      + ['a','b','c','d','e','f','g','h','i','j','k','l','m'].map(function(x){
-          return '<button data-x="' + x + '"' + (x === cand ? ' class="is-on"' : '') + '>'
-            + x.toUpperCase() + '</button>';
-        }).join('')
-      + '<button id="br-slow"' + (slow ? ' class="is-on"' : '') + '>慢放 8×</button>'
-      + '<button id="br-replay">重播</button>';
-    document.body.appendChild(bar);
-    function go(c, sl){
-      var u = location.pathname + '?boot=' + c + (sl ? '&slow=1' : '');
-      location.href = u;
-    }
-    bar.querySelectorAll('button[data-x]').forEach(function(btn){
-      btn.addEventListener('click', function(){ go(btn.dataset.x, slow); });
-    });
-    document.getElementById('br-slow').addEventListener('click', function(){ go(cand, !slow); });
-    document.getElementById('br-replay').addEventListener('click', function(){ location.reload(); });
-  });
-})();
 </script>
 <!-- 方波田：整页背景，铺满视口（像素格、光池、浮尘都由它垫底） -->
 <canvas class="bgpix" id="bg-pixels" aria-hidden="true"></canvas>

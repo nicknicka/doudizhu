@@ -1269,6 +1269,49 @@ try {
   }
   await page.screenshot({ path: '/tmp/ddz-web-3.png', fullPage: true });
 
+  // 加载层：常规态只有动画（说明由设计说），模块没起来才给文字与重试
+  {
+    const boot = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
+    watchPage(boot, '加载层');
+    // 把模块入口拖住，加载层就会一直停在常规态 —— 不用赌网速
+    await boot.route('**/app/main.js', async route => {
+      await new Promise(r => setTimeout(r, 3000));
+      await route.continue();
+    });
+    await boot.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+    await boot.waitForSelector('#boot .sk-fold-cube', { timeout: 10000 });
+    const quiet = await boot.evaluate(() => {
+      const t = document.getElementById('boot-text');
+      const r = t.getBoundingClientRect();
+      const fold = document.querySelector('#boot .boot-fold');
+      return {
+        textW: Math.round(r.width), textH: Math.round(r.height),
+        clip: getComputedStyle(t).clipPath, copy: t.textContent.trim(),
+        aria: document.getElementById('boot').getAttribute('aria-live'),
+        foldW: Math.round(fold.getBoundingClientRect().width),
+      };
+    });
+    if (quiet.textW > 4 || quiet.textH > 4) problems.push(`加载层常规态还显示着文字（${quiet.textW}×${quiet.textH}）`);
+    if (quiet.clip !== 'inset(50%)') problems.push(`加载层文字没沉到 sr-only（clip=${quiet.clip}）`);
+    if (!quiet.copy) problems.push('加载层没有留给读屏的文案');
+    if (quiet.aria !== 'polite') problems.push('加载层没挂 aria-live');
+    if (quiet.foldW < 40) problems.push(`加载层没画出折叠立方体（宽 ${quiet.foldW}）`);
+    await boot.close();
+  }
+
+  // 加载层兜底：模块挂了要把文字与重试入口放出来
+  {
+    const dead = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
+    watchPage(dead, '加载层兜底', msg => /net::ERR_FAILED|Failed to load resource/i.test(msg));
+    await dead.route('**/app/main.js', route => route.abort());
+    await dead.goto(`${BASE}/`);
+    const shown = await waitUntil(dead, async () =>
+      ((await dead.locator('#boot-text').boundingBox())?.width ?? 0) > 20);
+    if (!shown) problems.push('模块挂了以后加载层没把报错文字放出来');
+    if (await dead.locator('#boot-reload').isHidden()) problems.push('模块挂了以后没有「重新加载」入口');
+    await dead.close();
+  }
+
   // /glb：原样查看模型，不加环境贴图、不加色调映射
   {
     // 视口必须能把整机装进画布：这是保真比色的坐标系，被裁掉就会取不到边缘色块
