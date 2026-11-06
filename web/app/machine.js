@@ -74,6 +74,32 @@ let parallaxFrom = { x: 0, y: 0 }, parallaxTo = { x: 0, y: 0 };
 let started = false, ready = false, status = 'idle', error = '';
 // 入场动画占用 rig.scale；期间不接受滚轮缩放，免得两条动画抢同一根轴。
 let entranceDone = true;
+// 入场（ADR-0011）：就绪时先落到起点、但不播；等加载层收完尾（boot:done）再浮现。
+// 没有幕布可等（例如 8s 强放行之后才就绪）就直接播。
+const ENTRANCE_FROM = 0.94;
+let entranceStartedAt = null;
+function armEntrance(){
+  if (reduce || !window.gsap || !rig){ entranceDone = true; return; }
+  entranceDone = false;
+  const to = rigZoom;
+  rig.scale.setScalar(to * ENTRANCE_FROM);      // 先落到起点，别在幕布后面偷偷播完
+  if (canvas) canvas.style.opacity = '0';
+  requestRender();
+  if (document.body.classList.contains('is-booting')) {
+    document.addEventListener('boot:done', playEntrance, { once: true });
+  } else {
+    playEntrance();
+  }
+}
+function playEntrance(){
+  if (entranceStartedAt) return;
+  entranceStartedAt = performance.now();
+  const to = rigZoom;
+  // 淡入用 ease-in-out：起手慢，才读得出是「浮现」而不是「弹出来」
+  if (canvas) gsap.fromTo(canvas, { opacity: 0 }, { opacity: 1, duration: 0.6, ease: 'power1.inOut' });
+  gsap.to(rig.scale, { x: to, y: to, z: to, duration: 0.8, ease: 'power2.out',
+    onUpdate: requestRender, onComplete: () => { entranceDone = true; relayout(); } });
+}
 // boot 交接用：机身就绪或明确失败时兑现一次；重复装载会换新的 Promise。
 let readyResolve = null;
 let readyPromise = new Promise(res => { readyResolve = res; });
@@ -894,14 +920,9 @@ function installModel(gltf){
   // installModel 时画布尺寸通常没变，resize 会提前返回；这里必须立即布局，
   // 否则 ready 后到入场动画结束前，屏与键热区都会短暂读成空。
   relayout();
-  if (!reduce && window.gsap){
-    // 入场缩放只改变投影，不会重新 emit；结束时补一次 relayout，
-    // 让座位标签/热区/机下托盘的贴合都用"落定后"的 rect，而不是动画中途的。
-    entranceDone = false;
-    gsap.from(rig.scale, { x: 0.94, y: 0.94, z: 0.94, duration: 0.8,
-      ease: 'power2.out', onUpdate: requestRender,
-      onComplete: () => { entranceDone = true; relayout(); } });
-  }
+  // 入场缩放只改变投影，不会重新 emit；结束时补一次 relayout，
+  // 让座位标签/热区/机下托盘的贴合都用"落定后"的 rect，而不是动画中途的。
+  armEntrance();
 }
 function settle(){
   const res = readyResolve; readyResolve = null;
@@ -1459,6 +1480,7 @@ export function machineStatus(){
   if (body) body.traverse(o => { if (o.isMesh && o.castShadow) shadowCasters++; });
   return {
     source: 'glb', status, ready, error, nodes, buttonsVisible,
+    entranceDone, entranceStartedAt,          // 入场有没有播、什么时候开始（ADR-0011 验收用）
     environment: !!(scene && scene.environment),
     toneMapping: renderer ? renderer.toneMapping : null,
     toneMappingName: renderer

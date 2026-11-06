@@ -923,6 +923,9 @@
 // 计时从 HTML 解析起算 —— 模块下载多久，页头不该跟着瞎等多久。
 window.__bootStarted = false;   // boot() 一跑就置真，"没加载起来"的指控随之作废
 window.__bootFailed = false;
+// 加载层这一拍的时间轴（ADR-0011）：最短停留 + 收尾播完，机身才浮现。
+window.__bootAt = { shown: performance.now(), exitStart: 0, done: 0 };
+window.__bootDwellMs = 900;   // 最短停留：机身再快也让这一拍走完，免得像闪屏
 window.__bootFallback = function(){
   if (!document.body.classList.contains('is-booting')
       || window.__bootStarted || window.__bootFailed) return;
@@ -934,12 +937,33 @@ window.__bootFallback = function(){
 };
 window.__bootHandoff = function(){
   var boot = document.getElementById('boot');
-  if (boot.classList.contains('is-exiting')) return;   // 8s 强放行与 boot() 都调它
-  boot.classList.add('is-exiting');
-  setTimeout(function(){
+  if (window.__bootHandingOff) return;                 // 8s 强放行与 boot() 都调它
+  window.__bootHandingOff = true;
+  var reduce = !!(window.matchMedia
+                  && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // 幕布收完：摘类 + 通知机身可以浮现了（machine.js 等这个事件，见 ADR-0011）
+  var done = function(){
+    if (window.__bootAt.done) return;
+    window.__bootAt.done = performance.now();
     boot.classList.remove('is-exiting');
     document.body.classList.remove('is-booting');
-  }, 260);                                            // 与 bootFoldOff 的时长对齐
+    document.dispatchEvent(new Event('boot:done'));
+  };
+  // 收尾动画必须播完才摘幕布；动画没起来（或用户要减少动效）时由兜底/直通收口。
+  var left = reduce ? 0 : Math.max(0, window.__bootDwellMs - (performance.now() - window.__bootAt.shown));
+  setTimeout(function(){
+    if (reduce) { done(); return; }
+    var fold = boot.querySelector('.boot-fold');
+    var onEnd = function(e){
+      if (e && e.animationName && e.animationName !== 'bootFoldOff') return;
+      fold.removeEventListener('animationend', onEnd);
+      done();
+    };
+    if (fold) fold.addEventListener('animationend', onEnd);
+    window.__bootAt.exitStart = performance.now();
+    boot.classList.add('is-exiting');
+    setTimeout(done, 800);          // 退场动画没跑起来也不能把页面锁在幕布里
+  }, left);
 };
 setTimeout(function(){
   // 8 秒强放行：宁可先露半成品，也不把人锁在加载层里；到齐后照常补上。
