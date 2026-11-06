@@ -988,6 +988,63 @@
     animation:bootH-off calc(.26s * var(--slow,1)) steps(4,end) forwards}
   @keyframes bootH-off{to{transform:scaleY(.02);opacity:0}}
 
+  /* I~K · 三支立体的：真 3D（perspective + preserve-3d），不是画出来的假等距。
+     参考取参数不取代码：Uiverse 的 spicy-otter-30（perspective 350px、六面靠
+     translateZ(±w/2)）与 new-kangaroo-60（rotateX(-30deg) + rotateY 整圈 linear）。
+     三支共用「退场把立体件收进屏幕」的收尾思路。 */
+
+  #boot[data-candidate="i"] #boot-text,#boot[data-candidate="j"] #boot-text,
+  #boot[data-candidate="k"] #boot-text{grid-row:2;grid-column:1}
+
+  /* I · 立体方块：三面 + 左右摆动（不做整圈，回避背面没画的那三面） */
+  #boot[data-candidate="i"]{perspective:420px}
+  #boot[data-candidate="i"] .boot-mark{position:relative;width:40px;height:40px;font-size:0;
+    background:var(--accent);transform-style:preserve-3d;
+    animation:bootI-sway 1.8s cubic-bezier(.45,.03,.51,.95) infinite alternate}
+  #boot[data-candidate="i"] .boot-mark::before,
+  #boot[data-candidate="i"] .boot-mark::after{content:"";position:absolute;inset:0}
+  #boot[data-candidate="i"] .boot-mark::before{background:var(--ink);opacity:.72;
+    transform:rotateX(90deg) translateZ(20px)}
+  #boot[data-candidate="i"] .boot-mark::after{background:color-mix(in srgb,var(--accent) 62%,#000);
+    transform:rotateY(90deg) translateZ(20px)}
+  @keyframes bootI-sway{from{transform:rotateX(22deg) rotateY(-34deg)}
+                        to{transform:rotateX(22deg) rotateY(34deg)}}
+  #boot[data-candidate="i"] #boot-text::after{content:" · 候选 I 立体方块"}
+  #boot[data-candidate="i"].is-exiting .boot-mark{
+    animation:bootI-off calc(.26s * var(--slow,1)) ease-in forwards}
+  @keyframes bootI-off{to{transform:rotateX(22deg) rotateY(150deg) translateZ(-260px);opacity:0}}
+
+  /* J · 翻牌：一张牌绕 Y 自转（带 3px 厚度，转到侧面不会消失） */
+  #boot[data-candidate="j"]{perspective:360px}
+  #boot[data-candidate="j"] .boot-mark{position:relative;width:40px;height:56px;font-size:0;
+    box-sizing:border-box;border:2px solid var(--ink);
+    background:linear-gradient(var(--side-a),var(--side-a)) 6px 8px/28px 3px no-repeat,var(--ground);
+    transform-style:preserve-3d;
+    animation:bootJ-flip 1.7s cubic-bezier(.62,.02,.34,1) infinite alternate}
+  #boot[data-candidate="j"] .boot-mark::before{content:"";position:absolute;inset:0;
+    box-sizing:border-box;border:2px solid var(--ink);
+    background:color-mix(in srgb,var(--ground) 84%,var(--ink));transform:translateZ(-4px)}
+  @keyframes bootJ-flip{from{transform:rotateX(-10deg) rotateY(-54deg)}
+                        to{transform:rotateX(-10deg) rotateY(54deg)}}
+  #boot[data-candidate="j"] #boot-text::after{content:" · 候选 J 翻牌"}
+  #boot[data-candidate="j"].is-exiting .boot-mark{
+    animation:bootJ-off calc(.26s * var(--slow,1)) ease-in forwards}
+  @keyframes bootJ-off{to{transform:rotateX(-10deg) rotateY(200deg) translateY(-38vh) scale(.5);opacity:0}}
+
+  /* K · 透视扫描台：一张网格平面躺进景深里往下滚，接显像管自检的语感 */
+  #boot[data-candidate="k"]{perspective:300px}
+  #boot[data-candidate="k"] .boot-mark{display:none}
+  #boot[data-candidate="k"]::before{content:"";grid-area:1/1;align-self:center;
+    width:170px;height:170px;box-sizing:border-box;border:2px solid var(--ink);opacity:.6;
+    background-image:repeating-linear-gradient(0deg,var(--ink) 0 1px,transparent 1px 22px),
+                     repeating-linear-gradient(90deg,var(--ink) 0 1px,transparent 1px 22px);
+    transform:rotateX(72deg) translateZ(-40px);animation:bootK-scroll 1.6s linear infinite}
+  @keyframes bootK-scroll{from{background-position:0 0,0 0}to{background-position:0 22px,0 0}}
+  #boot[data-candidate="k"] #boot-text::after{content:" · 候选 K 透视扫描台"}
+  #boot[data-candidate="k"].is-exiting::before{
+    animation:bootK-off calc(.26s * var(--slow,1)) ease-in forwards}
+  @keyframes bootK-off{to{transform:rotateX(0) translateZ(0) scale(1.6);opacity:0}}
+
   /* 评审条：只在 ?boot= 出现，切换候选 / 慢放 / 重播；选定后整块删 */
   .boot-review{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:10000;
     display:flex;gap:6px;align-items:center;padding:6px 10px;
@@ -1076,14 +1133,15 @@ setTimeout(function(){
   window.__bootHandoff();
 }, 8000);
 setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中途崩了才会走到
-// #55 候选原型：?boot=a~h 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
+// #55 候选原型：?boot=a~k 选一条，?slow=1 慢放 8 倍，?hold=ms 压住退场，
 // ?nobar=1 不画评审条（录屏用）；退场播完才摘 is-booting。
 // 这是给人挑方向的临时骨架：选定后 #56 只留中标那条，评审条与本段一起删。
 (function(){
   var q = new URLSearchParams(location.search);
   var cand = q.get('boot');
-  if (!cand || 'abcdefgh'.indexOf(cand) < 0) return;
-  var EXIT_MS = { a:260, b:260, c:220, d:260, e:260, f:260, g:260, h:260 }[cand];
+  if (!cand || 'abcdefghijk'.indexOf(cand) < 0) return;
+  var EXIT_MS = { a:260, b:260, c:220, d:260, e:260, f:260, g:260, h:260,
+                  i:260, j:260, k:260 }[cand];
   var slow = q.get('slow') === '1';
   var holdMs = parseInt(q.get('hold') || '0', 10) || 0;
   var noBar = q.get('nobar') === '1';
@@ -1106,7 +1164,7 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
     var bar = document.createElement('div');
     bar.className = 'boot-review';
     bar.innerHTML = '<span class="cap">加载动画候选</span>'
-      + ['a','b','c','d','e','f','g','h'].map(function(x){
+      + ['a','b','c','d','e','f','g','h','i','j','k'].map(function(x){
           return '<button data-x="' + x + '"' + (x === cand ? ' class="is-on"' : '') + '>'
             + x.toUpperCase() + '</button>';
         }).join('')
