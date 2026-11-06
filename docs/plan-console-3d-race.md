@@ -135,7 +135,7 @@ KeyWell_L / KeyWell_R   左右按键凹槽   （不含具体按键）
 ### 5.1 视觉
 - 用 `tools/console-shot.mjs` 出三档截图（1440 / 900 / 420），同一相机、同一光照、同一 dsf。
 - 并排贴出 A / B / **现状 code** 三列。
-- 按更新后的 7 条验收（`handoff-3d-console.md` 第 4 条已改成"按三视图"）逐条打分，
+- 按更新后的 7 条验收（[`agents/acceptance-review.md`](agents/acceptance-review.md) 第 4 条已改成"按三视图"）逐条打分，
   **由独立 sub-agent 评**（作者不自评），给出 PASS/FAIL + 证据 + 最差项。
 
 ### 5.2 非视觉
