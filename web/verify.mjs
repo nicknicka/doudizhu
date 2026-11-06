@@ -72,16 +72,37 @@ const waitText = (page, sel, needle, timeout = 15000) =>
 const waitBanner = (page, needle, timeout = 15000) => waitText(page, '#banner', needle, timeout);
 // 手牌在画布上的中心点：直接问 3D 场景，脚本据此点"真牌"
 const handPts = page => page.evaluate(async () => (await import('/app/machine.js')).handPoints());
+
+// 布局 / 3D 投影没落定时，#stage 的盒或手牌坐标会是 null/NaN；直接丢给 mouse.move
+// 只会报 "Invalid parameters"，看不出是哪一处（#60 在 CI 上实际踩到过）。这里等到
+// 值可用再动手，超时则带出是哪一处 —— 把偶发 NaN 变成「等一下就好」，而不是硬失败。
+const finitePoint = p => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+async function stageBoxOf(page){
+  for (let i = 0; i < 50; i++){
+    const box = await page.locator('#stage').boundingBox();
+    if (box && Number.isFinite(box.x) && Number.isFinite(box.y)) return box;
+    await page.waitForTimeout(100);
+  }
+  throw new Error('#stage 的点击盒一直取不到（布局没落定）');
+}
+async function handPointOf(page, k){
+  for (let i = 0; i < 50; i++){
+    const pt = (await handPts(page))[k];
+    if (finitePoint(pt)) return pt;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`第 ${k} 张手牌坐标不是有限数：${JSON.stringify((await handPts(page))[k])}`);
+}
+
 // 在屏幕里点第 k 张手牌：先把鼠标移过去让视差收敛，再按收敛后的真实落点点击
 const clickCard = async (page, k) => {
   // machine.js 投影出来的手牌坐标是 .stage 局部坐标；机身铺满视口渲染后画布比 .stage 大，
   // 所以点击基准必须取 .stage 而不是画布本身。
-  const box = await page.locator('#stage').boundingBox();
-  let pt = (await handPts(page))[k];
-  if (!pt) throw new Error(`没有第 ${k} 张手牌坐标`);
+  const box = await stageBoxOf(page);
+  let pt = await handPointOf(page, k);
   await page.mouse.move(box.x + pt.x, box.y + pt.y);
   await page.waitForTimeout(650);
-  pt = (await handPts(page))[k];
+  pt = await handPointOf(page, k);
   await page.mouse.click(box.x + pt.x, box.y + pt.y);
 };
 
@@ -593,7 +614,7 @@ try {
   if (idleB.dpr > 2) problems.push(`DPR 超过 2：${idleB.dpr}`);
 
   // 视差动画也必须有明确终点：鼠标停住后 500ms 不再续帧
-  const stageBox = await page.locator('#stage').boundingBox();
+  const stageBox = await stageBoxOf(page);
   await page.mouse.move(stageBox.x + stageBox.width * 0.18, stageBox.y + stageBox.height * 0.28);
   await page.mouse.move(stageBox.x + stageBox.width * 0.72, stageBox.y + stageBox.height * 0.62);
   await page.waitForTimeout(400);
@@ -661,7 +682,7 @@ try {
     }
     return null;
   });
-  if (!bodyPoint) {
+  if (!finitePoint(bodyPoint)) {
     problems.push('机身上找不到可拖的点，没法验证副屏跟随');
   } else {
     await page.mouse.move(bodyPoint.x, bodyPoint.y);
@@ -763,13 +784,15 @@ try {
       const chipN = () => page.locator('#play-chips i.c').count();
       const n0 = await chipN();
       const slideAcross = async () => {
-        const box = await page.locator('#stage').boundingBox();
-        await page.mouse.move(box.x + (await handPts(page))[seq.g].x, box.y + (await handPts(page))[seq.g].y);
+        const box = await stageBoxOf(page);
+        const p0 = await handPointOf(page, seq.g);
+        await page.mouse.move(box.x + p0.x, box.y + p0.y);
         await page.waitForTimeout(600);
-        const P = await handPts(page);
         await page.mouse.down();
-        await page.mouse.move(box.x + P[seq.g + 1].x, box.y + P[seq.g + 1].y, { steps: 8 });
-        await page.mouse.move(box.x + P[seq.g + 2].x, box.y + P[seq.g + 2].y, { steps: 8 });
+        const p1 = await handPointOf(page, seq.g + 1);
+        await page.mouse.move(box.x + p1.x, box.y + p1.y, { steps: 8 });
+        const p2 = await handPointOf(page, seq.g + 2);
+        await page.mouse.move(box.x + p2.x, box.y + p2.y, { steps: 8 });
         await page.mouse.up();
         await page.waitForTimeout(150);
       };
@@ -1292,24 +1315,40 @@ try {
   {
     const boot = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 2 });
     watchPage(boot, '加载层');
-    // 把模块入口拖住，加载层就会一直停在常规态 —— 不用赌网速
+    // 加载层常规态只活很短一瞬（最短停留 900ms + 退场，见 ADR-0011）。用"此刻还在不在"
+    // 量宽度，会偶发量到退场中/已撤的 0（#60）。改成从进页起就记录：只要折叠立方体在
+    // 常规态里画出来过（宽 ≥ 40 且未进入退场），就把那一帧的数值存下来。
+    await boot.addInitScript(() => {
+      window.__bootQuiet = null;
+      const tick = () => {
+        if (!window.__bootQuiet){
+          const bootEl = document.getElementById('boot');
+          const fold = bootEl && bootEl.querySelector('.boot-fold');
+          if (bootEl && fold && document.body.classList.contains('is-booting')
+              && !bootEl.classList.contains('is-exiting')
+              && fold.getBoundingClientRect().width >= 40){
+            const t = document.getElementById('boot-text');
+            const r = t.getBoundingClientRect();
+            window.__bootQuiet = {
+              textW: Math.round(r.width), textH: Math.round(r.height),
+              clip: getComputedStyle(t).clipPath, copy: t.textContent.trim(),
+              aria: bootEl.getAttribute('aria-live'),
+              foldW: Math.round(fold.getBoundingClientRect().width),
+            };
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    // 拖住模块入口：常规态多停一会儿，好让记录器一定采到一帧。
     await boot.route('**/app/main.js', async route => {
       await new Promise(r => setTimeout(r, 3000));
       await route.continue();
     });
     await boot.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
-    await boot.waitForSelector('#boot .sk-fold-cube', { timeout: 10000 });
-    const quiet = await boot.evaluate(() => {
-      const t = document.getElementById('boot-text');
-      const r = t.getBoundingClientRect();
-      const fold = document.querySelector('#boot .boot-fold');
-      return {
-        textW: Math.round(r.width), textH: Math.round(r.height),
-        clip: getComputedStyle(t).clipPath, copy: t.textContent.trim(),
-        aria: document.getElementById('boot').getAttribute('aria-live'),
-        foldW: Math.round(fold.getBoundingClientRect().width),
-      };
-    });
+    await boot.waitForFunction(() => window.__bootQuiet, null, { timeout: 15000 });
+    const quiet = await boot.evaluate(() => window.__bootQuiet);
     if (quiet.textW > 4 || quiet.textH > 4) problems.push(`加载层常规态还显示着文字（${quiet.textW}×${quiet.textH}）`);
     if (quiet.clip !== 'inset(50%)') problems.push(`加载层文字没沉到 sr-only（clip=${quiet.clip}）`);
     if (!quiet.copy) problems.push('加载层没有留给读屏的文案');
