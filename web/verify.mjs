@@ -779,6 +779,10 @@ try {
     latestHidden: document.getElementById('play-latest').hidden,
     hint: document.getElementById('play-hint').textContent,
   }));
+  // 演示局开屏就落在「该我出牌、真有得选」的最新一手了 —— 先退回上一手，制造出历史局面再验回放
+  if (!(await page.locator('#step-prev').isDisabled())) {
+    await page.click('#step-prev'); await page.waitForTimeout(900);
+  }
   const st0 = await stepState();
   if (!/第\s*\d+/.test(st0.now)) problems.push(`出牌机会没显示编号：${st0.now}`);
   if (st0.prevOff !== st0.leftOff || st0.nextOff !== st0.rightOff) {
@@ -801,7 +805,17 @@ try {
   await page.waitForTimeout(250);
   if (!(await text(page, '#play-hint')).includes('推荐')) problems.push('推荐键没有给出反馈');
 
-  // 交互 2b：终局 —— 跳到最后那一手，操作台必须收手，不再提示"该谁出牌"
+  // 交互 2b：终局 —— 演示局开屏只接到「该我出牌」的那一手（整局随后端下发，
+  // 前端只切到接手的起点）。要看终局，用「打开记录」把整局载进来，再跳到最后。
+  const fullDemo = await (await fetch(`${BASE}/api/demo`)).json();
+  await page.setInputFiles('#dock-file', {
+    name: 'demo-full.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(fullDemo.record)),
+  });
+  if (!(await waitText(page, '#strip-sub', '/66 手'))) {
+    problems.push('「打开记录」没把整局载进来（演示局只接到该我出牌的一手）');
+  }
   await page.click('#play-latest');
   if (!(await waitText(page, '#play-who', '牌局已结束'))) {
     problems.push('终局时操作台没报「牌局已结束」');

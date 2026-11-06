@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from ddz.api.app import analyze, app, get_policy
+from ddz.api.app import DEMO_ME, DEMO_SEED, analyze, app, get_policy, opening_step
 from ddz.inference import sample
 from ddz.record.schema import Action, Candidate, Initial, MatchRecord, Step
+from ddz.record.state import derive, my_turn_steps
+from ddz.rules import legal_actions
+from ddz.source import sim
 
 fastapi_testclient = pytest.importorskip("fastapi.testclient")
 
@@ -431,3 +434,21 @@ def test_seat_mapping_is_relative_to_me(me, expect_up, expect_down):
     assert seats[expect_down]["relative"] == "down"
     assert seats["landlord"]["identity"] == "landlord"
     assert all(seats[p]["identity"] == "peasant" for p in seats if p != "landlord")
+
+
+def test_demo_opening_is_a_playable_rules_legal_decision():
+    """演示局开屏必须落在「轮到我方、且真有多条出牌线路」的决策点。
+
+    第一个轮到我方的决策点常常只能「不出」（上家刚甩了个压不住的牌），
+    于是页面一打开按键全灰、看着像坏了 / 像终局（用户报过）。开屏要直接落在
+    有得选的局面，而且这个局面本身得是规则推得出来的合法局面。
+    """
+    record = next(r for r in sim.generate(4, seed=DEMO_SEED) if r.me == DEMO_ME)
+    step = opening_step(record)
+
+    assert step in my_turn_steps(record), "开屏必须轮到我方"
+    snapshot = derive(record, steps=record.steps[:step])
+    assert not snapshot.finished, "开屏不能是终局"
+    assert snapshot.acting == DEMO_ME
+    plays = [a for a in legal_actions(snapshot) if a.is_play]
+    assert len(plays) >= 2, f"开屏得有多条出牌线路可选，收到 {[a.cards for a in plays]}"
