@@ -399,8 +399,11 @@ async function waitForFramesToSettle(page, timeoutMs = 60000) {
 
 try {
   if (!(await portIsFree())) throw new Error(`端口 ${PORT} 已被占用，请先停止占用进程`);
+  // PYTHONPATH 指到本 checkout 的 src：共享 .venv 的 editable 安装指向主 checkout，
+  // 不设的话 `python -m ddz` 会服务别的 checkout 的 web/，脚本与后端就来自两棵树（见 #66）。
   server = spawn('.venv/bin/python', ['-m', 'ddz', 'serve', '--port', String(PORT)],
-    { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
+    { cwd: REPO, env: { ...process.env, PYTHONPATH: path.join(REPO, 'src') },
+      stdio: ['ignore', 'pipe', 'pipe'] });
   serverExited = new Promise(resolve => server.once('exit', resolve));
   await waitForHealth();
   const browser = await chromium.launch();
