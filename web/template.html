@@ -5,7 +5,28 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>斗地主决策助手</title>
 <link rel="icon" href="data:,">
-<script src="vendor/gsap.min.js"></script>
+<!-- defer：解析不挡在这里；它仍先于 type=module 执行，window.gsap 照常可用（#54） -->
+<script src="vendor/gsap.min.js" defer></script>
+<!-- three 的 addons（GLTFLoader）用裸名 "three" 导入，靠 importmap 指回同一份
+     vendor；importmap 必须在任何模块（含 modulepreload）解析前就位。 -->
+<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
+<!-- 首屏并行下载（#53）：模块图要等求值才暴露下一层依赖，串行是慢网下
+     "机身到达"被拖长的主因；这里把整张图提前挂成 fetch 队列。
+     不要给 3.1MB 的 GLB 做 preload：实测它跟约 1MB 的模块图抢同一条管子，
+     慢网下机身反而更晚到；总字节也不变。 -->
+<link rel="modulepreload" href="/app/main.js">
+<link rel="modulepreload" href="/app/state.js">
+<link rel="modulepreload" href="/app/api.js">
+<link rel="modulepreload" href="/app/board.js">
+<link rel="modulepreload" href="/app/panels.js">
+<link rel="modulepreload" href="/app/console.js">
+<link rel="modulepreload" href="/app/machine.js">
+<link rel="modulepreload" href="/app/deskbg.js">
+<link rel="modulepreload" href="/app/labels.js">
+<link rel="modulepreload" href="/app/virtual-cards.js">
+<link rel="modulepreload" href="/app/card-face.js">
+<link rel="modulepreload" href="/vendor/three.module.min.js">
+<link rel="modulepreload" href="/vendor/three/examples/jsm/loaders/GLTFLoader.js">
 <style>
   /* 配色 / 字体来自 web/tokens.json，后端渲染时注入 */
   @font-face{
@@ -1048,9 +1069,6 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
   </section>
 </div>
 
-<!-- three 的 addons（GLTFLoader）用裸名 "three" 导入，
-     靠 importmap 指回同一份 vendor，避免 GLTFLoader 取到第二份 three -->
-<script type="importmap">{"imports":{"three":"/vendor/three.module.min.js"}}</script>
 <script type="module" src="app/main.js"></script>
 <script>
 // 模块图挂了是事件，不用猜网速：fetch/依赖失败直接在 script 元素上冒 error。
