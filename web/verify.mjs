@@ -242,11 +242,12 @@ async function checkProbabilityEmpty(page, label, expected){
 }
 
 async function goToMyTurn(page, label){
-  const before = await page.evaluate(async () => {
+  const turnState = () => page.evaluate(async () => {
     const { S } = await import('/app/state.js');
     return { mine: S.snap.acting === S.snap.me, hasPoint: Boolean(S.point),
              current: S.snap.step, mySteps: S.meta.my_steps };
   });
+  const before = await turnState();
   if (before.mine && before.hasPoint) return before;
   const target = [...before.mySteps]
     .sort((a, b) => Math.abs(a - before.current) - Math.abs(b - before.current))[0];
@@ -255,13 +256,16 @@ async function goToMyTurn(page, label){
     return before;
   }
   await page.click(target < before.current ? '#dpad-left' : '#dpad-right');
-  await page.waitForTimeout(1200);
-  const after = await page.evaluate(async () => {
-    const { S } = await import('/app/state.js');
-    return { mine: S.snap.acting === S.snap.me, hasPoint: Boolean(S.point),
-             current: S.snap.step, mySteps: S.meta.my_steps };
-  });
-  if (!after.mine || !after.hasPoint) problems.push(`${label} 没回到我方出牌机会`);
+  // 点完 dpad 不能固定等：慢 runner 上 1200ms 可能还没重排完，读到的仍是点击前
+  // 的状态，于是误报"没回到我方出牌机会"（CI 实测约 2/3 的运行栽在这一条）。
+  // 按本文件其余等待的口径轮询到条件成立，超时才算失败 —— 既不掩盖真回归，
+  // 也不会因为机器慢而误报。
+  const ok = await waitUntil(page, async () => {
+    const s = await turnState();
+    return s.mine && s.hasPoint;
+  }, 8000);
+  const after = await turnState();
+  if (!ok || !after.mine || !after.hasPoint) problems.push(`${label} 没回到我方出牌机会`);
   return after;
 }
 
@@ -1399,7 +1403,10 @@ try {
 
   await browser.close();
 } catch (err) {
-  problems.push(`验证本身出错：${err.message}`);
+  // 出错也要能定位：只报 message 时，"mouse.move: Invalid parameters"（NaN 坐标）
+  // 这类问题完全看不出是哪一次调用 —— #60 排查时就卡在这里。
+  const where = String(err.stack || '').split('\n').slice(0, 3).join(' ⏎ ');
+  problems.push(`验证本身出错：${err.message}${where ? ' @ ' + where : ''}`);
 } finally {
   await stopServer();
 }
