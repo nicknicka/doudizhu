@@ -2,7 +2,7 @@
 // 三维形状和真屏在 machine.js 里；要读的数字留在这一层。
 
 import { S, $ } from './state.js';
-import { RANKS, NAME, label, identityLabel, isMe, overText } from './labels.js';
+import { RANKS, NAME, label, identityLabel, isMe } from './labels.js';
 import * as machine from './machine.js';
 
 let labels = {};
@@ -231,26 +231,6 @@ function renderCounter(){
 export function renderBar(){ renderCounter(); }
 
 /** 窄屏用的计分板：把座位名牌从屏里搬出来，排成一条，避免互相压。 */
-function renderScoreboard(){
-  const v = S.snap;
-  const rank = { up: 0, me: 1, down: 2 };
-  const players = Object.keys(S.meta.seats).slice().sort((a, b) =>
-    (rank[S.meta.seats[a].relative] ?? 3) - (rank[S.meta.seats[b].relative] ?? 3));
-  $('scoreboard').innerHTML = players.map(player => {
-    const seat = S.meta.seats[player];
-    const mine = isMe(player), acting = !v.finished && v.acting === player;
-    const played = v.played[player] || [];
-    return `<div class="sc${mine ? ' is-me' : ''}${acting ? ' is-acting' : ''}">`
-      + `<span class="who"><b>${label(player)}</b>`
-      + `<span class="badge ${seat.identity}">${identityLabel(player)}</span>`
-      + `<span class="cnt">${v.remaining[player]} 张</span>`
-      + (acting ? `<span class="turn-flag">▶ ${mine ? '该你出' : '该他出'}</span>` : '')
-      + `</span>`
-      + `<span class="played">已出：${played.length ? played.map(x => NAME[x] || x).join(' ') : '—'}</span>`
-      + `</div>`;
-  }).join('');
-}
-
 /** 我的手牌在平面上的可读副本；3D 牌面负责点选。 */
 function renderHandLine(){
   const hand = (S.snap && S.snap.my_hand) || [];
@@ -404,7 +384,6 @@ export function render(){
   ensureLabels();
   paintLabels();
   renderCounter();
-  renderScoreboard();
   renderHandLine();
   machine.apply(S.snap, S.meta);
   // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。

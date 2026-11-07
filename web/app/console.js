@@ -52,6 +52,7 @@ const latestView = () => S.snap.step === S.meta.total_steps;
 /** 开局面板要的张数来自后端；配置未到时不许开局。 */
 const openingHandSizes = () => (S.config && S.config.opening_hand_sizes) || {};
 const needFor = me => openingHandSizes()[me];
+const cardLimit = rank => (rank === 'B' || rank === 'R') ? 1 : 4;
 
 /* 身份只有「地主 / 农民」；是农民时还要指定地主在我上家还是下家。
    两者合起来才是记录层的座位名 —— 出手顺序是领域知识，别在页面里推。 */
@@ -128,7 +129,7 @@ function renderNew(){
       : '<span class="empty">底牌还没选</span>');
   $('new-keys').innerHTML = RANKS.map(r => {
     const n = countIn(SEL.hand, r) + countIn(SEL.cards, r);
-    const spent = n >= 4;
+    const spent = n >= cardLimit(r);
     return `<button type="button" data-key="${r}" class="${n ? 'has' : ''}${spent ? ' spent' : ''}">${NAME[r]}`
          + (n ? `<sup>${n}</sup>` : '') + '</button>';
   }).join('');
@@ -239,8 +240,9 @@ export function init(dependencies){
   $('new-keys').addEventListener('click', e => {
     const b = e.target.closest('button[data-key]'); if (!b) return;
     const r = b.dataset.key;
-    if (countIn(SEL.hand, r) + countIn(SEL.cards, r) >= 4){
-      setBanner(`${NAME[r]} 一副牌只有 4 张。`, 'error'); return;
+    const limit = cardLimit(r);
+    if (countIn(SEL.hand, r) + countIn(SEL.cards, r) >= limit){
+      setBanner(`${NAME[r]} 一副牌只有 ${limit} 张。`, 'error'); return;
     }
     SEL[PAD.target].push(r);
     const need = needFor(currentMe());

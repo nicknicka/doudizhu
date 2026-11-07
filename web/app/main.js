@@ -260,13 +260,22 @@ $('stage').addEventListener('pointerdown', e => {
   e.stopPropagation();
 });
 $('stage').addEventListener('pointermove', e => {
-  if (!draggingCard) return;
+  if (!draggingCard){
+    machine.setHoverCard(cardAt(e));
+    return;
+  }
   const i = cardAt(e);
   if (i === lastCard) return;      // 同一张牌里移动不算重新进入
   lastCard = i;
   if (i !== null) consolePanel.toggleCard(i);
 });
-const endCardDrag = () => { draggingCard = false; lastCard = null; };
+$('stage').addEventListener('pointerleave', () => {
+  if (!draggingCard) machine.setHoverCard(null);
+});
+const endCardDrag = () => {
+  if (draggingCard) machine.setHoverCard(null);
+  draggingCard = false; lastCard = null;
+};
 addEventListener('pointerup', endCardDrag);
 addEventListener('pointercancel', endCardDrag);
 addEventListener('keydown', e => {
@@ -277,9 +286,9 @@ addEventListener('keydown', e => {
 });
 
 
-/* ---------- 操作台与状态带：首屏只剩机身 + 底部 dock ---------- */
+/* ---------- 操作台与底部 dock ---------- */
 
-// 操作台：状态行常驻在 dock，deckbar 作为独立浮层从 dock 上沿拉起
+// 操作台作为独立浮层从 dock 上沿拉起
 const panel = $('panel');
 const stripWho = $('strip-who');
 const stripSub = $('strip-sub');
@@ -297,7 +306,7 @@ function updateStatusStrip(){
 // Dock 按钮事件
 const dockMap = {
   'dock-steps': () => {
-    // 开关操作台；状态行始终留在 dock 上
+    // 开关操作台
     panel?.classList.toggle('is-open');
     syncDockActive();
   },
