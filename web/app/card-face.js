@@ -9,7 +9,7 @@ export const FACE_W = 80, FACE_H = 114;
 export const CORNER = 9;                 // 切角边长（与旧 52×74 版同比放大）
 
 // 排点的三个列与五个行（列间距要容得下牌脚的大角标，所以比真牌略窄）
-const PIP_COL = { L: 0.34, C: 0.50, R: 0.66 };
+const PIP_COL = { L: 0.36, C: 0.50, R: 0.64 };   // 往里收一点，给放大的角标让路
 const PIP_ROW = { T: 0.16, UM: 0.38, M: 0.50, LM: 0.62, B: 0.84 };
 
 const { L, C, R } = PIP_COL, { T, UM, M, LM, B } = PIP_ROW;
@@ -52,10 +52,10 @@ const PAPER = '#fbfaf6';          // 牌纸白（旧版就在用，不算新配�
 const PAD = '#201a26';                   // 切角外露的桌色
 const PIP_FONT = 13;                     // 排点字号（墨迹 ≈ 13，列距 16 放得下，也不压住角标）
 const ACE_FONT = 50;                     // A 的大花色
-const IDX_FONT = [30, 16];               // 角标点数：单字 / 两字
-const IDX_SUIT = 18;                     // 角标花色
-const JOKER_IDX = 24;                    // 大小王的「小/大」比点数宽一倍，收窄才不压住王冠
-const IDX_SUIT_Y = 30;
+const IDX_FONT = [34, 19];               // 角标点数：单字 / 两字
+const IDX_SUIT = 21;                     // 角标花色
+const JOKER_IDX = 28;                    // 大小王的「小/大」比点数宽一倍，收窄才不压住王冠
+const IDX_SUIT_Y = 34;
 
 // 角标：点数在上、花色在下。坐标是牌面左上角的局部坐标，右下角把整套转 180° 复用。
 function cornerIndex(g, label, glyph, color, size){

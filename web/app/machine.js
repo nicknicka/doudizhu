@@ -48,8 +48,15 @@ const SUB_TEX = { w: 1216, h: 80 };   // 1216×80 ≈ 玻璃面 113.90×7.50 的
 let hudScene = null, hudCam = null, hudTex = null, hudCanvas = null;
 const HUD_TEX = { w: 1536, h: 804 };   // ≈ 主屏 104×54.4 的长宽比；按大屏 RT 的实际像素留够采样率
 let tableScene, tableCam, rt;
-let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadowGeo, cardGeo;
+let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadowGeo, cardGeo, frameGeo, frameMat;
 let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
+let selectedCards = new Set();
+// 选中的牌怎么「站出来」：抬高 + 亮边 + 影子留在原位。
+const SEL_LIFT = 0.90;                 // 选中抬多高（世界 Y）：不抢层次，就靠抬得更开让人看见
+const SEL_EDGE = 0.055;                // 选中外描边的宽度（世界单位，画在牌的轮廓之外）
+const CARD_CORNER = 0.083;             // 牌面切角：card-face 的 9/80 格换算成世界单位
+const SEL_EDGE_COLOR = '#e8b04a';      // 兜底色；实际取 CSS 变量 --sel-edge（模板 :root 里改一行就换色）
+const _selQ = new THREE.Quaternion(), _selV = new THREE.Vector3();
 let screenSize = new THREE.Vector2(0.001, 0.001), screenPx = null;
 let buttons = [], buttonZones = [], modelSize = new THREE.Vector3(10, 4.2, 1.0);
 // 键帽按热区拆出来的独立组：按下时只有那一颗往 -Z 沉，机身不再替它做假动作。
@@ -58,7 +65,8 @@ let screenCenter = new THREE.Vector3();
 let stageW = 0, stageH = 0, dpr = 1, observedW = 0, observedH = 0;
 // 渲染画布铺满视口（比 .stage 设计盒大）；热区/叠加层仍按设计盒坐标算
 let canvasW = 0, canvasH = 0, observedCW = 0, observedCH = 0;
-let lastSnap = null, lastMeta = null, narrowHand = false, tinyHand = false;
+let lastSnap = null, lastMeta = null, narrowHand = false, tinyHand = false, hoverCard = null;
+let handSpread = 0, handSpreadTween = null;
 let dragYaw = 0, dragTilt = 0, dragFromYaw = 0, dragFromTilt = 0;
 let dragStartX = 0, dragStartY = 0, isDraggingRig = false, dragSpringRunning = false;
 let rigZoom = 1, rigZoomTarget = 1, zoomSpringRunning = false, zoomSpringStart = 0;
@@ -307,19 +315,30 @@ function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
     const off = i - mid;
     const roll = fan * off;
     let lift = surf + (CARD_H * scale / 2) * Math.cos(tilt) + 0.02 - arc * off * off;
-    let px = x + off * spacing, pz = z + i * 0.03 + arc * off * off * 1.9;
+    const rowX = Array.isArray(spacing)
+      ? x + spacing.slice(0, i).reduce((sum, gap) => sum + gap, 0)
+        - spacing.reduce((sum, gap) => sum + gap, 0) / 2
+      : x + off * spacing;
+    let px = rowX, pz = z + i * 0.03 + arc * off * off * 1.9;
     if (track){
       const c = clampHandCenter(px, lift, pz);
       if (c){ px = c.x; lift = c.y; pz = c.z; }
     }
+    const base = order + i * 3;
     const m = cardMesh(rank, suit, faceUp);
-    m.renderOrder = order + i * 2;
-    m.children[0].renderOrder = order + i * 2 - 1;
+    m.renderOrder = base + 1;
+    m.children[0].renderOrder = base;      // 影子垫在牌下，右邻照旧压在上面
     m.position.set(px, lift, pz);
     m.rotation.set(tilt, yaw, roll, 'YXZ');
     m.scale.setScalar(scale);
     if (track){
-      m.userData = { handIndex: offset + i, rank, baseY: lift };
+      const frame = new THREE.Mesh(frameGeo, frameMat);
+      frame.position.set(0, 0, CARD_T / 2 + 0.006);
+      frame.renderOrder = base + 2;          // 亮边贴在牌面上，只在自己轮廓内
+      frame.visible = false;
+      m.add(frame);
+      m.userData = { handIndex: offset + i, rank, baseY: lift,
+                     shadow: m.children[0], shadowBase: m.children[0].position.clone(), frame };
       handMeshes.push(m);
       const hit = new THREE.Mesh(hitGeo, hitMat);
       hit.position.set(px, lift, pz);
@@ -329,7 +348,8 @@ function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
       // 否则落点会命中的右邻（拾取与点击错位）。
       hit.userData = { handIndex: offset + i, visibleShift: 0 };
       // 拾取优先级与渲染叠放一致：renderOrder 大的牌压在上方，先被点中。
-      hit.renderOrder = order + i * 2;
+      // 拾取面钉在牌的原位不动：沿同一路径滑两次要能回到原状态，面积一跟着抬就错位。
+      hit.renderOrder = base + 1;
       handHits.push(hit);
       rowHits.push(hit);
       cardGroup.add(hit);
@@ -341,9 +361,12 @@ function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
   const half = CARD_W * scale / 2;
   rowHits.forEach((hit, i) => {
     const next = rowHits[i + 1];
-    hit.userData.visibleShift = next
-      ? (next.position.x - hit.position.x) / 2 - half
-      : 0;
+    const gap = next ? next.position.x - hit.position.x : CARD_W * scale;
+    const shift = next ? gap / 2 - half : 0;
+    const width = Math.min(CARD_W * scale, Math.max(CARD_W * scale * 0.22, gap));
+    hit.position.x += shift;
+    hit.scale.set(width / CARD_W, scale, 1);
+    hit.userData.visibleShift = 0;
   });
 }
 function drawCards(){
@@ -368,33 +391,34 @@ function drawCards(){
     if (rel === 'me'){
       const hand = handCards(recordId, lastSnap.my_hand || [], myCounts);
       handMeshes = []; handHits = []; handRows = [];
-      if (tinyHand && hand.length > 9){
-        // 420px 下 17 张牌塞单排时每张只露约 11px，点数必然糊成一条。
-        // 分成 9+8 两排，索引仍按原手牌顺序连续；前排靠近玩家，后排靠桌心。
-        const split = Math.ceil(hand.length / 2);
-        const sz = 2.20;
-        const gap = CARD_W * sz * 0.62;
-        const rows = [
-          { cards: hand.slice(0, split), offset: 0, z: place.z + 0.86 },
-          { cards: hand.slice(split), offset: split, z: place.z - 0.86 },
-        ];
-        for (const row of rows){
-          layRow(row.cards, place.x, row.z, true, HAND_TILT, gap, sz, true,
-                 row.offset, -0.012, 0, 0, 0.55, row.offset ? 500 : 600);
-          handRows.push({ start: row.offset, count: row.cards.length });
-        }
-      } else {
-        const n = Math.max(hand.length, 1);
-        const per = (n - 1) * 0.44 + 1;
-        const szMax = 13.0 / (CARD_W * per);
-        const sz = Math.max(narrowHand ? 1.52 : 1.62,
-                            tinyHand ? Math.min(2.30, szMax) : 0);
-        const gap = n > 1 ? CARD_W * sz * 0.46 : 0;
-        // 20 张是满手牌的上限；弧度过大会把两端投影出副屏。
-        const arc = n > 18 ? 0.005 : n > 15 ? 0.009 : 0.014;
-        layRow(hand, place.x, place.z + 0.42, true, HAND_TILT, gap, sz, true, 0, -0.018, 0, arc, 0.85, 500);
-        handRows.push({ start: 0, count: hand.length });
-      }
+      const n = Math.max(hand.length, 1);
+      // 尺寸按默认紧凑牌缝加局部展开牌缝计算，悬停时最多三道牌缝变宽。
+      // 预算放宽到木圈内沿、悬停只留三道缝：牌能画多大就画多大，点数才认得出。
+      const HAND_SPAN = 13.4;
+      const baseGapRatio = 0.30;
+      const maxGapRatio = 0.66;
+      const focusGaps = Math.min(n - 1, 3);
+      const per = (n - 1) * baseGapRatio + focusGaps * (maxGapRatio - baseGapRatio) + 1;
+      const szMax = HAND_SPAN / (CARD_W * per);
+      const sz = Math.max(tinyHand ? 1.52 : narrowHand ? 1.64 : 1.78,
+                          Math.min(tinyHand ? 2.55 : 2.70, szMax));
+      const fitGap = n > 1 ? (HAND_SPAN - CARD_W * sz) / (n - 1) : 0;
+      const baseGap = n > 1 ? Math.min(CARD_W * sz * baseGapRatio, fitGap) : 0;
+      const maxGap = n > 1 ? Math.min(CARD_W * sz * maxGapRatio, fitGap) : 0;
+      const gaps = Array.from({ length: n - 1 }, (_, i) => {
+        const inFocus = hoverCard !== null && i >= hoverCard - 2 && i < hoverCard + 2;
+        return baseGap + (inFocus ? (maxGap - baseGap) * handSpread : 0);
+      });
+      const extraBeforeHover = hoverCard === null
+        ? 0
+        : gaps.slice(0, hoverCard).reduce((sum, value) => sum + value - baseGap, 0);
+      const totalExtra = gaps.reduce((sum, value) => sum + value - baseGap, 0);
+      const fanCenter = place.x + totalExtra / 2 - extraBeforeHover;
+      // 逐张旋转让默认态也有清楚的扇面；仅在平面内展开牌缝，不抬高焦点牌。
+      const arc = n > 18 ? 0.012 : n > 15 ? 0.016 : 0.022;
+      layRow(hand, fanCenter, place.z + 0.42, true, HAND_TILT, gaps, sz, true,
+             0, -0.072, 0, arc, 0.85, 500);
+      handRows.push({ start: 0, count: hand.length });
     } else {
       const back = Math.min(lastSnap.remaining[player], MAX_BACKS);
       const dir = rel === 'up' ? 1 : -1;
@@ -414,6 +438,7 @@ function drawCards(){
   const trickGap = Math.max(cardW * 0.46, Math.min(want, fit));
   layRow(trickRow, 0, tinyHand ? -1.10 : (narrowHand ? 0.55 : 0.95),
          true, TRICK_TILT, trickGap, trickScale, false, 0, -0.02, 0, 0, 0.32, 300);
+  applySelection();
 }
 
 /* ---------- GLB 测量 ---------- */
@@ -1030,6 +1055,13 @@ export function init(canvasEl, hook){
   cardGeo = new THREE.BoxGeometry(CARD_W, CARD_H, CARD_T);
   hitGeo = new THREE.PlaneGeometry(CARD_W * 1.02, CARD_H * 1.02);
   hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  // 选中外描边：比牌大一圈的切角环，整圈长在牌的轮廓之外，不吃牌面。
+  // 内孔比牌略小一点，正好压住牌缘那道缝；层次仍按自然叠放，右邻盖住它右沿。
+  frameGeo = new THREE.ShapeGeometry(
+    octaRing(CARD_W + SEL_EDGE * 2, CARD_H + SEL_EDGE * 2, CARD_CORNER + SEL_EDGE,
+             CARD_W - 0.006, CARD_H - 0.006, CARD_CORNER));
+  frameMat = new THREE.MeshBasicMaterial({
+    color: cssVar('--sel-edge') || SEL_EDGE_COLOR, depthTest: false });
   screenMat = new THREE.MeshBasicMaterial({ toneMapped: false });
   rt = new THREE.WebGLRenderTarget(512, 256, { depthBuffer: true, samples: 4 });
   // 屏内是"能读的牌桌"：线性过滤，尺寸在 relayout 里按真屏像素 1:1 跟随
@@ -1400,18 +1432,72 @@ export function pickCardAt(px, py){
   for (const hit of raycaster.intersectObjects(handHits, false)){
     if (!best || hit.object.renderOrder > best.object.renderOrder) best = hit;
   }
+  // 单行扇面在窄屏会让相邻牌的 3D 命中面轻微重叠；优先取离可见牌面锚点
+  // 最近的那张，避免点击边缘数字时被更右侧的牌抢走。
+  const points = handPoints();
+  let nearest = null, nearestD = Infinity;
+  for (const p of points){
+    const d = Math.hypot(p.x - px, p.y - py);
+    if (d < nearestD){ nearest = p; nearestD = d; }
+  }
+  if (nearest && nearestD <= Math.max(18, s.w * 0.08)) return nearest.i;
   return best ? best.object.userData.handIndex : null;
 }
 export function setSelected(indices){
   // 抬哪几张按「手牌下标」定，不再按点数。同点数的牌要能各自反转，
   // 按点数记的话滑过三张 5 只抬得起第一张。
-  const on = new Set(indices || []);
+  selectedCards = new Set(indices || []);
+  applySelection();
+}
+/** 按当前选中集合刷新每张手牌：高度、亮边、影子位置。重建牌桌后要再走一遍。 */
+function applySelection(){
+  if (!handMeshes.length) return;
   const ordered = handMeshes.slice().sort((a, b) => a.userData.handIndex - b.userData.handIndex);
   for (const m of ordered){
-    const base = m.userData.baseY;
-    m.position.y = on.has(m.userData.handIndex) ? base + 0.46 : base;
+    const on = selectedCards.has(m.userData.handIndex);
+    m.position.y = on ? m.userData.baseY + SEL_LIFT : m.userData.baseY;
+    // 层次一律不动：叠扇就该右压左，把选中的牌提到最上层会吃掉右邻露出的点数。
+    const sh = m.userData.shadow;
+    if (on){
+      // 影子留在原位：把这次抬升在世界 Y 上的位移，在牌的局部坐标里抵消掉。
+      // 牌升起来、影子还在老位置，抬了多少一眼可见。
+      _selQ.copy(m.quaternion).invert();
+      _selV.set(0, -SEL_LIFT, 0).applyQuaternion(_selQ).divideScalar(m.scale.x);
+      sh.position.copy(m.userData.shadowBase).add(_selV);
+    } else {
+      sh.position.copy(m.userData.shadowBase);
+    }
+    m.userData.frame.visible = on;
   }
   requestRender();
+}
+export function setHoverCard(index){
+  const next = Number.isInteger(index) ? index : null;
+  if (next === hoverCard) return;
+  const wasHovered = hoverCard !== null;
+  const isHovered = next !== null;
+  hoverCard = next;
+  if (wasHovered && isHovered){
+    if (lastSnap) drawCards();
+    requestRender();
+    return;
+  }
+  if (handSpreadTween) handSpreadTween.kill();
+  if (window.gsap && !reduce){
+    handSpreadTween = gsap.to({ value: handSpread }, {
+      value: isHovered ? 1 : 0,
+      duration: 0.18,
+      ease: 'power2.out',
+      onUpdate(){ handSpread = this.targets()[0].value; if (lastSnap) drawCards(); requestRender(); },
+      onComplete(){
+        handSpreadTween = null;
+      },
+    });
+  } else {
+    handSpread = isHovered ? 1 : 0;
+    if (lastSnap) drawCards();
+    requestRender();
+  }
 }
 export function handPoints(){
   if (!ready || !handHits.length) return [];
@@ -1419,8 +1505,9 @@ export function handPoints(){
   tableScene.updateMatrixWorld(true);
   return handHits.map(hit => {
     const v = hit.position.clone();
-    const shift = hit.userData.visibleShift;
-    if (shift) v.add(tmp.set(shift, 0, 0).applyQuaternion(hit.quaternion));
+    // 叠扇的牌心会被相邻牌压在一起；把自动拾取锚点放到牌面上缘，
+    // 对应用户实际能看到的点数区域，避免窄屏单行时多个牌心投影重合。
+    v.add(tmp.set(0, CARD_H * hit.scale.y * 0.24, 0).applyQuaternion(hit.quaternion));
     cardGroup.localToWorld(v);
     const n = v.project(tableCam);
     return { i: hit.userData.handIndex,

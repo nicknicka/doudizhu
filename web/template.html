@@ -38,6 +38,7 @@
     --ground:__GROUND__; --ink:__INK__; --muted:__MUTED__;
     --accent:__ACCENT__; --side-a:__SIDE_A__; --side-b:__SIDE_B__;
     --display:__FONT_DISPLAY__; --data:__FONT_DATA__;
+    --sel-edge:#e8b04a;   /* 选中牌的外描边颜色：换色只改这一行 */
     --px:2px; --rig-dx:0px; --rig-dy:0px;
     --shell:color-mix(in srgb,var(--ground) 88%,var(--ink));
     --shell-hi:color-mix(in srgb,var(--ground) 96%,var(--ink));
@@ -794,8 +795,7 @@
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   .status-strip .who-txt{font-weight:600;white-space:nowrap}
   .status-strip .muted{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dock-row{display:flex;align-items:center;gap:4px;padding-left:8px;
-    border-left:1px solid color-mix(in srgb,var(--ink) 22%,transparent)}
+  .dock-row{display:flex;align-items:center;gap:4px;padding-left:0;border-left:0}
   .dock-btn{
     position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
     width:42px;height:42px;padding:0;cursor:pointer;
@@ -878,16 +878,10 @@
   body.is-dragging .seat-label .cnt{transition:transform .15s ease}
 
   @media (max-width:620px){
-    :root{--dock-bottom:12px;--dock-h:91px}
-    /* 窄屏一行塞不下「现在该谁」+「全局第 N/M 手」，抬头折成两行：
-       主行报谁在动，副行报进度；图标轨让到第二行并居中，不再挤同一行。 */
-    .dock{gap:2px;padding:4px;border-radius:12px;flex-wrap:wrap;row-gap:3px;
+    :root{--dock-bottom:12px;--dock-h:58px}
+    .dock{gap:2px;padding:4px;border-radius:12px;flex-wrap:nowrap;
       width:min(94vw,780px)}
-    .status-strip{flex:1 0 100%;flex-wrap:wrap;align-items:center;
-      padding:1px 6px 0;gap:1px 6px}
-    .status-strip .muted{display:block;flex:1 0 100%;font-size:10px;line-height:1.25}
-    .dock-row{flex:1 0 100%;justify-content:center;padding:5px 0 0;border-left:none;
-      border-top:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
+    .dock-row{flex:1 1 auto;justify-content:center;padding:0;border-top:0}
     .dock-btn{width:36px;height:36px}
     .dock-btn svg{width:16px;height:16px}
     .dock-btn .lbl{display:none}
@@ -1074,14 +1068,6 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
         </section>
       </div>
 
-      <!-- 机身下方：计分板、选牌结果、候选、对手录入 -->
-      <div class="chassis" id="chassis">
-        <span class="grip-rail l" aria-hidden="true"></span>
-        <span class="grip-rail r" aria-hidden="true"></span>
-        <div class="scoreboard" id="scoreboard"></div>
-
-      </div>
-
     </div>
 
     <!-- 数据面板：宽屏在机侧，窄屏在机下；任何视口都不覆盖屏幕 -->
@@ -1164,18 +1150,13 @@ document.querySelector('script[type="module"]').addEventListener('error', window
   </div>
 
   <!-- 底部图标轨 -->
-  <nav class="dock" id="dock" aria-label="操作">
-    <div class="status-strip" id="status-strip">
-      <span class="dot" aria-hidden="true"></span>
-      <span class="who-txt" id="strip-who">—</span>
-      <span class="muted" id="strip-sub">正在加载…</span>
-    </div>
+  <nav class="dock" id="dock" aria-label="工具">
+    <span id="strip-who" hidden></span><span id="strip-sub" hidden></span>
     <div class="dock-row">
-    <button class="dock-btn" id="dock-steps" data-action="steps" title="出牌机会">
+    <button class="dock-btn" id="dock-steps" data-action="steps" title="操作">
       <svg viewBox="0 0 24 24"><path d="M9 6l-5 6 5 6M15 6l5 6-5 6"/></svg>
-      <span class="lbl">出牌机会</span>
+      <span class="lbl">操作</span>
     </button>
-    <span class="dock-sep"></span>
     <button class="dock-btn" id="dock-data" data-action="data" title="数据面板">
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 15l3-4 3 2 4-5"/><circle cx="17" cy="8" r="1.2"/></svg>
       <span class="lbl">数据面板</span>

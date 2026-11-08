@@ -569,15 +569,14 @@ try {
     const p = document.getElementById('panel');
     const cs = getComputedStyle(p);
     return { open: p.classList.contains('is-open'), visibility: cs.visibility,
-             opacity: Number(cs.opacity), pointerEvents: cs.pointerEvents,
-             chassisTop: document.getElementById('chassis').getBoundingClientRect().top };
+             opacity: Number(cs.opacity), pointerEvents: cs.pointerEvents };
   });
   if (deckState.open || deckState.visibility === 'visible'
       || deckState.opacity > 0.01 || deckState.pointerEvents !== 'none') {
     problems.push('操作台浮层默认没有收起：应该只留 dock 上的「出牌机会」入口');
   }
-  if (deckState.chassisTop !== 0) {
-    problems.push(`宽屏不该再显示机身壳体：chassis 顶 ${deckState.chassisTop.toFixed(1)}px`);
+  if (await page.locator('#dock .dock-btn').count() !== 5) {
+    problems.push('底部工具区应只保留 5 个图标入口');
   }
 
   // 取景和相机都停了才取样，否则探针坐标会落在机身别的地方
@@ -1098,7 +1097,7 @@ try {
   // 托盘各层不互相压住，触控条不把页面撑宽。
   const narrowLayout = await page.evaluate(() => {
     const r = id => document.getElementById(id).getBoundingClientRect();
-    const stage = r('stage'), chassis = r('chassis'), score = r('scoreboard');
+    const stage = r('stage');
     const deck = r('deckbar'), touch = r('touchbar');
     const counterEl = document.getElementById('counter'), counter = counterEl.getBoundingClientRect();
     const cell = document.querySelector('#counter .cc');
@@ -1110,11 +1109,9 @@ try {
       rowTops[y] = (rowTops[y] || 0) + 1;
     });
     return {
-      stageH: stage.height, chassisH: chassis.height,
-      scoreTop: score.top, scoreBottom: score.bottom,
+      stageH: stage.height,
       deckTop: deck.top, deckBottom: deck.bottom,
       touchTop: touch.top, touchBottom: touch.bottom,
-      chassisTop: chassis.top, chassisBottom: chassis.bottom,
       counterFs: parseFloat(getComputedStyle(counterEl).fontSize),
       counterCellW: cell ? cell.offsetWidth : 0,
       counterRows: Object.values(rowTops),
@@ -1127,24 +1124,12 @@ try {
       bodyOverflow: document.body.scrollWidth - innerWidth,
     };
   });
-  if (narrowLayout.stageH < narrowLayout.chassisH) {
-    problems.push(`窄屏机身比台面还矮：stage ${narrowLayout.stageH.toFixed(1)}px < chassis ${narrowLayout.chassisH.toFixed(1)}px`);
-  }
-  if (!narrowLayout.handlineHidden) problems.push('420px 仍显示平面手牌副本，和 3D 9+8 手牌重复占高');
+  if (!narrowLayout.handlineHidden) problems.push('420px 仍显示平面手牌副本，和 3D 单行手牌重复占高');
   if (narrowLayout.counterButtons) problems.push('420px 副屏里仍显示模式切换按钮');
   if (narrowLayout.counterFs < 10) problems.push(`420px 机顶记牌字号过小：${narrowLayout.counterFs}px`);
   if (narrowLayout.counterCellW < 20) problems.push(`420px 机顶记牌格宽过窄：${narrowLayout.counterCellW.toFixed(1)}px`);
   if (JSON.stringify(narrowLayout.counterRows) !== JSON.stringify([8, 7])) {
     problems.push(`420px 机顶记牌不是 8+7 两行：${narrowLayout.counterRows.join('+')}`);
-  }
-  // 操作台已经脱离机身，窄屏只剩一条计分板收在壳体里；
-  // 浮层本身由 checkPanelLayout 保证接在 dock 上沿之上。
-  if (narrowLayout.scoreTop < narrowLayout.chassisTop - 1
-      || narrowLayout.scoreBottom > narrowLayout.chassisBottom + 1) {
-    problems.push('窄屏计分板没有收进机身壳体');
-  }
-  if (narrowLayout.scoreBottom > narrowLayout.deckTop + 1) {
-    problems.push(`窄屏计分板与操作台相撞：${narrowLayout.scoreBottom.toFixed(1)} > ${narrowLayout.deckTop.toFixed(1)}`);
   }
   if (narrowLayout.deckBottom > narrowLayout.touchTop + 1) {
     problems.push(`窄屏操作台与触控条相撞：${narrowLayout.deckBottom.toFixed(1)} > ${narrowLayout.touchTop.toFixed(1)}`);
@@ -1189,8 +1174,8 @@ try {
              pts: hits.length, miss, missDetail };
   });
   if (freshHand.n !== 17) problems.push(`420px 复核样本不是 17 张：${freshHand.n}`);
-  if (freshHand.rows.length !== 2 || freshHand.rows[0]?.count !== 9 || freshHand.rows[1]?.count !== 8) {
-    problems.push(`420px 17 张手牌不是 9+8 双排：${freshHand.rows.map(r => r.count).join('+')}`);
+  if (freshHand.rows.length !== 1 || freshHand.rows[0]?.count !== freshHand.n) {
+    problems.push(`420px 17 张手牌不是单行：${freshHand.rows.map(r => r.count).join('+')}`);
   }
   if (freshHand.pts !== freshHand.n || freshHand.miss.length) {
     // 只报"错 N 张"在 CI 上没法定位：到底是哪张牌的落点被邻牌盖住了、差多少。
