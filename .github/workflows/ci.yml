@@ -4,12 +4,15 @@ name: CI
 # 此前没有任何检查，"npm run verify 全绿"的证据只能来自某个人带未提交改动的
 # 工作区 —— #57 就是这么漏过去的（合入的头在干净树上根本跑不过 verify）。
 #
-# 三条检查的取舍（详见 #60）：
+# 三条检查的取舍（#60 已收口）：
 #   server / web-unit —— 硬门禁。在干净 runner 上稳定，快。
-#   browser            —— 只手动触发。它在 ubuntu 上有 6 处未定级的版式偏差
-#                         （#60），而 browser verify 又是唯一能挡住 #57 那类
-#                         回归的检查，所以既不删也不让它把每个 PR 涂红：
-#                         改版式后手动跑一次，或在 #60 定级、转为固定门禁。
+#   browser            —— 只手动触发。它曾在 ubuntu 上 flaky（#60：同一 commit
+#                         连跑 4 次失败 2 次）；#86 把「点一下 sleep 900ms 再读
+#                         状态」换成轮询后清成 4/4。现在不上每次推送，理由只剩
+#                         分钟数 —— 它要装 Chromium 再走完整端到端，一次约 7 分钟，
+#                         改版式后手动跑一次就够。
+#                         browser verify 是唯一能挡住 #57 那类「干净树上跑不过 verify」
+#                         回归的检查；哪天觉得 7 分钟值，把它提成门禁即可。
 
 on:
   push:
@@ -61,7 +64,8 @@ jobs:
 
   browser:
     name: 展示页真实交互（browser verify，手动）
-    # 见文件头：ubuntu 上 6 处版式偏差尚未定级（#60），不设成每次推送都红。
+    # 见文件头：手动触发是为了省分钟数（一次约 7 分钟），不是因为不稳定 ——
+    # flaky 已在 #86 清掉，连跑 4 次全过。
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
