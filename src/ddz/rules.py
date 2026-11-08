@@ -78,7 +78,7 @@ def canonical_combo(cards) -> str:
     try:
         return _COMBO_INDEX[key]
     except KeyError:
-        raise ValueError(f"不是合法牌型：{sorted(cards)!r}") from None
+        raise ValueError(f"不是合法牌型：{''.join(sorted(cards))}") from None
 
 
 def combo_type(combo: str) -> str:
