@@ -369,6 +369,19 @@ function place(payload){
   if (tablet) machineEl.style.setProperty('--machine-bleed', `${Math.max(0,
     stage.clientHeight - (tablet.y + tablet.h) + stage.clientWidth * BOX_OVERHANG).toFixed(1)}px`);
 
+  // 窄屏再一条：机器要在**扣掉机下操作层的可用区**里居中，而不是在整个视口里居中。
+  // 420×1200 这种高瘦屏整个视口居中的话，机身被压到下半屏、上方空出一大片；
+  // 而机下那层（数据面板 + dock）是常驻的，它占的高度得先扣掉。
+  // 高度是量出来的（面板内容随局面变，写死会错位），面板最多按 40vh 留位。
+  const panelEl = $('panel'), dockEl = $('dock');
+  if (panelEl && dockEl){
+    const dockBottom = parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue('--dock-bottom')) || 0;
+    const panelH = Math.min(panelEl.offsetHeight, Math.round(innerHeight * 0.4));
+    machineEl.parentElement.style.setProperty('--bottom-reserve',
+      `${Math.round(panelH + dockEl.offsetHeight + dockBottom + 8)}px`);
+  }
+
   const sh = $('screen-hud');
   // 座位圆点已经画进主屏纹理：DOM 只留悬停展开的完整卡片，别再压一层盖在模型上。
   sh.classList.toggle('is-3d', Boolean(screen3d));

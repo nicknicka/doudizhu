@@ -1173,6 +1173,7 @@ try {
     });
     return {
       stageH: stage.height,
+      stageTop: stage.top,          // 机身块的顶（stage 就是块的头）
       deckTop: deck.top, deckBottom: deck.bottom,
       touchTop: touch.top, touchBottom: touch.bottom,
       counterFs: parseFloat(getComputedStyle(counterEl).fontSize),
@@ -1195,6 +1196,7 @@ try {
       })) : [],
       seatTop: seatstrip ? seatstrip.getBoundingClientRect().top : 0,
       seatBottom: seatstrip ? seatstrip.getBoundingClientRect().bottom : 0,
+      stripBottom: handstrip ? handstrip.getBoundingClientRect().bottom : 0,
       counterButtons,
       docOverflow: document.documentElement.scrollWidth - innerWidth,
       innerW: innerWidth,
@@ -1274,6 +1276,14 @@ try {
   }
   if (narrowLayout.deckBottom > narrowLayout.touchTop + 1) {
     problems.push(`窄屏操作台与触控条相撞：${narrowLayout.deckBottom.toFixed(1)} > ${narrowLayout.touchTop.toFixed(1)}`);
+  }
+  // #49 第三条：机身要在「扣掉机下操作层」的可用区里居中 —— 上方空场与机身到面板之间
+  // 不能一头沉。这里面板是打开的，它上沿就是可用区的下界。
+  // （改之前是上 452 / 下 196，一眼就是机身被压到下半屏、上面空一大片。）
+  const aboveGap = narrowLayout.stageTop, belowGap = narrow.panel.top - narrowLayout.stripBottom;
+  if (Math.abs(aboveGap - belowGap) > 60) {
+    problems.push(`420px 机身没在可用区里居中：上方空场 ${aboveGap.toFixed(0)}px`
+      + ` vs 机身到面板 ${belowGap.toFixed(0)}px`);
   }
   await checkPanelLayout(page, '窄屏');
   if (narrowLayout.docOverflow > 2 || narrowLayout.bodyOverflow > 2) {
