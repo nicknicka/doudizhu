@@ -333,6 +333,8 @@
   /* 窄屏常驻手牌条：3D 那张牌在 420px 只有约 6px 的点数，读不出来就得有一条平面的，
      而且要能直接点着选。挂在机身下方，不必先开操作台。 */
   .handstrip{display:none}
+  /* 机下 2D 座位状态行：只在窄屏露面，和手牌条是同一条机下状态层 */
+  .seatstrip{display:none}
   .deckbar .cell{min-width:0}
   .deckbar .k{font-size:12px;color:var(--muted);margin-bottom:4px}
   .deckbar .k b{font-weight:400;color:var(--ink)}
@@ -600,6 +602,21 @@
     /* 浮层里那份平面副本在窄屏收起，改由机身下方的常驻条承担：点数逐张读得出，
        而且不用先开操作台。 */
     .panel .handline{display:none}
+    /* 机下状态行：420px 下屏内贴图字已经糊了，「谁是谁、还剩几张」挪到 2D 层读。
+       负 margin 用 --machine-bleed —— 机身投影底到 stage 底的空隙由 board.js 量出来，
+       贴住机身下沿，而不是浮成一张单独贴在机器下面的卡片。 */
+    .seatstrip{display:flex;gap:4px;align-items:center;justify-content:center;
+      width:min(94vw,420px);margin:calc(-1 * var(--machine-bleed,0px)) auto 0;
+      padding:6px 8px;position:relative;z-index:3;pointer-events:auto;
+      border:var(--px) solid var(--ink);border-bottom:none;background:var(--shell-hi)}
+    .seatstrip .sc{display:inline-flex;align-items:center;gap:3px;min-width:0;
+      padding:3px 6px;font-size:12px;line-height:1.25;white-space:nowrap;
+      border:var(--px) solid var(--ink);background:var(--ground);color:var(--ink)}
+    .seatstrip .sc.is-me{border-color:var(--accent)}
+    .seatstrip .sc.is-acting{box-shadow:0 0 0 2px var(--accent)}
+    .seatstrip .sc .badge{font-size:11px;color:var(--muted)}
+    .seatstrip .sc.is-me .badge{color:var(--accent)}
+    .seatstrip .sc .cnt{color:var(--muted);font-variant-numeric:tabular-nums}
     /* 画布铺满视口，手牌条要自己压到它上面，否则点不到（elementFromPoint 会命中 #scene） */
     .handstrip{display:flex;flex-wrap:wrap;gap:4px;align-items:center;justify-content:center;
       width:min(94vw,420px);margin:0 auto;padding:8px 10px;position:relative;z-index:3;
@@ -1083,8 +1100,9 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
         </section>
       </div>
 
-      <!-- 窄屏常驻手牌条：宽屏由 3D 手牌与操作台承担，这里只在 620px 以下露面。
-           挂在 .stage 之后而不是 section 之后 —— 画布铺满视口，挂外面会掉到折叠线以下。 -->
+      <!-- 窄屏机下状态层：座位名+身份+张数，再接一条手牌条。宽屏屏内就看得到，这一层只在
+           620px 以下露面。挂在 .stage 之后而不是 section 之后 —— 画布铺满视口，挂外面会掉到折叠线以下。 -->
+      <div class="seatstrip" id="seatstrip" aria-label="三家座位：相对位置、身份与剩余张数"></div>
       <p class="handstrip" id="handstrip" aria-label="我的手牌：点一下选中或取消"></p>
 
     </div>
@@ -1106,6 +1124,8 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
           </div>
           <p class="pp-note">每个粒子 = 一种"另两家各拿哪些牌"的可能分法；一列是一种点数，
             左栏是 <span id="la2"></span>、右栏是 <span id="lb2"></span>。点某一列（或下面的牌）看逐张概率。</p>
+          <h2>某张牌在谁手上</h2>
+          <div class="plist-wrap" id="plist"></div>
         </div>
         <div>
           <h2>校准 · 估计值 vs 实际胜率</h2>

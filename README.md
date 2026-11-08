@@ -98,6 +98,9 @@ ddz serve            # 起本机后端，默认 127.0.0.1:8000（--host / --port
 npm i && npm run verify     # 自己起后端、跑真实交互、抓 pageerror
 ```
 
+它在起后端时把模块搜索路径指向**本 checkout** 的 `src/`，所以在 worktree / 副 checkout
+里跑，测的也是那个 checkout（见 #66）。
+
 ### 给出建议
 
 ```bash

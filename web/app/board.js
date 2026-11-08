@@ -41,6 +41,26 @@ function paintLabels(){
   }
 }
 
+/**
+ * 机下那条 2D 座位状态行：420px 下屏内贴图字已经糊了，「谁是谁、还剩几张」得在 2D 层读得到。
+ * 内容和屏内那份同源（S.meta.seats + S.snap.remaining），不另算一遍。
+ */
+function renderSeatstrip(){
+  const el = $('seatstrip');
+  if (!el || !S.meta || !S.snap) return;
+  const v = S.snap;
+  const order = { up: 0, me: 1, down: 2 };          // 按相对位置排：上家 / 我 / 下家
+  const players = Object.keys(S.meta.seats).sort((a, b) =>
+    (order[S.meta.seats[a].relative] ?? 9) - (order[S.meta.seats[b].relative] ?? 9));
+  el.innerHTML = players.map(player => {
+    const seat = S.meta.seats[player];
+    const acting = !v.finished && v.acting === player;
+    return `<span class="sc${isMe(player) ? ' is-me' : ''}${acting ? ' is-acting' : ''}">`
+      + `<b>${label(player)}</b><span class="badge ${seat.identity}">${identityLabel(player)}</span>`
+      + `<span class="cnt">${v.remaining[player]}</span></span>`;
+  }).join('');
+}
+
 /** 副屏要显示什么：DOM 锚点和 3D 贴图共用这一份数据，两边不各算一次。 */
 function counterModel(){
   if (S.barMode === 'prob'){
@@ -161,6 +181,7 @@ function paintScreenHud(){
   const ink = cssVar('--ink') || '#201a26';
   const ground = cssVar('--ground') || '#efe7d8';
   const accent = cssVar('--accent') || '#e0442a';
+  const muted = cssVar('--muted') || '#6b6357';
   g.clearRect(0, 0, W, H);
   // 圆点大小照 DOM 那颗 28px 圆点折算：CSS 一改，纹理跟着走，不各写一个常量。
   const box = $('screen-hud').getBoundingClientRect();
@@ -175,7 +196,8 @@ function paintScreenHud(){
   g.textBaseline = 'middle';
   for (const [player, el] of Object.entries(labels)){
     if (!el || el.style.display === 'none') continue;      // board.place 会把缺席的座位藏掉
-    const slot = HUD_SLOTS[S.meta.seats[player].relative] || HUD_SLOTS.up;
+    const seat = S.meta.seats[player];
+    const slot = HUD_SLOTS[seat.relative] || HUD_SLOTS.up;
     if (meDotHidden && slot === HUD_SLOTS.me) continue;
     const cx = slot.x * W + slot.sx * r, cy = slot.y * H + slot.sy * r;
     if (!v.finished && v.acting === player){               // DOM 版用脉冲，纹理里用一圈静态光环
@@ -189,6 +211,26 @@ function paintScreenHud(){
     g.fillStyle = ground;
     g.font = `600 ${Math.round(r * 0.79)}px Pixel, monospace`;
     g.fillText(String(v.remaining[player]), cx, cy);
+    // 座位名与身份钉在圆点外侧：不悬停也知道"谁是谁"（#49 评估第 2 条）。
+    // 它落在牌桌皮与牌面上，背景颜色不可控，所以先垫一块底色板再写字；
+    // 不垫的话墨色字压到深桌皮上就糊了。字号照圆点折算，不另写常量。
+    const who = label(player), ident = identityLabel(player);
+    const fs = Math.round(r * 0.72);
+    g.font = `600 ${fs}px Pixel, monospace`;
+    const wW = g.measureText(who).width, wI = g.measureText(ident).width;
+    const pad = Math.round(r * 0.24), gap = Math.round(r * 0.3);
+    const bw = wW + gap + wI + pad * 2, bh = fs + pad * 2;
+    // 圆点在右半屏就往右排字，否则往左排 —— 字永远落在圆点外侧，不压回屏心。
+    const bx = slot.sx > 0 ? cx + r + 8 : cx - r - 8 - bw;
+    const by = Math.min(Math.max(cy - bh / 2, 2), H - bh - 2);   // 别被屏沿切掉
+    g.fillStyle = ground; g.fillRect(bx, by, bw, bh);
+    g.lineWidth = Math.max(1, r * 0.08); g.strokeStyle = ink;
+    g.strokeRect(bx + g.lineWidth / 2, by + g.lineWidth / 2, bw - g.lineWidth, bh - g.lineWidth);
+    g.textAlign = 'left';
+    g.fillStyle = ink; g.fillText(who, bx + pad, by + bh / 2);
+    g.fillStyle = seat.identity === 'landlord' ? accent : muted;
+    g.fillText(ident, bx + pad + wW + gap, by + bh / 2);
+    g.textAlign = 'center';
   }
   machine.commitMainHud();
 }
@@ -310,6 +352,18 @@ function place(payload){
   ov.classList.toggle('is-compact', stage.clientWidth < 900);
   ov.style.fontSize = `${Math.max(7, Math.min(13, s.w * 0.025)).toFixed(1)}px`;
 
+  // 机下那条 2D 状态行要贴住机身下沿。机身投影在 stage 里的位置只有 machine 知道，
+  // 把"机身底到 stage 底还差多少"量成变量交给 CSS，免得两边各写一个魔法数。
+  //
+  // 注意 tablet 是机身盒**前面四角**的投影，比看得见的剪影还低一点（底沿那条轨）。
+  // 实测 360 / 420 / 480 / 620 四个视口，这段差值稳定在屏宽的 ≈4.7%，跟着机身一起缩放 ——
+  // 不补的话状态层和机身之间会留一条亮缝，读起来就像贴在机器下面的一张卡片。
+  const tablet = rects.tablet;
+  const BOX_OVERHANG = 0.047;
+  // 变量要设在 .stage 和状态行的共同祖先上（状态行是 .stage 的兄弟，设在自己身上传不过去）。
+  if (tablet) machineEl.style.setProperty('--machine-bleed', `${Math.max(0,
+    stage.clientHeight - (tablet.y + tablet.h) + stage.clientWidth * BOX_OVERHANG).toFixed(1)}px`);
+
   const sh = $('screen-hud');
   // 座位圆点已经画进主屏纹理：DOM 只留悬停展开的完整卡片，别再压一层盖在模型上。
   sh.classList.toggle('is-3d', Boolean(screen3d));
@@ -376,6 +430,7 @@ export function init(){
 export function render(){
   ensureLabels();
   paintLabels();
+  renderSeatstrip();
   renderCounter();
   machine.apply(S.snap, S.meta);
   // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。
