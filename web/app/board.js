@@ -161,6 +161,7 @@ function paintScreenHud(){
   const ink = cssVar('--ink') || '#201a26';
   const ground = cssVar('--ground') || '#efe7d8';
   const accent = cssVar('--accent') || '#e0442a';
+  const muted = cssVar('--muted') || '#6b6357';
   g.clearRect(0, 0, W, H);
   // 圆点大小照 DOM 那颗 28px 圆点折算：CSS 一改，纹理跟着走，不各写一个常量。
   const box = $('screen-hud').getBoundingClientRect();
@@ -175,7 +176,8 @@ function paintScreenHud(){
   g.textBaseline = 'middle';
   for (const [player, el] of Object.entries(labels)){
     if (!el || el.style.display === 'none') continue;      // board.place 会把缺席的座位藏掉
-    const slot = HUD_SLOTS[S.meta.seats[player].relative] || HUD_SLOTS.up;
+    const seat = S.meta.seats[player];
+    const slot = HUD_SLOTS[seat.relative] || HUD_SLOTS.up;
     if (meDotHidden && slot === HUD_SLOTS.me) continue;
     const cx = slot.x * W + slot.sx * r, cy = slot.y * H + slot.sy * r;
     if (!v.finished && v.acting === player){               // DOM 版用脉冲，纹理里用一圈静态光环
@@ -189,6 +191,26 @@ function paintScreenHud(){
     g.fillStyle = ground;
     g.font = `600 ${Math.round(r * 0.79)}px Pixel, monospace`;
     g.fillText(String(v.remaining[player]), cx, cy);
+    // 座位名与身份钉在圆点外侧：不悬停也知道"谁是谁"（#49 评估第 2 条）。
+    // 它落在牌桌皮与牌面上，背景颜色不可控，所以先垫一块底色板再写字；
+    // 不垫的话墨色字压到深桌皮上就糊了。字号照圆点折算，不另写常量。
+    const who = label(player), ident = identityLabel(player);
+    const fs = Math.round(r * 0.72);
+    g.font = `600 ${fs}px Pixel, monospace`;
+    const wW = g.measureText(who).width, wI = g.measureText(ident).width;
+    const pad = Math.round(r * 0.24), gap = Math.round(r * 0.3);
+    const bw = wW + gap + wI + pad * 2, bh = fs + pad * 2;
+    // 圆点在右半屏就往右排字，否则往左排 —— 字永远落在圆点外侧，不压回屏心。
+    const bx = slot.sx > 0 ? cx + r + 8 : cx - r - 8 - bw;
+    const by = Math.min(Math.max(cy - bh / 2, 2), H - bh - 2);   // 别被屏沿切掉
+    g.fillStyle = ground; g.fillRect(bx, by, bw, bh);
+    g.lineWidth = Math.max(1, r * 0.08); g.strokeStyle = ink;
+    g.strokeRect(bx + g.lineWidth / 2, by + g.lineWidth / 2, bw - g.lineWidth, bh - g.lineWidth);
+    g.textAlign = 'left';
+    g.fillStyle = ink; g.fillText(who, bx + pad, by + bh / 2);
+    g.fillStyle = seat.identity === 'landlord' ? accent : muted;
+    g.fillText(ident, bx + pad + wW + gap, by + bh / 2);
+    g.textAlign = 'center';
   }
   machine.commitMainHud();
 }
