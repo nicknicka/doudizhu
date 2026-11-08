@@ -542,25 +542,34 @@ try {
   // #22 三位角色：三个座位各一个，身份跟着服务端下发的 meta 走，地主头顶必须有王冠。
   // 角色只是叠加物：投影矩形要落在屏内（出了屏就成了贴边的一块色），
   // 座位徽章是 DOM 层，永远压在角色上面，所以这里不用再查遮挡。
+  //
+  // 角色有个总开关（machine.js 的 charactersEnabled）——效果还在改，先关着。
+  // 两头都要守：开着就查三个座位，关着就查「一个都没建」。
+  const charsOn = await page.evaluate(async () =>
+    (await import('/app/machine.js')).charactersEnabled);
   const chars = shell.characters || [];
-  const seatsNow = await page.evaluate(async () => Object.fromEntries(
-    Object.entries((await import('/app/state.js')).S.meta.seats)
-      .map(([player, seat]) => [seat.relative, seat.identity])));
-  if (chars.length !== 3) problems.push(`屏内角色不是 3 个：${chars.length}`);
-  for (const c of chars) {
-    const want = seatsNow[c.relative];
-    if (!want) problems.push(`角色 ${c.relative} 在状态里找不到对应座位`);
-    else if (c.identity !== want) problems.push(`角色 ${c.relative} 的身份不对：${c.identity} ≠ ${want}`);
-    if (!c.visible) problems.push(`角色 ${c.relative} 没显示出来`);
-    if (c.crowned !== (want === 'landlord')) problems.push(`角色 ${c.relative} 的王冠和身份不一致`);
-    const r = c.screen || {};
-    if (!(r.x >= -0.01 && r.x + r.w <= 1.01 && r.y >= -0.01 && r.y + r.h <= 1.01)) {
-      problems.push(`角色 ${c.relative} 出了屏：x[${r.x},${(r.x + r.w).toFixed(3)}]`
-        + ` y[${r.y},${(r.y + r.h).toFixed(3)}]`);
+  if (!charsOn) {
+    if (chars.length) problems.push(`角色已关掉，状态里却还报出 ${chars.length} 个`);
+  } else {
+    const seatsNow = await page.evaluate(async () => Object.fromEntries(
+      Object.entries((await import('/app/state.js')).S.meta.seats)
+        .map(([player, seat]) => [seat.relative, seat.identity])));
+    if (chars.length !== 3) problems.push(`屏内角色不是 3 个：${chars.length}`);
+    for (const c of chars) {
+      const want = seatsNow[c.relative];
+      if (!want) problems.push(`角色 ${c.relative} 在状态里找不到对应座位`);
+      else if (c.identity !== want) problems.push(`角色 ${c.relative} 的身份不对：${c.identity} ≠ ${want}`);
+      if (!c.visible) problems.push(`角色 ${c.relative} 没显示出来`);
+      if (c.crowned !== (want === 'landlord')) problems.push(`角色 ${c.relative} 的王冠和身份不一致`);
+      const r = c.screen || {};
+      if (!(r.x >= -0.01 && r.x + r.w <= 1.01 && r.y >= -0.01 && r.y + r.h <= 1.01)) {
+        problems.push(`角色 ${c.relative} 出了屏：x[${r.x},${(r.x + r.w).toFixed(3)}]`
+          + ` y[${r.y},${(r.y + r.h).toFixed(3)}]`);
+      }
     }
-  }
-  if (chars.filter(c => c.crowned).length !== 1) {
-    problems.push(`戴王冠的角色不是恰好 1 个：${chars.filter(c => c.crowned).length}`);
+    if (chars.filter(c => c.crowned).length !== 1) {
+      problems.push(`戴王冠的角色不是恰好 1 个：${chars.filter(c => c.crowned).length}`);
+    }
   }
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
   // ADR-0008：座位徽章内嵌进主屏纹理，DOM 只留锚点；否则机身一转圆点就浮到屏外。
