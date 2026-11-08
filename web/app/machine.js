@@ -45,7 +45,10 @@ const SEAT_3D = {
 const CHAR_SEAT = {
   up:   { x: -5.15, z: 0.75, scale: 1.000 },
   down: { x:  5.15, z: 0.75, scale: 1.000 },
-  me:   { x: -4.90, z: 4.35, scale: 0.905 },
+  // 我：近沿正中是「我 农民 / 17」那枚徽章，往下才是手牌扇面的下缘空白带。
+  // 站在正下方、从牌后探出头，才和徽章绑成一件事；站到左边会被读成第三个旁观者。
+  // front：画在牌的上层 —— 脚下那块是牌的下缘白边，不遮点数，但仍在 HUD 层之下。
+  me:   { x: 0.00, z: 5.55, scale: 0.780, front: true },
 };
 const CHAR_H_WORLD = 2.10;
 const CHAR_TONE = { up: '--side-a', me: '--accent', down: '--side-b' };
@@ -180,13 +183,18 @@ function buildCharacters(){
   for (const [seat, at] of Object.entries(CHAR_SEAT)){
     const h = CHAR_H_WORLD * at.scale, w = h * (CHAR_W / CHAR_H);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
-      new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.5, depthWrite: false }));
+      // 牌面那几层是 depthTest:false 画上去的，会写深度；我的角色要压在手牌之上，
+      // 光是 renderOrder 排在后面还不够，深度测试也得关掉（见 CHAR_SEAT.me）。
+      new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.5,
+                                    depthWrite: false, depthTest: !at.front }));
     m.position.set(at.x, 0, at.z);
     m.lookAt(tableCam.position);      // 公告板：永远把正面转向镜头
     // 脚踩在木圈顶面上（圈顶 y≈0.26）：不抬这一下，腿会整段埋进桌沿里，
     // 看着像从桌子里长出来；抬到位以后鞋和半截腿露出来，人才是站在桌边的。
     m.translateY(h / 2 + 0.18);
-    m.renderOrder = 10;               // 排在牌（100 起）之前：牌永远压在角色身上
+    // 默认排在牌（100 起）之前：牌压在角色身上。我的角色压在牌上（见 CHAR_SEAT.me），
+    // 但仍低于 HUD 层 —— 徽章与张数照样盖在它上面。
+    m.renderOrder = at.front ? 600 : 10;
     m.visible = false;                // 身份要等第一份 meta 到了才知道
     charMeshes[seat] = m;
     charGroup.add(m);
