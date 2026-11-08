@@ -1177,6 +1177,11 @@ try {
       seatShown: !!seatstrip && getComputedStyle(seatstrip).display !== 'none',
       seatCells: seatstrip ? [...seatstrip.querySelectorAll('.sc')].map(el => ({
         text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+        relative: el.dataset.seat || '',
+        who: (el.querySelector('b')?.textContent || '').trim(),
+        badge: (el.querySelector('.badge')?.textContent || '').trim(),
+        cnt: (el.querySelector('.cnt')?.textContent || '').trim(),
+        out: (el.querySelector('.out')?.textContent || '').replace(/\s+/g, ' ').trim(),
         fs: parseFloat(getComputedStyle(el).fontSize),
       })) : [],
       seatTop: seatstrip ? seatstrip.getBoundingClientRect().top : 0,
@@ -1197,15 +1202,29 @@ try {
   if (!narrowLayout.seatShown) problems.push('420px 没有机下座位行，「谁是谁、还剩几张」读不出来');
   if (narrowLayout.seatShown) {
     const want = ['上家', '我', '下家'];
+    // 三格的「已出」和状态里那份逐字对齐（同一个 NAME 映射），别各写各的
+    const playedText = await page.evaluate(async () => {
+      const { S } = await import('/app/state.js');
+      const { NAME } = await import('/app/labels.js');
+      return Object.fromEntries(Object.entries(S.meta.seats).map(([p, seat]) =>
+        [seat.relative, (S.snap.played[p] || []).map(c => NAME[c] || c).join(' ')]));
+    });
     if (narrowLayout.seatCells.length !== want.length) {
       problems.push(`420px 机下座位行不是 3 家：${narrowLayout.seatCells.length}`);
     }
     narrowLayout.seatCells.forEach((c, i) => {
-      if (!c.text.startsWith(want[i] || '')) {
-        problems.push(`420px 机下第 ${i + 1} 格不是「${want[i] || ''}」：${c.text || '(空)'}`);
+      if (c.relative !== ['up', 'me', 'down'][i]) {
+        problems.push(`420px 机下第 ${i + 1} 格的 data-seat 不对：${c.relative || '(空)'}`);
       }
-      if (!/地主|农民/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写身份：${c.text || '(空)'}`);
-      if (!/\d+$/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写剩余张数：${c.text || '(空)'}`);
+      if (c.who !== want[i]) {
+        problems.push(`420px 机下第 ${i + 1} 格不是「${want[i] || ''}」：${c.who || '(空)'}`);
+      }
+      if (!/地主|农民/.test(c.badge)) problems.push(`420px 机下第 ${i + 1} 格没写身份：${c.badge || '(空)'}`);
+      if (!/^\d+$/.test(c.cnt)) problems.push(`420px 机下第 ${i + 1} 格没写剩余张数：${c.cnt || '(空)'}`);
+      const wantOut = `已出：${playedText[c.relative] || '—'}`;
+      if (c.out !== wantOut) {
+        problems.push(`420px 机下第 ${i + 1} 格的已出牌对不上：${c.out || '(空)'} ≠ ${wantOut}`);
+      }
       if (c.fs < 12) problems.push(`420px 机下座位行字号过小：${c.fs}px`);
     });
     if (narrowLayout.seatBottom > narrowLayout.stripTop + 1) {

@@ -609,9 +609,12 @@
       width:min(94vw,420px);margin:calc(-1 * var(--machine-bleed,0px)) auto 0;
       padding:6px 8px;position:relative;z-index:3;pointer-events:auto;
       border:var(--px) solid var(--ink);border-bottom:none;background:var(--shell-hi)}
-    .seatstrip .sc{display:inline-flex;align-items:center;gap:3px;min-width:0;
+    /* 一格两行：上行「谁 + 身份 + 剩几张」，下行「已出」。三格并排仍放得下 420px。 */
+    .seatstrip .sc{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;
       padding:3px 6px;font-size:12px;line-height:1.25;white-space:nowrap;
       border:var(--px) solid var(--ink);background:var(--ground);color:var(--ink)}
+    .seatstrip .sc .top{display:inline-flex;align-items:center;gap:3px}
+    .seatstrip .sc .out{font-size:11px;color:var(--muted)}
     .seatstrip .sc.is-me{border-color:var(--accent)}
     .seatstrip .sc.is-acting{box-shadow:0 0 0 2px var(--accent)}
     .seatstrip .sc .badge{font-size:11px;color:var(--muted)}
