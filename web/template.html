@@ -914,6 +914,9 @@
 
   @media (max-width:620px){
     :root{--dock-bottom:12px;--dock-h:58px}
+    /* 机身在这块「可用区」里居中：--bottom-reserve 由 board.js 量（数据面板 + dock + 底距），
+       不量的话 420×1200 这种高瘦屏会把机身压到下半屏、上方留一大片空场。 */
+    .page{padding-bottom:var(--bottom-reserve,82px)}
     .dock{gap:2px;padding:4px;border-radius:12px;flex-wrap:nowrap;
       width:min(94vw,780px)}
     .dock-row{flex:1 1 auto;justify-content:center;padding:0;border-top:0}
