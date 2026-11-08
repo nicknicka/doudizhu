@@ -891,8 +891,18 @@ def build_band_inset(mats):
         ob.location = (BACKKEY_CX, 0.0, BACKKEY_CZ)
         apply_transform(ob)
         shade_by_angle(ob, 28.0)
+    # 参考图上这颗是带 ← 的返回键；黑键面中央补一枚箭头（同一个符号材质）。
+    # 少了它，机顶右边就是一块没有语义的黑块 —— 独立评估连着两轮都报这一处。
+    arrow_pts = [(-2.6, 0.0), (-0.9, 1.5), (-0.9, 0.7), (2.4, 0.7),
+                 (2.4, -0.7), (-0.9, -0.7), (-0.9, -1.5)]
+    face_y = SHELL_FRONT + BAND_DEPTH - BACKKEY_RAISE
+    arrow = front_piece("BackKey_arrow", arrow_pts, face_y - 0.15, face_y + 0.05,
+                        [mats["symbol"]], bevel=0.0)
+    arrow.location = (BACKKEY_CX, 0.0, BACKKEY_CZ)
+    apply_transform(arrow)
+    shade_by_angle(arrow, 28.0)
     back = new_object("BackKey", [], [])
-    join_into(back, [gold, black])
+    join_into(back, [gold, black, arrow])
 
     return [sub, back]
 
@@ -1170,16 +1180,6 @@ def diamond_key_outlines(hw, hh, edge):
     return outer, inner
 
 
-def star_poly(radius, inner=0.44, points=5, rot=90.0):
-    """★：一个角朝上的五角星（键面图案）。"""
-    pts = []
-    for i in range(points * 2):
-        a = math.radians(rot + i * 180.0 / points)
-        rr = radius if i % 2 == 0 else radius * inner
-        pts.append((rr * math.cos(a), rr * math.sin(a)))
-    return pts
-
-
 def tri_poly(radius, rot_deg, cx=0.0, cz=0.0):
     """三角形：radius 外接圆，rot_deg 指向。"""
     return [(cx + radius * math.cos(math.radians(rot_deg + i * 120.0)),
@@ -1187,22 +1187,156 @@ def tri_poly(radius, rot_deg, cx=0.0, cz=0.0):
             for i in range(3)]
 
 
-def arc_band_poly(r_out, r_in, a0, a1, seg=16):
-    """圆环的一段（↺ 的弧）：外弧走一遍，再沿内弧走回来。"""
-    pts = []
-    for k in range(seg + 1):
-        a = math.radians(a0 + (a1 - a0) * k / seg)
-        pts.append((r_out * math.cos(a), r_out * math.sin(a)))
-    for k in range(seg, -1, -1):
-        a = math.radians(a0 + (a1 - a0) * k / seg)
-        pts.append((r_in * math.cos(a), r_in * math.sin(a)))
-    return pts
+# ---- 键面文字：点阵字形表 ----
+# 字形取自仓库里那份点阵中文字体 web/vendor/fusion-pixel-zh-hans.woff2
+# （OFL：web/vendor/OFL-fusion-pixel.txt），在它自己的 12px 网格上取 11x11 墨迹框。
+# 位图写死在脚本里、不运行时读字体：Blender 端不用装字库、不看系统中文字体，
+# 换台机器重建出来的字一模一样；笔画也正好和机顶/机下那层点阵字是同一套。
+GLYPH_PX = 11
+KEY_GLYPHS = {
+    "推": [
+        "01000101000",
+        "01000100100",
+        "11101111111",
+        "01011000100",
+        "01001111111",
+        "01101000100",
+        "11001000100",
+        "01001111111",
+        "01001000100",
+        "01001000100",
+        "11001111111",
+    ],
+    "荐": [
+        "00010001000",
+        "11111111111",
+        "00010001000",
+        "11111111111",
+        "00010000000",
+        "00100111110",
+        "01100000100",
+        "10100001000",
+        "00101111111",
+        "00100001000",
+        "00100011000",
+    ],
+    "撤": [
+        "01000100100",
+        "01011110100",
+        "11101000111",
+        "01010010101",
+        "01011101001",
+        "01110010101",
+        "11011110101",
+        "01010010101",
+        "01011110010",
+        "01010010101",
+        "11010111001",
+    ],
+    "销": [
+        "01001001001",
+        "01100101010",
+        "10000001000",
+        "11101111111",
+        "01001000001",
+        "01001111111",
+        "11101000001",
+        "01001111111",
+        "01001000001",
+        "01101000001",
+        "01001000011",
+    ],
+    "出": [
+        "00000100000",
+        "01000100010",
+        "01000100010",
+        "01000100010",
+        "01111111110",
+        "00000100000",
+        "00000100000",
+        "10000100001",
+        "10000100001",
+        "10000100001",
+        "11111111111",
+    ],
+    "牌": [
+        "01010010000",
+        "01010111111",
+        "01010101001",
+        "01111111111",
+        "01000101001",
+        "01000111111",
+        "01110010100",
+        "01010100100",
+        "01011111111",
+        "01010000100",
+        "10010000100",
+    ],
+    "不": [
+        "11111111111",
+        "00000010000",
+        "00000100000",
+        "00001100000",
+        "00010101000",
+        "00100100100",
+        "11000100010",
+        "00000100001",
+        "00000100000",
+        "00000100000",
+        "00000100000",
+    ],
+    "要": [
+        "11111111111",
+        "00001010000",
+        "01111111110",
+        "01001010010",
+        "01111111110",
+        "00001000000",
+        "11111111111",
+        "00010000100",
+        "00110001000",
+        "00001110000",
+        "11110001111",
+    ],
+}
+
+# 键面文字的一个像素边长（mm）与字距（按像素数）：23 像素宽的一行正好落在
+# 菱形内面里，四角不至于戳出斜边。
+KEY_LABEL_PX = 0.30
+KEY_LABEL_GAP = 1.0
 
 
-def x_poly(arm, length):
-    """✕：把十字多边形转 45°。"""
-    c = math.cos(math.radians(45.0))
-    return [(x * c - z * c, x * c + z * c) for x, z in cross_outline(length, arm)]
+def pixel_text_object(name, text, cx, cz, px, y0, y1, mat, gap=KEY_LABEL_GAP):
+    """把一行点阵字摆成一块网格：整行居中，每个字按自己的墨迹框居中。
+
+    一行里连续的亮像素合成一段、每段拉一个薄方块，再并进同一个 mesh ——
+    一个字几十段，但不建几十个 object，导出与烘焙都轻。
+    """
+    verts, faces = [], []
+    n = len(text)
+    width = (n * GLYPH_PX + (n - 1) * gap) * px
+    x0 = cx - width / 2.0
+    top = cz + GLYPH_PX * px / 2.0
+    for ch in text:
+        bits = KEY_GLYPHS[ch]
+        for r, row in enumerate(bits):
+            c = 0
+            while c < len(row):
+                if row[c] != "1":
+                    c += 1
+                    continue
+                c0 = c
+                while c < len(row) and row[c] == "1":
+                    c += 1
+                run = c - c0
+                v, f = prism_solid(rect_pts(run * px, px), y0, y1)
+                off = len(verts)
+                xa = x0 + c0 * px + run * px / 2.0
+                za = top - r * px - px / 2.0
+                verts += [(vx + xa, vy, vz + za) for (vx, vy, vz) in v]
+                faces += [tuple(i + off for i in face) for face in f]
+        x0 += (GLYPH_PX + gap) * px
+    return new_object(name, verts, faces, mats=[mat])
 
 
 def front_piece(name, pts, front, back, mats, bevel=0.12):
@@ -1284,14 +1418,10 @@ def build_right_keys(mats):
     cap_front = SHELL_FRONT - DIAMOND_DEPTH - 0.10        # 黑键面的正面
     sym_front, sym_back = cap_front - 0.15, cap_front + 0.05   # P1：图案微凸 0.15mm
 
-    # 图案用符号不用文字：和左边十字键的白三角是同一套语言
-    glyphs = {
-        "Up": [star_poly(2.40, 0.44, rot=90.0)],                    # ★ 推荐
-        "Left": [arc_band_poly(2.10, 1.45, 75.0, 330.0, 16),        # ↺ 撤销
-                 tri_poly(1.30, 150.0, 1.15, 1.92)],
-        "Right": [tri_poly(2.50, 0.0, -0.625, 0.0)],               # ▶ 出牌
-        "Down": [x_poly(1.00, 4.20)],                               # ✕ 不要
-    }
+    # 键面写功能名，不写图案：参考图上这四颗菱形键就是文字键（出牌/设置/Pass/提示），
+    # 图案反而把语义丢了。这台机器的四个功能是 出牌 / 不要 / 推荐 / 撤销 —— 照功能写，
+    # 按钮就不撒谎；字形走仓库那份点阵中文字体，和机顶/机下的字同一套笔画。
+    labels = {"Up": "推荐", "Left": "撤销", "Right": "出牌", "Down": "不要"}
     positions = [
         ("Up", 0.0, DIAMOND_OFF),
         ("Left", -DIAMOND_OFF, 0.0),
@@ -1313,13 +1443,11 @@ def build_right_keys(mats):
             apply_transform(ob)
             shade_by_angle(ob, 28.0)
         out += [edge, black]
-        for i, poly in enumerate(glyphs[name]):
-            sym = front_piece("KeySymbol_%s_%d" % (name, i), poly,
-                              sym_front, sym_back, [mats["symbol"]], bevel=0.0)
-            sym.location = (DIAMOND_CX + dx, 0.0, DIAMOND_CZ + dz)
-            apply_transform(sym)
-            shade_by_angle(sym, 28.0)
-            out.append(sym)
+        label = pixel_text_object("KeyLabel_" + name, labels[name],
+                                  DIAMOND_CX + dx, DIAMOND_CZ + dz,
+                                  KEY_LABEL_PX, sym_front, sym_back, mats["symbol"])
+        shade_by_angle(label, 28.0)
+        out.append(label)
     return out
 
 
