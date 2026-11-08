@@ -1131,6 +1131,7 @@ try {
     const handline = document.getElementById('handline');
     const handstrip = document.getElementById('handstrip');
     const stripChip = handstrip && handstrip.querySelector('i[data-hand]');
+    const seatstrip = document.getElementById('seatstrip');
     const counterButtons = counterEl.querySelectorAll('button').length;
     const rowTops = {};
     document.querySelectorAll('#counter .cc').forEach(el => {
@@ -1147,6 +1148,15 @@ try {
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
       stripShown: !!handstrip && getComputedStyle(handstrip).display !== 'none',
       stripFs: stripChip ? parseFloat(getComputedStyle(stripChip).fontSize) : 0,
+      stripTop: handstrip ? handstrip.getBoundingClientRect().top : 0,
+      stageBottom: stage.bottom,
+      seatShown: !!seatstrip && getComputedStyle(seatstrip).display !== 'none',
+      seatCells: seatstrip ? [...seatstrip.querySelectorAll('.sc')].map(el => ({
+        text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+        fs: parseFloat(getComputedStyle(el).fontSize),
+      })) : [],
+      seatTop: seatstrip ? seatstrip.getBoundingClientRect().top : 0,
+      seatBottom: seatstrip ? seatstrip.getBoundingClientRect().bottom : 0,
       counterButtons,
       docOverflow: document.documentElement.scrollWidth - innerWidth,
       innerW: innerWidth,
@@ -1159,6 +1169,32 @@ try {
   // 3D 那张牌在 420px 只有约 6px 的点数：这一档只能靠机身下方的常驻条逐张读。
   if (!narrowLayout.stripShown) problems.push('420px 没有常驻的平面手牌条，点数读不出来');
   if (narrowLayout.stripFs < 12) problems.push(`420px 常驻手牌条字号过小：${narrowLayout.stripFs}px`);
+  // 屏内贴图字在 420px 只有约 2.4px（ADR-0013）：「谁是谁、还剩几张」这一档由机下的 2D 行承载。
+  if (!narrowLayout.seatShown) problems.push('420px 没有机下座位行，「谁是谁、还剩几张」读不出来');
+  if (narrowLayout.seatShown) {
+    const want = ['上家', '我', '下家'];
+    if (narrowLayout.seatCells.length !== want.length) {
+      problems.push(`420px 机下座位行不是 3 家：${narrowLayout.seatCells.length}`);
+    }
+    narrowLayout.seatCells.forEach((c, i) => {
+      if (!c.text.startsWith(want[i] || '')) {
+        problems.push(`420px 机下第 ${i + 1} 格不是「${want[i] || ''}」：${c.text || '(空)'}`);
+      }
+      if (!/地主|农民/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写身份：${c.text || '(空)'}`);
+      if (!/\d+$/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写剩余张数：${c.text || '(空)'}`);
+      if (c.fs < 12) problems.push(`420px 机下座位行字号过小：${c.fs}px`);
+    });
+    if (narrowLayout.seatBottom > narrowLayout.stripTop + 1) {
+      problems.push(`420px 机下座位行压住手牌条：${narrowLayout.seatBottom.toFixed(1)}`
+        + ` > ${narrowLayout.stripTop.toFixed(1)}`);
+    }
+    // 负 margin（--machine-bleed）把状态行拉回机身可见下沿。变量只在 .stage 上设过是传不到
+    // 状态行的（它是 .stage 的兄弟），那时状态行会正好落在 stage 底 —— 这条就守着这个回退。
+    if (narrowLayout.stageBottom - narrowLayout.seatTop < 5) {
+      problems.push(`420px 机下座位行没贴回机身下沿（负 margin 没生效）：`
+        + `seatTop=${narrowLayout.seatTop.toFixed(1)} stageBottom=${narrowLayout.stageBottom.toFixed(1)}`);
+    }
+  }
   // 窄屏手牌条点一下 = 点屏幕上那张牌：420px 下这是唯一读得出点数的选择入口
   if (narrowLayout.stripShown) {
     if (await page.locator('#play-clear').isEnabled()) {

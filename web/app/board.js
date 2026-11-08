@@ -41,6 +41,26 @@ function paintLabels(){
   }
 }
 
+/**
+ * 机下那条 2D 座位状态行：420px 下屏内贴图字已经糊了，「谁是谁、还剩几张」得在 2D 层读得到。
+ * 内容和屏内那份同源（S.meta.seats + S.snap.remaining），不另算一遍。
+ */
+function renderSeatstrip(){
+  const el = $('seatstrip');
+  if (!el || !S.meta || !S.snap) return;
+  const v = S.snap;
+  const order = { up: 0, me: 1, down: 2 };          // 按相对位置排：上家 / 我 / 下家
+  const players = Object.keys(S.meta.seats).sort((a, b) =>
+    (order[S.meta.seats[a].relative] ?? 9) - (order[S.meta.seats[b].relative] ?? 9));
+  el.innerHTML = players.map(player => {
+    const seat = S.meta.seats[player];
+    const acting = !v.finished && v.acting === player;
+    return `<span class="sc${isMe(player) ? ' is-me' : ''}${acting ? ' is-acting' : ''}">`
+      + `<b>${label(player)}</b><span class="badge ${seat.identity}">${identityLabel(player)}</span>`
+      + `<span class="cnt">${v.remaining[player]}</span></span>`;
+  }).join('');
+}
+
 /** 副屏要显示什么：DOM 锚点和 3D 贴图共用这一份数据，两边不各算一次。 */
 function counterModel(){
   if (S.barMode === 'prob'){
@@ -332,6 +352,18 @@ function place(payload){
   ov.classList.toggle('is-compact', stage.clientWidth < 900);
   ov.style.fontSize = `${Math.max(7, Math.min(13, s.w * 0.025)).toFixed(1)}px`;
 
+  // 机下那条 2D 状态行要贴住机身下沿。机身投影在 stage 里的位置只有 machine 知道，
+  // 把"机身底到 stage 底还差多少"量成变量交给 CSS，免得两边各写一个魔法数。
+  //
+  // 注意 tablet 是机身盒**前面四角**的投影，比看得见的剪影还低一点（底沿那条轨）。
+  // 实测 360 / 420 / 480 / 620 四个视口，这段差值稳定在屏宽的 ≈4.7%，跟着机身一起缩放 ——
+  // 不补的话状态层和机身之间会留一条亮缝，读起来就像贴在机器下面的一张卡片。
+  const tablet = rects.tablet;
+  const BOX_OVERHANG = 0.047;
+  // 变量要设在 .stage 和状态行的共同祖先上（状态行是 .stage 的兄弟，设在自己身上传不过去）。
+  if (tablet) machineEl.style.setProperty('--machine-bleed', `${Math.max(0,
+    stage.clientHeight - (tablet.y + tablet.h) + stage.clientWidth * BOX_OVERHANG).toFixed(1)}px`);
+
   const sh = $('screen-hud');
   // 座位圆点已经画进主屏纹理：DOM 只留悬停展开的完整卡片，别再压一层盖在模型上。
   sh.classList.toggle('is-3d', Boolean(screen3d));
@@ -398,6 +430,7 @@ export function init(){
 export function render(){
   ensureLabels();
   paintLabels();
+  renderSeatstrip();
   renderCounter();
   machine.apply(S.snap, S.meta);
   // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。
