@@ -53,6 +53,10 @@ const CHAR_SEAT = {
   me:   { x: 0.00, z: 5.45, scale: 0.950, front: true },
 };
 const CHAR_H_WORLD = 2.10;
+// 角色开关：效果还没定，先关掉（场景里不建、不画、状态里也不报）。
+// 要开回来把这一行改成 true 即可，buildCharacters / updateCharacters / machineStatus
+// 三处都看它；verify 的断言也跟着它走。
+export const charactersEnabled = false;
 const CHAR_TONE = { up: '--side-a', me: '--accent', down: '--side-b' };
 
 let canvas, stage, overlayHook;
@@ -222,7 +226,7 @@ function charScreenRect(m){
 }
 // 身份是服务端算的（谁当地主每局都可能变），所以贴图跟着 meta 走，不写死座位。
 function updateCharacters(){
-  if (!charGroup || !lastMeta || !lastMeta.seats) return;
+  if (!charactersEnabled || !charGroup || !lastMeta || !lastMeta.seats) return;
   const shown = {};
   Object.keys(lastMeta.seats).forEach(player => {
     const seat = lastMeta.seats[player];
@@ -1142,7 +1146,7 @@ export function init(canvasEl, hook){
   const tkey = new THREE.DirectionalLight(0xffffff, 1.5); tkey.position.set(-4, 9, 7); tableScene.add(tkey);
   const tfill = new THREE.DirectionalLight(0xcfe0ff, 0.5); tfill.position.set(6, 4, 5); tableScene.add(tfill);
   buildTable();
-  buildCharacters();
+  if (charactersEnabled) buildCharacters();
   cardGroup = new THREE.Group();
   tableScene.add(cardGroup);
   edgeMat = new THREE.MeshBasicMaterial({ color: cssVar('--ink'), depthTest: false });
@@ -1645,7 +1649,7 @@ export function machineStatus(){
   return {
     source: 'glb', status, ready, error, nodes, buttonsVisible,
     // #22 的验收锚点：三个座位各有一个角色、身份对不对、地主头上有没有王冠。
-    characters: Object.keys(CHAR_SEAT).map(relative => {
+    characters: charactersEnabled ? Object.keys(CHAR_SEAT).map(relative => {
       const m = charMeshes[relative];
       return {
         relative,
@@ -1655,7 +1659,7 @@ export function machineStatus(){
         position: m ? [+m.position.x.toFixed(3), +m.position.y.toFixed(3), +m.position.z.toFixed(3)] : null,
         screen: m ? charScreenRect(m) : null,
       };
-    }),
+    }) : [],
     entranceDone, entranceStartedAt,          // 入场有没有播、什么时候开始（ADR-0011 验收用）
     environment: !!(scene && scene.environment),
     toneMapping: renderer ? renderer.toneMapping : null,
