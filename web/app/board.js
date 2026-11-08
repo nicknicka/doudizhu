@@ -42,8 +42,9 @@ function paintLabels(){
 }
 
 /**
- * 机下那条 2D 座位状态行：420px 下屏内贴图字已经糊了，「谁是谁、还剩几张」得在 2D 层读得到。
- * 内容和屏内那份同源（S.meta.seats + S.snap.remaining），不另算一遍。
+ * 机下那条 2D 座位状态行：420px 下屏内贴图字已经糊了，「谁是谁、还剩几张、已出什么」
+ * 都得在 2D 层读得到。内容和屏内那份同源（S.meta.seats + S.snap.remaining / played），
+ * 不另算一遍。两行一格：上行是座位名 + 身份 + 剩余张数，下行是已出牌。
  */
 function renderSeatstrip(){
   const el = $('seatstrip');
@@ -55,9 +56,13 @@ function renderSeatstrip(){
   el.innerHTML = players.map(player => {
     const seat = S.meta.seats[player];
     const acting = !v.finished && v.acting === player;
-    return `<span class="sc${isMe(player) ? ' is-me' : ''}${acting ? ' is-acting' : ''}">`
-      + `<b>${label(player)}</b><span class="badge ${seat.identity}">${identityLabel(player)}</span>`
-      + `<span class="cnt">${v.remaining[player]}</span></span>`;
+    const played = (v.played[player] || []).map(c => NAME[c] || c).join(' ');
+    return `<span class="sc${isMe(player) ? ' is-me' : ''}${acting ? ' is-acting' : ''}"`
+      + ` data-seat="${seat.relative}">`
+      + `<span class="top"><b>${label(player)}</b>`
+      + `<span class="badge ${seat.identity}">${identityLabel(player)}</span>`
+      + `<span class="cnt">${v.remaining[player]}</span></span>`
+      + `<span class="out">已出：${played || '—'}</span></span>`;
   }).join('');
 }
 

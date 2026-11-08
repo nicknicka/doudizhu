@@ -538,6 +538,30 @@ try {
   if (!(band.left <= 25)) problems.push(`机身左下的影子铺满了整条（${band.left}），影子没有方向`);
   for (const a of band.corner) if (a !== 0) problems.push(`机身外空场被涂了东西：alpha=${a}`);
   if (!shell.screen || shell.screen.w < 2 || shell.screen.h < 2) problems.push('没有从 GLB 量出真屏矩形');
+
+  // #22 三位角色：三个座位各一个，身份跟着服务端下发的 meta 走，地主头顶必须有王冠。
+  // 角色只是叠加物：投影矩形要落在屏内（出了屏就成了贴边的一块色），
+  // 座位徽章是 DOM 层，永远压在角色上面，所以这里不用再查遮挡。
+  const chars = shell.characters || [];
+  const seatsNow = await page.evaluate(async () => Object.fromEntries(
+    Object.entries((await import('/app/state.js')).S.meta.seats)
+      .map(([player, seat]) => [seat.relative, seat.identity])));
+  if (chars.length !== 3) problems.push(`屏内角色不是 3 个：${chars.length}`);
+  for (const c of chars) {
+    const want = seatsNow[c.relative];
+    if (!want) problems.push(`角色 ${c.relative} 在状态里找不到对应座位`);
+    else if (c.identity !== want) problems.push(`角色 ${c.relative} 的身份不对：${c.identity} ≠ ${want}`);
+    if (!c.visible) problems.push(`角色 ${c.relative} 没显示出来`);
+    if (c.crowned !== (want === 'landlord')) problems.push(`角色 ${c.relative} 的王冠和身份不一致`);
+    const r = c.screen || {};
+    if (!(r.x >= -0.01 && r.x + r.w <= 1.01 && r.y >= -0.01 && r.y + r.h <= 1.01)) {
+      problems.push(`角色 ${c.relative} 出了屏：x[${r.x},${(r.x + r.w).toFixed(3)}]`
+        + ` y[${r.y},${(r.y + r.h).toFixed(3)}]`);
+    }
+  }
+  if (chars.filter(c => c.crowned).length !== 1) {
+    problems.push(`戴王冠的角色不是恰好 1 个：${chars.filter(c => c.crowned).length}`);
+  }
   if (!shell.screenSize || shell.screenSize.w <= 0 || shell.screenSize.h <= 0) problems.push('真屏包围盒尺寸无效');
   // ADR-0008：座位徽章内嵌进主屏纹理，DOM 只留锚点；否则机身一转圆点就浮到屏外。
   const mainHud = shell.mainHud || {};
@@ -1153,6 +1177,11 @@ try {
       seatShown: !!seatstrip && getComputedStyle(seatstrip).display !== 'none',
       seatCells: seatstrip ? [...seatstrip.querySelectorAll('.sc')].map(el => ({
         text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+        relative: el.dataset.seat || '',
+        who: (el.querySelector('b')?.textContent || '').trim(),
+        badge: (el.querySelector('.badge')?.textContent || '').trim(),
+        cnt: (el.querySelector('.cnt')?.textContent || '').trim(),
+        out: (el.querySelector('.out')?.textContent || '').replace(/\s+/g, ' ').trim(),
         fs: parseFloat(getComputedStyle(el).fontSize),
       })) : [],
       seatTop: seatstrip ? seatstrip.getBoundingClientRect().top : 0,
@@ -1173,15 +1202,29 @@ try {
   if (!narrowLayout.seatShown) problems.push('420px 没有机下座位行，「谁是谁、还剩几张」读不出来');
   if (narrowLayout.seatShown) {
     const want = ['上家', '我', '下家'];
+    // 三格的「已出」和状态里那份逐字对齐（同一个 NAME 映射），别各写各的
+    const playedText = await page.evaluate(async () => {
+      const { S } = await import('/app/state.js');
+      const { NAME } = await import('/app/labels.js');
+      return Object.fromEntries(Object.entries(S.meta.seats).map(([p, seat]) =>
+        [seat.relative, (S.snap.played[p] || []).map(c => NAME[c] || c).join(' ')]));
+    });
     if (narrowLayout.seatCells.length !== want.length) {
       problems.push(`420px 机下座位行不是 3 家：${narrowLayout.seatCells.length}`);
     }
     narrowLayout.seatCells.forEach((c, i) => {
-      if (!c.text.startsWith(want[i] || '')) {
-        problems.push(`420px 机下第 ${i + 1} 格不是「${want[i] || ''}」：${c.text || '(空)'}`);
+      if (c.relative !== ['up', 'me', 'down'][i]) {
+        problems.push(`420px 机下第 ${i + 1} 格的 data-seat 不对：${c.relative || '(空)'}`);
       }
-      if (!/地主|农民/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写身份：${c.text || '(空)'}`);
-      if (!/\d+$/.test(c.text)) problems.push(`420px 机下第 ${i + 1} 格没写剩余张数：${c.text || '(空)'}`);
+      if (c.who !== want[i]) {
+        problems.push(`420px 机下第 ${i + 1} 格不是「${want[i] || ''}」：${c.who || '(空)'}`);
+      }
+      if (!/地主|农民/.test(c.badge)) problems.push(`420px 机下第 ${i + 1} 格没写身份：${c.badge || '(空)'}`);
+      if (!/^\d+$/.test(c.cnt)) problems.push(`420px 机下第 ${i + 1} 格没写剩余张数：${c.cnt || '(空)'}`);
+      const wantOut = `已出：${playedText[c.relative] || '—'}`;
+      if (c.out !== wantOut) {
+        problems.push(`420px 机下第 ${i + 1} 格的已出牌对不上：${c.out || '(空)'} ≠ ${wantOut}`);
+      }
       if (c.fs < 12) problems.push(`420px 机下座位行字号过小：${c.fs}px`);
     });
     if (narrowLayout.seatBottom > narrowLayout.stripTop + 1) {
