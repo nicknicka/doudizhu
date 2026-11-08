@@ -418,6 +418,34 @@ async function waitForFramesToSettle(page, timeoutMs = 60000) {
   throw new Error('渲染在 60 秒内没有稳定');
 }
 
+// 点一个「会异步换局面」的按钮（上一次 / 下一次出牌机会、回到最新），等局面真的换了再往下。
+//
+// 「点一下 + sleep 900ms + 读状态」在 ubuntu runner 上会读错（#60，2/4 复现）：
+//   1. 换一次局面是 POST /api/analyze —— 200 粒子采样 + 模型给全部合法动作打分，
+//      这一趟可能超过 900ms，sleep 完读到的还是旧局面；
+//   2. refresh() 在 S.busy 为真时会**静默丢弃**点击（main.js:25），上一次还没回来
+//      时点了等于没点，既不报错也不排队。
+// 所以先等按钮可点、app 不忙，再点，再轮询到局面真的换了。按钮始终不可点返回 null。
+async function stepAndSettle(page, selector, read) {
+  const busy = () => page.evaluate(async () =>
+    Boolean((await import('/app/state.js')).S.busy));
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (!(await page.locator(selector).isDisabled()) && !(await busy())) break;
+    await page.waitForTimeout(100);
+  }
+  if (await page.locator(selector).isDisabled()) return null;
+  const before = await read();       // 等稳了再读，别拿点击之前那份可能过期的状态
+  await page.click(selector);
+  while (Date.now() < deadline) {
+    const now = await read();
+    if (now.now !== before.now) return now;
+    await page.waitForTimeout(100);
+  }
+  problems.push(`点了 ${selector}，30 秒内局面没有换（还停在 ${before.now}）`);
+  return await read();
+}
+
 try {
   if (!(await portIsFree())) throw new Error(`端口 ${PORT} 已被占用，请先停止占用进程`);
   // PYTHONPATH 指到本 checkout 的 src：共享 .venv 的 editable 安装指向主 checkout，
@@ -850,10 +878,7 @@ try {
     hint: document.getElementById('play-hint').textContent,
   }));
   // 演示局开屏就落在「该我出牌、真有得选」的最新一手了 —— 先退回上一手，制造出历史局面再验回放
-  if (!(await page.locator('#step-prev').isDisabled())) {
-    await page.click('#step-prev'); await page.waitForTimeout(900);
-  }
-  const st0 = await stepState();
+  const st0 = (await stepAndSettle(page, '#step-prev', stepState)) ?? await stepState();
   if (!/第\s*\d+/.test(st0.now)) problems.push(`出牌机会没显示编号：${st0.now}`);
   if (st0.prevOff !== st0.leftOff || st0.nextOff !== st0.rightOff) {
     problems.push('台面的 ←/→ 与握把上的 ←/→ 可用状态不一致');
@@ -862,12 +887,14 @@ try {
   if (!st0.hint.includes('回到最新')) problems.push('看历史局面时没提示「回到最新才能继续录」');
   if (st0.nextOff) problems.push('历史局面下「下一次出牌机会」却点不动');
   else {
-    await page.click('#step-next'); await page.waitForTimeout(900);
-    const st1 = await stepState();
-    if (st1.now === st0.now) problems.push('点「下一次出牌机会」没有换局面');
-    await page.click('#step-prev'); await page.waitForTimeout(900);
-    const st2 = await stepState();
-    if (st2.now !== st0.now) problems.push(`点「上一次出牌机会」没回到原来那一手：${st0.now} → ${st2.now}`);
+    const st1 = await stepAndSettle(page, '#step-next', stepState);
+    if (!st1) problems.push('点「下一次出牌机会」没有换局面');
+    else {
+      const st2 = await stepAndSettle(page, '#step-prev', stepState);
+      if (!st2 || st2.now !== st0.now) {
+        problems.push(`点「上一次出牌机会」没回到原来那一手：${st0.now} → ${st2 && st2.now}`);
+      }
+    }
   }
 
   // 交互 2：推荐键 → 选中模型给的那一手（并在提示里说明是第几个候选）
@@ -1393,16 +1420,13 @@ try {
     problems.push('窄屏出牌机会两个方向都点不动（历史局面应有可换的一手）');
   } else {
     const fwd = !ns0.nextOff;
-    await page.click(fwd ? '#step-next' : '#step-prev');
-    await page.waitForTimeout(900);
-    const ns1 = await narrowStep();
-    if (ns1.now === ns0.now) problems.push('窄屏点出牌机会按钮没有换局面');
+    const ns1 = await stepAndSettle(page, fwd ? '#step-next' : '#step-prev', narrowStep);
+    if (!ns1) problems.push('窄屏点出牌机会按钮没有换局面');
     // 回到最新那一手：有「回到最新」就用它，否则反向点一次
     if (!(await page.locator('#play-latest').isHidden())) {
-      await page.click('#play-latest'); await page.waitForTimeout(900);
+      await stepAndSettle(page, '#play-latest', narrowStep);
     } else {
-      await page.click(fwd ? '#step-prev' : '#step-next');
-      await page.waitForTimeout(900);
+      await stepAndSettle(page, fwd ? '#step-prev' : '#step-next', narrowStep);
     }
   }
 
