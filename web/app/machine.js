@@ -7,6 +7,7 @@ import { reduce } from './state.js';
 import { NAME, SHORT, SUIT_GLYPH } from './labels.js';
 import { handCards, trickCards, isMyTrick, rankCounts, isRedSuit } from './virtual-cards.js';
 import { drawFace, FACE_W, FACE_H } from './card-face.js';
+import { drawCharacter, CHAR_W, CHAR_H } from './characters.js';
 
 const MODEL_URL = new URL('../assets/console-b.glb', import.meta.url);
 const MODEL_SCALE = 1 / 20;                 // 建模单位是 mm；20mm = 1 three.js 单位
@@ -35,6 +36,20 @@ const SEAT_3D = {
   down: { x: 4.55,  z: -0.55, labelZ: -0.85 },
 };
 
+// #22 三位角色：像看板一样立在各自座位外侧、永远正对镜头 —— 相机是俯视牌桌的，
+// 不正对镜头的话角色看起来像躺在桌上。底色区分是谁（上家 / 我 / 下家），
+// 头顶区分身份（王冠 / 斗笠），造型见 characters.js。
+// 坐标是「脚踩在哪」：左右两侧站在木圈上（绒面外），我在近沿左端 —— 近沿正中
+// 被自己的手牌扇面占着，站进去就会压住牌。数值是拿屏幕归一化矩形反解出来的：
+// 三个角色都落在屏内，且不压座位徽章与牌（见 machineStatus().characters[].screen）。
+const CHAR_SEAT = {
+  up:   { x: -5.15, z: 0.75, scale: 1.000 },
+  down: { x:  5.15, z: 0.75, scale: 1.000 },
+  me:   { x: -4.90, z: 4.35, scale: 0.905 },
+};
+const CHAR_H_WORLD = 2.10;
+const CHAR_TONE = { up: '--side-a', me: '--accent', down: '--side-b' };
+
 let canvas, stage, overlayHook;
 let renderer, scene, camera, rig, body, screenGroup, screenMesh, screenMat;
 // 副屏是**真 3D 面**：内容画进一张 canvas，再当纹理贴到玻璃面前沿。
@@ -49,6 +64,8 @@ let hudScene = null, hudCam = null, hudTex = null, hudCanvas = null;
 const HUD_TEX = { w: 1536, h: 804 };   // ≈ 主屏 104×54.4 的长宽比；按大屏 RT 的实际像素留够采样率
 let tableScene, tableCam, rt;
 let cardGroup, anchors = {}, frontMats = {}, backMat, edgeMat, shadowMat, shadowGeo, cardGeo, frameGeo, frameMat;
+let charGroup = null, charMeshes = {};
+const charTex = {};
 let handMeshes = [], handHits = [], handRows = [], hitGeo, hitMat;
 let selectedCards = new Set();
 // 选中的牌怎么「站出来」：抬高 + 亮边 + 影子留在原位。
@@ -140,6 +157,74 @@ function asTexture(c, crisp = false){
   t.anisotropy = crisp ? 1 : 8;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+function characterTexture(seat, identity){
+  const key = `${seat}:${identity}`;
+  if (charTex[key]) return charTex[key];
+  const c = makeCanvas(CHAR_W, CHAR_H);
+  drawCharacter(c.getContext('2d'), {
+    seat, identity,
+    palette: {
+      ink: cssVar('--ink'), paper: '#fbfaf6',
+      // 斗笠用草色（和铜木圈同一支暖色），王冠用更亮的金：两个都压在墨色轮廓里，
+      // 拉开明度也拉开形状 —— 一眼分得出谁是地主。
+      gold: cssVar('--sel-edge'), hat: cssVar('--side-b'), hatBand: cssVar('--ink'),
+      tone: cssVar(CHAR_TONE[seat] || '--ink'),
+    },
+  });
+  charTex[key] = asTexture(c, true);
+  return charTex[key];
+}
+function buildCharacters(){
+  charGroup = new THREE.Group();
+  for (const [seat, at] of Object.entries(CHAR_SEAT)){
+    const h = CHAR_H_WORLD * at.scale, w = h * (CHAR_W / CHAR_H);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.5, depthWrite: false }));
+    m.position.set(at.x, 0, at.z);
+    m.lookAt(tableCam.position);      // 公告板：永远把正面转向镜头
+    // 脚踩在木圈顶面上（圈顶 y≈0.26）：不抬这一下，腿会整段埋进桌沿里，
+    // 看着像从桌子里长出来；抬到位以后鞋和半截腿露出来，人才是站在桌边的。
+    m.translateY(h / 2 + 0.18);
+    m.renderOrder = 10;               // 排在牌（100 起）之前：牌永远压在角色身上
+    m.visible = false;                // 身份要等第一份 meta 到了才知道
+    charMeshes[seat] = m;
+    charGroup.add(m);
+  }
+  tableScene.add(charGroup);
+}
+// 角色在屏上的位置：把看板四角投到牌桌相机，换算成 0..1 的屏内归一化矩形
+// （y 向下）。验收要问「角色有没有出屏、有没有压住座位徽章」，这里给可读的数。
+const _cv = new THREE.Vector3();
+function charScreenRect(m){
+  const p = m.geometry.parameters;
+  const pts = [[-p.width / 2, -p.height / 2], [p.width / 2, -p.height / 2],
+               [p.width / 2, p.height / 2], [-p.width / 2, p.height / 2]];
+  m.updateWorldMatrix(true, false);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of pts){
+    _cv.set(x, y, 0); m.localToWorld(_cv); _cv.project(tableCam);
+    x0 = Math.min(x0, _cv.x); x1 = Math.max(x1, _cv.x);
+    y0 = Math.min(y0, _cv.y); y1 = Math.max(y1, _cv.y);
+  }
+  return { x: +((x0 + 1) / 2).toFixed(4), y: +((1 - y1) / 2).toFixed(4),
+           w: +((x1 - x0) / 2).toFixed(4), h: +((y1 - y0) / 2).toFixed(4) };
+}
+// 身份是服务端算的（谁当地主每局都可能变），所以贴图跟着 meta 走，不写死座位。
+function updateCharacters(){
+  if (!charGroup || !lastMeta || !lastMeta.seats) return;
+  const shown = {};
+  Object.keys(lastMeta.seats).forEach(player => {
+    const seat = lastMeta.seats[player];
+    const m = charMeshes[seat.relative];
+    if (!m) return;
+    const want = characterTexture(seat.relative, seat.identity);
+    if (m.material.map !== want){ m.material.map = want; m.material.needsUpdate = true; }
+    m.userData.identity = seat.identity;
+    m.visible = true;
+    shown[seat.relative] = true;
+  });
+  Object.keys(charMeshes).forEach(rel => { if (!shown[rel]) charMeshes[rel].visible = false; });
 }
 function faceTexture(rank, suit){
   // 造型在 card-face.js：A 一个大花色、2–10 对称排点、J/Q/K 半身像、大小王王冠人像。
@@ -429,6 +514,7 @@ function drawCards(){
     }
     anchors[player] = new THREE.Vector3(place.x, 0.06, place.labelZ);
   });
+  updateCharacters();
   const trick = lastSnap.last_move || [];
   const trickRow = trickCards(recordId, trick, myCounts, isMyTrick(myPlayed, trick));
   const trickScale = tinyHand ? 2.10 : (narrowHand ? 1.30 : 1.42);
@@ -1046,6 +1132,7 @@ export function init(canvasEl, hook){
   const tkey = new THREE.DirectionalLight(0xffffff, 1.5); tkey.position.set(-4, 9, 7); tableScene.add(tkey);
   const tfill = new THREE.DirectionalLight(0xcfe0ff, 0.5); tfill.position.set(6, 4, 5); tableScene.add(tfill);
   buildTable();
+  buildCharacters();
   cardGroup = new THREE.Group();
   tableScene.add(cardGroup);
   edgeMat = new THREE.MeshBasicMaterial({ color: cssVar('--ink'), depthTest: false });
@@ -1547,6 +1634,18 @@ export function machineStatus(){
   if (body) body.traverse(o => { if (o.isMesh && o.castShadow) shadowCasters++; });
   return {
     source: 'glb', status, ready, error, nodes, buttonsVisible,
+    // #22 的验收锚点：三个座位各有一个角色、身份对不对、地主头上有没有王冠。
+    characters: Object.keys(CHAR_SEAT).map(relative => {
+      const m = charMeshes[relative];
+      return {
+        relative,
+        visible: !!(m && m.visible),
+        identity: (m && m.userData.identity) || null,
+        crowned: !!(m && m.userData.identity === 'landlord'),
+        position: m ? [+m.position.x.toFixed(3), +m.position.y.toFixed(3), +m.position.z.toFixed(3)] : null,
+        screen: m ? charScreenRect(m) : null,
+      };
+    }),
     entranceDone, entranceStartedAt,          // 入场有没有播、什么时候开始（ADR-0011 验收用）
     environment: !!(scene && scene.environment),
     toneMapping: renderer ? renderer.toneMapping : null,
