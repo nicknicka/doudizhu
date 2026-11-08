@@ -144,6 +144,23 @@ function renderNew(){
 }
 
 /* ---------- 录一手 ---------- */
+/**
+ * 我的手牌在平面上的可读副本；3D 那张牌负责点选，这一份负责「逐张认得出」。
+ * 宽屏挂在操作台里（#handline），窄屏挂在机身下方常驻（#handstrip）——
+ * 同一份数据、同一套点击口径，两边不会各说各话。
+ */
+function renderHandline(){
+  const hand = (S.snap && S.snap.my_hand) || [];
+  const html = `<span class="lb">我的牌（${hand.length} 张）</span>`
+    + hand.map((r, i) =>
+        `<i data-hand="${i}" class="${pickedIdx.has(i) ? 'is-picked' : ''}"`
+        + ` title="第 ${i + 1} 张">${NAME[r] || r}</i>`).join('');
+  for (const id of ['handline', 'handstrip']){
+    const el = $(id);
+    if (el) el.innerHTML = html;
+  }
+}
+
 function renderPlay(){
   const v = S.snap, m = S.meta;
   const latest = latestView();
@@ -152,6 +169,7 @@ function renderPlay(){
   $('play-who').textContent = over ? overText(v.winner) : turnText(v.acting);
   $('play-count').textContent = SEL.play.length ? `本手 ${SEL.play.length} 张` : '';
   chips($('play-chips'), sortPicked(), '在屏幕里点牌来选择；选中的牌会抬起来');
+  renderHandline();
 
   $('play-go').disabled = over || !latest || !SEL.play.length;
   $('play-pass').disabled = over || !latest;
@@ -301,6 +319,14 @@ export function init(dependencies){
     commitPlay(); syncPicked(); renderPlay();
   });
   $('play-clear').addEventListener('click', () => { SEL.play = []; adoptPlay(); syncPicked(); renderPlay(); });
+  // 平面手牌条点一下 = 点屏幕上那张牌：宽屏副本与窄屏常驻条共用一套口径
+  for (const id of ['handline', 'handstrip']){
+    const el = $(id);
+    if (el) el.addEventListener('click', e => {
+      const chip = e.target.closest('[data-hand]');
+      if (chip) toggleCard(Number(chip.dataset.hand));
+    });
+  }
   $('play-latest').addEventListener('click', () => deps.refresh(S.meta.total_steps));
 
   $('play-go').addEventListener('click', async () => {

@@ -231,13 +231,6 @@ function renderCounter(){
 export function renderBar(){ renderCounter(); }
 
 /** 窄屏用的计分板：把座位名牌从屏里搬出来，排成一条，避免互相压。 */
-/** 我的手牌在平面上的可读副本；3D 牌面负责点选。 */
-function renderHandLine(){
-  const hand = (S.snap && S.snap.my_hand) || [];
-  $('handline').innerHTML = `<span class="lb">我的牌（${hand.length} 张）</span>`
-    + hand.map(r => `<i>${NAME[r] || r}</i>`).join('');
-}
-
 function setMachineError(status, error){
   const box = $('machine-error');
   if (!box) return;
@@ -384,7 +377,6 @@ export function render(){
   ensureLabels();
   paintLabels();
   renderCounter();
-  renderHandLine();
   machine.apply(S.snap, S.meta);
   // 画座位圆章要读排好的手牌行数，所以放在 apply 之后，别吃到上一帧的布局。
   paintScreenHud();

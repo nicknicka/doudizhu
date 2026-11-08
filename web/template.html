@@ -327,6 +327,12 @@
   .handline i{font-style:normal;min-width:22px;padding:0 5px;line-height:1.5;font-size:12px;
               text-align:center;border:var(--px) solid var(--ink);background:var(--ground);
               color:var(--ink)}
+  .handline i[data-hand],.handstrip i[data-hand]{cursor:pointer}
+  .handline i.is-picked,.handstrip i.is-picked{background:var(--accent);border-color:var(--accent);
+                                              color:var(--ground)}
+  /* 窄屏常驻手牌条：3D 那张牌在 420px 只有约 6px 的点数，读不出来就得有一条平面的，
+     而且要能直接点着选。挂在机身下方，不必先开操作台。 */
+  .handstrip{display:none}
   .deckbar .cell{min-width:0}
   .deckbar .k{font-size:12px;color:var(--muted);margin-bottom:4px}
   .deckbar .k b{font-weight:400;color:var(--ink)}
@@ -591,8 +597,17 @@
     .machine.is-stacked .scoreboard .sc .turn-flag{margin-left:1px;font-size:9px}
     .machine.is-stacked .scoreboard .sc .badge{padding:0 2px;font-size:9px}
     .machine.is-stacked .scoreboard .sc .played{font-size:9px;line-height:1.2}
-    /* 3D 手牌已经排成 9+8；这份平面副本只在 620px 以上补读，窄屏不再重复占高。 */
+    /* 浮层里那份平面副本在窄屏收起，改由机身下方的常驻条承担：点数逐张读得出，
+       而且不用先开操作台。 */
     .panel .handline{display:none}
+    /* 画布铺满视口，手牌条要自己压到它上面，否则点不到（elementFromPoint 会命中 #scene） */
+    .handstrip{display:flex;flex-wrap:wrap;gap:4px;align-items:center;justify-content:center;
+      width:min(94vw,420px);margin:0 auto;padding:8px 10px;position:relative;z-index:3;
+      pointer-events:auto;   /* 它挂在 #panel 里，而面板收起时整层 pointer-events:none */
+      border:var(--px) solid var(--ink);background:var(--shell-hi)}
+    .handstrip .lb{font-size:12px;color:var(--muted);margin-right:2px}
+    .handstrip i{font-style:normal;min-width:26px;padding:5px 7px;font-size:13px;line-height:1.25;
+      text-align:center;border:var(--px) solid var(--ink);background:var(--ground);color:var(--ink)}
     .panel .deckbar{padding:6px 8px 8px;gap:3px 6px;grid-template-columns:1fr}
     .panel .deckbar .k{font-size:9px;line-height:1.2;white-space:nowrap;
       overflow:hidden;text-overflow:ellipsis}
@@ -1067,6 +1082,10 @@ setTimeout(window.__bootFallback, 30000);   // 兜底的兜底：模块求值中
           </div>
         </section>
       </div>
+
+      <!-- 窄屏常驻手牌条：宽屏由 3D 手牌与操作台承担，这里只在 620px 以下露面。
+           挂在 .stage 之后而不是 section 之后 —— 画布铺满视口，挂外面会掉到折叠线以下。 -->
+      <p class="handstrip" id="handstrip" aria-label="我的手牌：点一下选中或取消"></p>
 
     </div>
 
