@@ -172,7 +172,7 @@ class TestAppend:
             manual.append_step(record, "landlord_down", Action(kind="pass"))
 
     def test_rejects_an_unknown_card_type(self, fresh):
-        with pytest.raises(IllegalEntryError, match="不是合法牌型"):
+        with pytest.raises(IllegalEntryError, match="不是合法牌型：346"):
             manual.append_step(fresh, "landlord", Action(kind="play", cards=("3", "4", "6")))
 
 
