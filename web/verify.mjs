@@ -1102,6 +1102,8 @@ try {
     const counterEl = document.getElementById('counter'), counter = counterEl.getBoundingClientRect();
     const cell = document.querySelector('#counter .cc');
     const handline = document.getElementById('handline');
+    const handstrip = document.getElementById('handstrip');
+    const stripChip = handstrip && handstrip.querySelector('i[data-hand]');
     const counterButtons = counterEl.querySelectorAll('button').length;
     const rowTops = {};
     document.querySelectorAll('#counter .cc').forEach(el => {
@@ -1116,6 +1118,8 @@ try {
       counterCellW: cell ? cell.offsetWidth : 0,
       counterRows: Object.values(rowTops),
       handlineHidden: !handline || getComputedStyle(handline).display === 'none',
+      stripShown: !!handstrip && getComputedStyle(handstrip).display !== 'none',
+      stripFs: stripChip ? parseFloat(getComputedStyle(stripChip).fontSize) : 0,
       counterButtons,
       docOverflow: document.documentElement.scrollWidth - innerWidth,
       innerW: innerWidth,
@@ -1124,7 +1128,29 @@ try {
       bodyOverflow: document.body.scrollWidth - innerWidth,
     };
   });
-  if (!narrowLayout.handlineHidden) problems.push('420px 仍显示平面手牌副本，和 3D 单行手牌重复占高');
+  if (!narrowLayout.handlineHidden) problems.push('420px 浮层里仍显示平面手牌副本，和机身下方的常驻条重复');
+  // 3D 那张牌在 420px 只有约 6px 的点数：这一档只能靠机身下方的常驻条逐张读。
+  if (!narrowLayout.stripShown) problems.push('420px 没有常驻的平面手牌条，点数读不出来');
+  if (narrowLayout.stripFs < 12) problems.push(`420px 常驻手牌条字号过小：${narrowLayout.stripFs}px`);
+  // 窄屏手牌条点一下 = 点屏幕上那张牌：420px 下这是唯一读得出点数的选择入口
+  if (narrowLayout.stripShown) {
+    if (await page.locator('#play-clear').isEnabled()) {
+      await page.click('#play-clear'); await page.waitForTimeout(150);
+    }
+    const before = await page.locator('#play-chips i.c').count();
+    await page.locator('#handstrip i[data-hand]').first().click();
+    await page.waitForTimeout(180);
+    const after = await page.locator('#play-chips i.c').count();
+    if (after !== before + 1) problems.push(`420px 点常驻手牌条没有选中：${before} → ${after}`);
+    else if ((await page.locator('#handstrip i.is-picked').count()) !== after) {
+      problems.push('420px 常驻手牌条没有把选中的那张标出来');
+    }
+    await page.locator('#handstrip i[data-hand]').first().click();
+    await page.waitForTimeout(180);
+    if ((await page.locator('#play-chips i.c').count()) !== before) {
+      problems.push('420px 再点一次没有取消选中');
+    }
+  }
   if (narrowLayout.counterButtons) problems.push('420px 副屏里仍显示模式切换按钮');
   if (narrowLayout.counterFs < 10) problems.push(`420px 机顶记牌字号过小：${narrowLayout.counterFs}px`);
   if (narrowLayout.counterCellW < 20) problems.push(`420px 机顶记牌格宽过窄：${narrowLayout.counterCellW.toFixed(1)}px`);
