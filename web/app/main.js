@@ -129,13 +129,15 @@ document.addEventListener('drop', e => {
 
 /* ---------- 透明热区：悬浮（或触摸长按）0.5 秒才弹功能气泡 ---------- */
 const tip = $('tip');
-let tipTimer = null;
+let tipTimer = null, tipAnchor = null;
 const hideTip = () => {
   if (tipTimer){ clearTimeout(tipTimer); tipTimer = null; }
   if (tip) tip.classList.remove('is-on');
+  tipAnchor = null;
 };
 const showTip = el => {
   if (!tip || !el.dataset.tip) return;
+  tipAnchor = el;
   tip.textContent = el.dataset.tip;
   tip.classList.add('is-on');                    // 先显示再量：display:none 时 offsetWidth 是 0，夹不住边
   const r = el.getBoundingClientRect(), sr = $('stage').getBoundingClientRect();
@@ -148,6 +150,12 @@ const showTip = el => {
   tip.style.top = `${over ? r.top - sr.top - tip.offsetHeight - 6 : below}px`;
 };
 const armTip = el => { hideTip(); tipTimer = setTimeout(() => showTip(el), 500); };
+// 机身一动，气泡的锚点就旧了。这里不「收掉」而是重量一次 —— 布局事件在空闲时
+// 也会零星来（约每秒一次），一律收掉会把还没弹出来的气泡饿死。#89
+const retip = () => {
+  if (tipAnchor && tip && tip.classList.contains('is-on')) showTip(tipAnchor);
+};
+$('stage').addEventListener('machine:layout', retip);
 document.querySelectorAll('[data-tip]').forEach(el => {
   el.addEventListener('mouseenter', () => armTip(el));
   el.addEventListener('mouseleave', hideTip);

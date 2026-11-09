@@ -350,6 +350,9 @@ function place(payload){
   machineEl.classList.toggle('is-stacked', stacked);
   setMachineError(status, error);
   placeHotspots(status === 'ready' ? buttons : []);
+  // 布局变了（拖拽 / 平移 / 缩放 / 回弹 / 改窗口都走这里）：按键矩形刚被重写过，
+  // 按矩形量出来的东西（目前是功能气泡）得跟着重量一次。#89
+  stage.dispatchEvent(new CustomEvent('machine:layout'));
 
   const s = rects.screen;
   if (!s) return;
