@@ -1361,22 +1361,21 @@ def triangle_prism(p0, p1, p2, front, back, mats):
 def build_dpad(mats, shell):
     """左握把 D-pad：26x26、臂宽 9、厚 3.5；8x8 中心键再凸 1；四面白三角。"""
     front = SHELL_FRONT - DPAD_DEPTH
-    gold_out = cross_outline(DPAD_W + 2 * DPAD_EDGE, DPAD_ARM + 2 * DPAD_EDGE)
     black = cross_outline(DPAD_W, DPAD_ARM)
     key_front = front - 1.0
 
     pieces = [
-        front_piece("dpad_edge", gold_out, front + 0.30,
-                    SHELL_FRONT + 0.05, [mats["key_edge"]], bevel=0.10),
-        front_piece("dpad_black", black, front - 0.10, front + 0.32,
+        # 键面自己当键井、一直伸到板面。原先它悬在板面上方，靠比它大 0.6mm 的
+        # 浅灰十字垫板垫起来；那圈垫板会在十字的内凹角处露成台阶，掠射角看就是
+        # 几条横穿键面的灰线，所以把垫板撤掉、让黑键长到底（#90）。
+        front_piece("dpad_black", black, front - 0.10, SHELL_FRONT + 0.32,
                     [mats["key"]], bevel=0.22),
-        front_piece("key_edge",
-                    stepped_round_rect(DPAD_KEY + 2 * DPAD_EDGE,
-                                       DPAD_KEY + 2 * DPAD_EDGE, 1.2, steps=2),
-                    key_front + 0.25, front + 0.10, [mats["key_edge"]], bevel=0.08),
+        # 中心键原来也靠一圈浅灰阶梯垫板（key_edge）垫起来，那圈在掠射角下把十字
+        # 切成「几个分离的方块」，跟参考图里连续的十字不符；同样让它自己长进十字
+        # 体内（后端比十字键面深 0.2mm，重叠，不留缝）（#90）。
         front_piece("key_center",
                     stepped_round_rect(DPAD_KEY, DPAD_KEY, 0.6, steps=1),
-                    key_front - 0.05, key_front + 0.30,
+                    key_front - 0.05, front + 0.10,
                     [mats["key_center"]], bevel=0.10),
         # P1：参考图十字键中心是亮色方块（我们原来是纯黑）
         front_piece("key_center_face", rounded_rect(4.4, 4.4, 0.5, seg=2),
