@@ -383,9 +383,37 @@ function cardMesh(rank, suit, faceUp){
   return m;
 }
 const _hcW = new THREE.Vector3(), _hcC = new THREE.Vector3();
-// 手牌扇面两端的投影可能越出屏幕（NDC 超出 ±1），拾取落点会掉到屏幕 rect 外被边界挡掉。
-// 在相机空间里把牌心拉回屏内（保持深度不变），拾取与渲染就永远一致。
-function clampHandCenter(px, lift, pz){
+// 手牌扇面两端的投影会越出屏幕（NDC 超出 ±1），拾取落点就会掉到屏幕 rect 外被边界挡掉。
+// 早先是逐张把牌心硬夹回 ±0.94：那会把最外侧那张单独抬起来（手牌右端那张牌偏高就是这么来的，
+// 见 #91），而且一次改两个轴。现在改成整排一次校正：先按投影量出整排的包围盒，再把整排摊开的量
+// 等比缩一档、整体平移进安全框 —— 扇面形状与左右对称都保住；缩的是牌之间摊开的量，不是牌本身。
+const HAND_NDC_BOX = 0.94;                 // 整排最外沿允许落到的 NDC 半径
+const _hcS = new THREE.Vector3();          // ndcShiftToLocal 的返回值（复用，别每帧新建）
+
+/** 整排牌心投影出来的 NDC 包围盒；有任何一张落在相机背后就返回 null。 */
+function handRowNdc(plan){
+  if (!tableCam) return null;
+  tableCam.updateMatrixWorld();
+  cardGroup.updateWorldMatrix(true, false);
+  const e = tableCam.projectionMatrix.elements;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of plan){
+    _hcW.set(p.px, p.lift, p.pz);
+    cardGroup.localToWorld(_hcW);
+    _hcC.copy(_hcW).applyMatrix4(tableCam.matrixWorldInverse);
+    const nz = -_hcC.z;
+    if (!(nz > 0.001)) return null;
+    const x = (_hcC.x * e[0]) / nz, y = (_hcC.y * e[5]) / nz;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+/** 把 NDC 上的一个位移换算成表平面位移（保持同一深度），给整排平移用。 */
+function ndcShiftToLocal(px, lift, pz, dxNdc, dyNdc){
   if (!tableCam) return null;
   tableCam.updateMatrixWorld();
   cardGroup.updateWorldMatrix(true, false);
@@ -395,34 +423,65 @@ function clampHandCenter(px, lift, pz){
   const e = tableCam.projectionMatrix.elements;
   const nz = -_hcC.z;
   if (!(nz > 0.001)) return null;
-  const ndcX = (_hcC.x * e[0]) / nz, ndcY = (_hcC.y * e[5]) / nz;
-  const M = 0.94;
-  if (Math.abs(ndcX) <= M && Math.abs(ndcY) <= M) return null;
-  _hcC.x = Math.min(M, Math.max(-M, ndcX)) * nz / e[0];
-  _hcC.y = Math.min(M, Math.max(-M, ndcY)) * nz / e[5];
+  _hcC.x += dxNdc * nz / e[0];
+  _hcC.y += dyNdc * nz / e[5];
   _hcC.applyMatrix4(tableCam.matrixWorld);
   cardGroup.worldToLocal(_hcC);
-  return _hcC;
+  return _hcS.set(_hcC.x - px, _hcC.y - lift, _hcC.z - pz);
+}
+
+/** 整排进安全框：先缩摊开的量（不动牌尺寸），再整体平移；投影不是线性的，最多三轮。 */
+function fitHandRow(plan){
+  if (!tableCam || !plan.length) return;
+  for (let iter = 0; iter < 3; iter++){
+    const b = handRowNdc(plan);
+    if (!b) return;
+    const spanX = b.maxX - b.minX, spanY = b.maxY - b.minY;
+    const k = Math.min(1, (2 * HAND_NDC_BOX) / Math.max(spanX, 1e-6),
+                            (2 * HAND_NDC_BOX) / Math.max(spanY, 1e-6));
+    if (k < 0.999){
+      let mx = 0, my = 0, mz = 0;
+      for (const p of plan){ mx += p.px; my += p.lift; mz += p.pz; }
+      mx /= plan.length; my /= plan.length; mz /= plan.length;
+      for (const p of plan){
+        p.px = mx + (p.px - mx) * k;
+        p.lift = my + (p.lift - my) * k;
+        p.pz = mz + (p.pz - mz) * k;
+      }
+      continue;                                  // 缩完重量一次，再决定要不要平移
+    }
+    // 只把越出的那点挪回来，不把整排挪到框中央 —— 手牌该贴屏的下缘，不该被抬到屏中间。
+    let dx = 0, dy = 0;
+    if (b.minX < -HAND_NDC_BOX) dx = -HAND_NDC_BOX - b.minX;
+    else if (b.maxX > HAND_NDC_BOX) dx = HAND_NDC_BOX - b.maxX;
+    if (b.minY < -HAND_NDC_BOX) dy = -HAND_NDC_BOX - b.minY;
+    else if (b.maxY > HAND_NDC_BOX) dy = HAND_NDC_BOX - b.maxY;
+    if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) return;
+    const ref = plan[Math.floor(plan.length / 2)];
+    const d = ndcShiftToLocal(ref.px, ref.lift, ref.pz, dx, dy);
+    if (!d) return;
+    for (const p of plan){ p.px += d.x; p.lift += d.y; p.pz += d.z; }
+  }
 }
 function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
                 offset = 0, fan = 0, yaw = 0, arc = 0, surf = 0.18, order = 0){
   const n = cards.length;
   if (!n) return;
   const mid = (n - 1) / 2, rowHits = [];
-  cards.forEach((card, i) => {
-    const { rank, suit } = card;
+  const spanSum = Array.isArray(spacing) ? spacing.reduce((sum, gap) => sum + gap, 0) : 0;
+  // 先把整排摊成一份计划：手牌要按投影整排校正一次，再按校正后的位置建牌。
+  const plan = cards.map((card, i) => {
     const off = i - mid;
-    const roll = fan * off;
-    let lift = surf + (CARD_H * scale / 2) * Math.cos(tilt) + 0.02 - arc * off * off;
     const rowX = Array.isArray(spacing)
-      ? x + spacing.slice(0, i).reduce((sum, gap) => sum + gap, 0)
-        - spacing.reduce((sum, gap) => sum + gap, 0) / 2
+      ? x + spacing.slice(0, i).reduce((sum, gap) => sum + gap, 0) - spanSum / 2
       : x + off * spacing;
-    let px = rowX, pz = z + i * 0.03 + arc * off * off * 1.9;
-    if (track){
-      const c = clampHandCenter(px, lift, pz);
-      if (c){ px = c.x; lift = c.y; pz = c.z; }
-    }
+    return { card, i, off, roll: fan * off, px: rowX,
+             lift: surf + (CARD_H * scale / 2) * Math.cos(tilt) + 0.02 - arc * off * off,
+             pz: z + i * 0.03 + arc * off * off * 1.9 };
+  });
+  if (track) fitHandRow(plan);
+  plan.forEach(({ card, i, off, roll, px, lift, pz }) => {
+    const { rank, suit } = card;
     const base = order + i * 3;
     const m = cardMesh(rank, suit, faceUp);
     m.renderOrder = base + 1;
@@ -455,8 +514,7 @@ function layRow(cards, x, z, faceUp, tilt, spacing, scale = 1, track = false,
     }
     cardGroup.add(m);
   });
-  // clampHandCenter 可能把边缘牌拉离等距扇面；落点要按实际相邻中心算，
-  // 否则最外侧牌的可点区域会压到邻牌下面。
+  // 整排校正会挪动牌心；落点要按实际相邻中心算，否则最外侧牌的可点区域会压到邻牌下面。
   const half = CARD_W * scale / 2;
   rowHits.forEach((hit, i) => {
     const next = rowHits[i + 1];
