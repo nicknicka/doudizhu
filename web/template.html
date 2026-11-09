@@ -270,6 +270,9 @@
   .machine.is-stacked .controls{position:absolute;inset:0;pointer-events:none}
   .machine.is-stacked .cluster{pointer-events:auto}
   .machine.is-stacked .cluster .key{font-size:9px;padding:0;box-shadow:0 2px 0 var(--well)}
+  /* 3D 机身的键热区是透明的，外观只由模型给；上面那条 2px 垫影是给 DOM 键的，
+     落到热区上会在机身转过角度后露出几条飘着的灰条（#9E9A8F）。这里撤掉。 */
+  .machine.is-stacked .controls .key{box-shadow:none}
   .machine.is-stacked .cluster .key-center{font-size:7px}
   .machine.is-stacked .scoreboard{border-bottom:1px solid var(--well);padding:2px 0 4px}
   .machine.is-stacked .scoreboard .sc{border:none;background:transparent;padding:0 8px;
