@@ -100,8 +100,35 @@ def start(
     )
 
 
+def _unavailable_cards_message(over: Counter, snapshot) -> str:
+    """牌池里凑不出的牌，分开说清是「在我方手里」还是「已经出过」。
+
+    牌池 = 全牌 − 我方手牌 − 已出的牌，所以一张牌没进池子只有这两种去处。
+    混成一句「已经出过」，碰上「这张牌其实在我手里」就会把人引到错的方向。
+    """
+    in_hand = Counter(snapshot.my_hand)
+    played = Counter(card for cards in snapshot.played_cards.values() for card in cards)
+    mine: Counter = Counter()
+    gone: Counter = Counter()
+    for card, need in over.items():
+        held = min(need, in_hand[card])
+        spent = min(need - held, played[card])
+        if held:
+            mine[card] = held
+        if spent:
+            gone[card] = spent
+    if mine + gone != over:
+        # 连整副牌都凑不出这么多张（比如同一点数要了五张），别硬归到上面两种里去
+        return f"这些牌不可能再出：{dict(over)}"
+    if mine and gone:
+        return f"这些牌凑不出来：{dict(mine)} 在我方手里，{dict(gone)} 已经出过"
+    if mine:
+        return f"这些牌在我方手里，不可能在对手那儿：{dict(mine)}"
+    return f"这些牌已经出过了，不可能再出：{dict(gone)}"
+
+
 def _validate_play(record: MatchRecord, snapshot, player: str, action: Action) -> None:
-    """校验一手出牌：牌型认得、牌还没出过、压得住上一手。"""
+    """校验一手出牌：牌型认得、牌还在牌池里、压得住上一手。"""
     try:
         combo = canonical_combo(action.cards)
     except ValueError as exc:
@@ -123,7 +150,7 @@ def _validate_play(record: MatchRecord, snapshot, player: str, action: Action) -
     # 别人的牌：只能验证牌在池子里、并且压得住
     over = Counter(action.cards) - Counter(snapshot.pool)
     if over:
-        raise IllegalEntryError(f"这些牌已经出过了，不可能再出：{dict(over)}")
+        raise IllegalEntryError(_unavailable_cards_message(over, snapshot))
     if snapshot.last_move and combo not in beat_options(snapshot.pool, snapshot.last_move):
         raise IllegalEntryError(f"这手压不过上一手：{combo}")
 

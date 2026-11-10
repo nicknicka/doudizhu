@@ -289,14 +289,18 @@ def test_step_refuses_the_wrong_player():
 
 
 def test_step_refuses_cards_that_are_not_available():
-    """我手上有三张 3，牌池只剩一张 —— 地主不可能打出两张 3。"""
+    """我手上有三张 3，牌池只剩一张 —— 地主不可能打出两张 3。
+
+    理由要说是「在我方手里」，不能笼统写成「已经出过」：那三张 3 一张都没出过，
+    只是它们在我手上，本来就不该出现在牌池里。
+    """
     client = _client_with_fake_policy()
     try:
         record = _new_game(client)
         r = client.post("/api/game/step",
                         json={"record": record, "player": "landlord", "cards": "33"})
         assert r.status_code == 400
-        assert "已经出过" in r.json()["detail"]
+        assert "在我方手里" in r.json()["detail"]
     finally:
         app.dependency_overrides.clear()
 

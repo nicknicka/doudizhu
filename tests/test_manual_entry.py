@@ -99,6 +99,18 @@ class TestAppend:
         with pytest.raises(IllegalEntryError, match="已经出过"):
             manual.append_step(record, "landlord_down", Action(kind="play", cards=("R",)))
 
+    def test_says_the_card_is_in_my_hand_rather_than_already_played(self, fresh):
+        """牌池里少的那张在我手上时，理由得是「在我方手里」。
+
+        fresh 是我方 = landlord_up、手里两张 T：地主先出一张 3，牌池只剩两张 T，
+        下家再出三张 T 就多出一张 —— 那张一直在**我手上**，从没出过。
+        """
+        record = manual.append_step(fresh, "landlord", Action(kind="play", cards=("3",)))
+        with pytest.raises(IllegalEntryError, match="在我方手里"):
+            manual.append_step(
+                record, "landlord_down", Action(kind="play", cards=("T", "T", "T"))
+            )
+
     def test_rejects_a_play_that_cannot_beat_the_last_move(self, fresh):
         record = manual.append_step(fresh, "landlord", Action(kind="play", cards=("2",)))
         with pytest.raises(IllegalEntryError, match="压不过"):
