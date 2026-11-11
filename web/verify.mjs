@@ -1101,6 +1101,47 @@ try {
       await page.click('#play-clear');
       await page.waitForTimeout(150);
     }
+    // 交互 5b：轮到对手时，出牌区里若凑出了牌池给不出的点数（那一定有我手上的牌），
+    // 按「出牌」必须就地讲清理由并拦下 —— 不能把这一手发出去、让后端回一句
+    // "这些牌已经出过了"，而那张牌其实一直在我手上。控制台还盯着 400，
+    // 所以这一段同时也验了"根本没发请求"。
+    const overPicks = await page.evaluate(async () => {
+      const { S } = await import('/app/state.js');
+      const pool = S.snap.pool_counts || {}, hand = S.snap.my_hand || [];
+      const own = {};
+      for (const r of hand) own[r] = (own[r] || 0) + 1;
+      let pick = null;
+      for (const [r, n] of Object.entries(own)) {
+        const need = (pool[r] || 0) + 1;          // 比牌池多一张：一定有我手上那份
+        if (n >= need && (!pick || (pool[r] || 0) < (pool[pick.rank] || 0))) pick = {rank: r, need};
+      }
+      if (!pick) return null;
+      const idx = [];
+      hand.forEach((c, i) => { if (c === pick.rank && idx.length < pick.need) idx.push(i); });
+      return {rank: pick.rank, need: pick.need, idx};
+    });
+    if (!overPicks) {
+      problems.push('对手回合：手牌里找不到能造出「牌池不够」的点数');
+    } else {
+      for (const i of overPicks.idx) {
+        await page.click(`#handline i[data-hand="${i}"]`);
+        await page.waitForTimeout(140);
+      }
+      const stepBefore = await text(page, '#step-now');
+      const picked = await page.locator('#play-chips i.c').count();
+      if (picked !== overPicks.need) {
+        problems.push(`轮到对手时点自己的手牌没进出牌区：${picked}/${overPicks.need} 张`);
+      }
+      await page.click('#play-go');
+      if (!(await waitBanner(page, '不在牌池里'))) {
+        problems.push(`对手回合把自己手上的牌交出去时没被拦下：${await text(page, '#banner')}`);
+      }
+      if ((await text(page, '#step-now')) !== stepBefore) {
+        problems.push('对手回合把自己手上的牌交出去了 —— 这一手不该被记下');
+      }
+      await page.click('#play-clear');
+      await page.waitForTimeout(150);
+    }
     // 轮到对手：概率副屏显示对手 Top-3，但对手动作不能进入我方可录候选。
     await page.click('#bar-mode');
     await page.waitForTimeout(250);

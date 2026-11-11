@@ -22,6 +22,20 @@ function rippleAt(el, e){
 /** 牌池里每个点数还剩几张。数据来自后端，页面不自己数。 */
 const poolCounts = () => (S.snap && S.snap.pool_counts) || {};
 
+/** 对手回合：这一刻录的是他出的牌，牌池里凑不出来的点数不可能是他出的。
+    牌池上限是页面唯一被允许施加的约束（ADR-0001），所以拦在提交之前 —— 别把
+    这一手发出去、等后端回一句"这些牌已经出过了"（那多半是我自己的牌被点进来了）。
+    返回「超出的牌面计数」，没有超出就是 null。 */
+function beyondPool(){
+  if (!S.snap || S.snap.acting === S.snap.me) return null;
+  const pool = poolCounts(), over = {};
+  for (const r of new Set(SEL.play)){
+    const n = countIn(SEL.play, r) - (pool[r] || 0);
+    if (n > 0) over[r] = n;
+  }
+  return Object.keys(over).length ? over : null;
+}
+
 function chips(host, sel, emptyText){
   host.innerHTML = sel.length
     ? sel.map((c,i) => `<span data-drop="${i}">${card(c)}</span>`).join('')
@@ -213,7 +227,8 @@ function renderPlay(){
   } else if (mine && picks.length){
     $('play-hint').textContent = '这些是模型动作选择概率（Q 值经 T=1 softmax，所有合法动作合计 100%）。点一下记下这一手，或在屏幕里自己点牌。';
   } else {
-    $('play-hint').textContent = `${actorName(v.acting)}出的牌在屏幕里点出来；他没有出就按「不要」。`;
+    $('play-hint').textContent = `${actorName(v.acting)}出的牌在屏幕里点出来；他没有出就按「不要」。`
+      + (mine ? '' : '这一刻录的是他的牌：牌池里凑不出来的点数，会在「出牌」时被拦下。');
   }
 }
 
@@ -331,6 +346,13 @@ export function init(dependencies){
 
   $('play-go').addEventListener('click', async () => {
     const player = S.snap.acting, cards = sortPicked().join('');
+    const beyond = beyondPool();
+    if (beyond){
+      const list = Object.entries(beyond).map(([r, n]) => `${NAME[r] || r}×${n}`).join('、');
+      setBanner(`${list} 不在牌池里，不可能是${actorName(player)}出的 —— 先在出牌区把它们点掉。`,
+                'error');
+      return;
+    }
     const undo = rememberPlay(player);
     if (await deps.mutate('/api/game/step', {record:S.record, player, cards},
                           `已录：${actorName(player)} ${cards}。`)){
